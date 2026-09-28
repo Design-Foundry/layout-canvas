@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>visualcore</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #1e1f22; color: #ddd; font: 13px system-ui; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script type="module">
+    import createVisualCore from './visualcore.js';
+
+    const core = await createVisualCore({ canvas: document.getElementById('canvas') });
+
+    // Bridge smoke test: call into C++ from JS
+    const cam = new core.Camera();
+    cam.zoomAt({ x: 100, y: 100 }, 2);
+    console.log('zoom', cam.zoom());
+    console.log('world under (100,100) stays put:', cam.toWorld({ x: 100, y: 100 }));
+    cam.delete(); // embind objects live in WASM memory, free them explicitly
+
+    window.core = core; // poke at it from DevTools
+  </script>
+</body>
+</html>

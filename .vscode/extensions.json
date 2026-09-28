@@ -1,0 +1,14 @@
+{
+    "recommendations": [
+        "llvm-vs-code-extensions.vscode-clangd",
+        "ms-vscode.cmake-tools",
+        "ms-vscode.cpptools",
+        "ms-vscode.wasm-dwarf-debugging",
+        "angular.ng-template",
+        "esbenp.prettier-vscode",
+        "ms-dotnettools.csdevkit"
+    ],
+    "unwantedRecommendations": [
+        "ms-vscode.cpptools-extension-pack"
+    ]
+}

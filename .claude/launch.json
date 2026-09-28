@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "server",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "server/src/Canvas.Server", "--launch-profile", "http"],
+      "port": 5180
+    },
+    {
+      "name": "client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@canvas/client", "start"],
+      "port": 4200
+    }
+  ]
+}

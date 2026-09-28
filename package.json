@@ -1,0 +1,11 @@
+{
+  "name": "canvas",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "wasm": "pnpm --filter @canvas/bridge wasm",
+    "wasm:release": "pnpm --filter @canvas/bridge wasm:release",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @canvas/client start"
+  }
+}

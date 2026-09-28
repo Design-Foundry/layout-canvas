@@ -1,0 +1,66 @@
+{
+    "version": "2.0.0",
+    "options": { "cwd": "${workspaceFolder}" },
+    "tasks": [
+        {
+            "label": "wasm: build",
+            "type": "shell",
+            "command": "pnpm wasm",
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "wasm: serve",
+            "type": "shell",
+            "command": "python -u -m http.server 8080 --bind 127.0.0.1 -d visualcore/build/wasm-debug",
+            "dependsOn": "wasm: build",
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": { "regexp": "^__never__$" },
+                "background": { "activesBegin": true, "beginsPattern": "^Serving HTTP", "endsPattern": "^Serving HTTP" }
+            }
+        },
+        {
+            "label": "bridge: watch",
+            "type": "shell",
+            "command": "pnpm --filter @canvas/bridge dev",
+            "isBackground": true,
+            "problemMatcher": ["$tsc-watch"]
+        },
+        {
+            "label": "client: serve",
+            "type": "shell",
+            "command": "pnpm --filter @canvas/client start",
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": { "regexp": "^__never__$" },
+                "background": {
+                    "activesBegin": true,
+                    "beginsPattern": "(Building|Changes detected)",
+                    "endsPattern": "(Local:|bundle generation (complete|failed))"
+                }
+            }
+        },
+        {
+            "label": "server: watch",
+            "type": "shell",
+            "command": "dotnet watch run --project server/src/Canvas.Server --launch-profile http",
+            "isBackground": true,
+            "problemMatcher": {
+                "base": "$msCompile",
+                "background": { "activesBegin": true, "beginsPattern": "dotnet watch", "endsPattern": "Now listening on" }
+            }
+        },
+        {
+            "label": "dev: client",
+            "dependsOrder": "sequence",
+            "dependsOn": ["wasm: build", "bridge: watch", "client: serve"]
+        },
+        {
+            "label": "dev: all",
+            "dependsOrder": "parallel",
+            "dependsOn": ["dev: client", "server: watch"],
+            "group": { "kind": "build", "isDefault": true }
+        }
+    ]
+}

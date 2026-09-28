@@ -1,0 +1,71 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}/visualcore",
+    "cmake.useCMakePresets": "always",
+    "cmake.useVsDeveloperEnvironment": "always",
+    "cmake.configureOnOpen": true,
+    "cmake.ctest.testExplorerIntegrationEnabled": true,
+
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "C_Cpp.autocomplete": "disabled",
+    "C_Cpp.errorSquiggles": "disabled",
+    "clangd.arguments": [
+        "--background-index",
+        "--clang-tidy",
+        "--header-insertion=never",
+        "--completion-style=detailed",
+        "--query-driver=**/emscripten/em++*"
+    ],
+    "[cpp]": {
+        "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+        "editor.formatOnSave": true
+    },
+
+    "[typescript][html][scss][json][jsonc]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+    },
+    "[csharp]": {
+        "editor.defaultFormatter": "ms-dotnettools.csharp",
+        "editor.formatOnSave": true
+    },
+    "dotnet.defaultSolution": "server/Canvas.Server.slnx",
+    "typescript.tsdk": "client/node_modules/typescript/lib",
+
+    "files.exclude": {
+        "**/build": true,
+        "**/.cache": true,
+        "**/bin": true,
+        "**/obj": true,
+        "**/dist": true,
+        "**/.angular": true,
+        "**/node_modules": true
+    },
+    "search.exclude": {
+        "**/build": true,
+        "**/.cache": true,
+        "**/wasm": true
+    },
+    "explorer.fileNesting.enabled": true,
+    "explorer.fileNesting.expand": false,
+    "explorer.fileNesting.patterns": {
+        "CMakeLists.txt": "CMakePresets.json, CMakeUserPresets.json",
+        "README.md": ".gitignore, .clangd, .clang-format, .clang-tidy, .editorconfig, .prettierrc",
+        "package.json": "pnpm-lock.yaml, pnpm-workspace.yaml, tsconfig*.json, angular.json, proxy.conf.json",
+        "*.slnx": "global.json, Directory.Build.props",
+        "*.csproj": "appsettings*.json"
+    },
+
+    "terminal.integrated.profiles.windows": {
+        "Dev PowerShell": {
+            "path": "powershell.exe",
+            "args": ["-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\visualcore\\tools\\devshell.ps1"],
+            "icon": "tools"
+        }
+    },
+    "terminal.integrated.defaultProfile.windows": "Dev PowerShell",
+    "terminal.integrated.automationProfile.windows": {
+        "path": "powershell.exe",
+        "args": ["-NoLogo", "-NoProfile"]
+    },
+    "terminal.integrated.cwd": "${workspaceFolder}"
+}

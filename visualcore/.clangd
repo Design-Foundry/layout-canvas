@@ -1,0 +1,14 @@
+CompileFlags:
+  CompilationDatabase: build/native-debug
+---
+If:
+  PathMatch: [src/main_wasm\.cpp, src/render/.*]
+CompileFlags:
+  CompilationDatabase: build/wasm-debug
+---
+If:
+  PathExclude: [src/main_wasm\.cpp, src/render/.*]
+CompileFlags:
+  Add:
+    - /vctoolsdir
+    - C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207

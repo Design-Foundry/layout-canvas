@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Client: debug in Chrome",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:4200",
+            "webRoot": "${workspaceFolder}/client",
+            "preLaunchTask": "dev: client"
+        },
+        {
+            "name": "Server: debug",
+            "type": "dotnet",
+            "request": "launch",
+            "projectPath": "${workspaceFolder}/server/src/Canvas.Server/Canvas.Server.csproj"
+        },
+        {
+            "name": "Native: debug target",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${command:cmake.launchTargetPath}",
+            "cwd": "${workspaceFolder}/visualcore",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "WASM: debug test page",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://127.0.0.1:8080",
+            "preLaunchTask": "wasm: serve"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Full stack",
+            "configurations": ["Server: debug", "Client: debug in Chrome"],
+            "stopAll": true
+        }
+    ]
+}
