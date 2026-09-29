@@ -9,6 +9,10 @@ struct Vec2 {
     double y = 0.0;
 };
 
+[[nodiscard]] constexpr Vec2 operator-(Vec2 a, Vec2 b) {
+    return {a.x - b.x, a.y - b.y};
+}
+
 struct Rect {
     double x = 0.0;
     double y = 0.0;
