@@ -1,10 +1,8 @@
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Canvas.Server.Tests;
 
-public sealed class HealthEndpointTests(WebApplicationFactory<Program> factory)
-    : IClassFixture<WebApplicationFactory<Program>>
+public sealed class HealthEndpointTests(CanvasFactory factory) : IClassFixture<CanvasFactory>
 {
     [Fact]
     public async Task Health_reports_ok()
