@@ -1,13 +1,15 @@
 #include <cstdio>
 #include <emscripten/bind.h>
+#include "render/renderer.hpp"
 #include "vc/camera.hpp"
-
 // Milestone step 1: prove C++ runs in the browser and JS can call into it.
 // WebGPU arrives in step 2, inside src/render/ (the only place allowed to
 // include GPU headers).
 
 int main() {
     std::puts("visualcore: alive");
+    static vc::render::Renderer renderer{"#canvas"};
+    renderer.start();
     return 0;
 }
 

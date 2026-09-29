@@ -12,3 +12,12 @@ CompileFlags:
   Add:
     - /vctoolsdir
     - C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207
+---
+If:
+  PathMatch: src/render/.*
+CompileFlags:
+  Add:
+    - -isystem
+    - C:/dev/emsdk/upstream/emscripten/cache/ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu/include
+    - -isystem
+    - C:/dev/emsdk/upstream/emscripten/cache/ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu_cpp/include
