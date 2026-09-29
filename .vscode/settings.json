@@ -1,4 +1,7 @@
 {
+    "files.eol": "\n",
+    "files.insertFinalNewline": true,
+
     "cmake.sourceDirectory": "${workspaceFolder}/visualcore",
     "cmake.useCMakePresets": "always",
     "cmake.useVsDeveloperEnvironment": "always",
