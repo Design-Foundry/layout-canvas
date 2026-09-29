@@ -35,6 +35,8 @@
               }
             ],
             "styles": [
+              "node_modules/material-icons/iconfont/material-icons.css",
+              "node_modules/@design-foundry/lucent/styles/lucent.css",
               "src/styles.scss"
             ]
           },

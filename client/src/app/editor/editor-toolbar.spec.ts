@@ -1,0 +1,61 @@
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
+import { EditorToolbar } from './editor-toolbar';
+
+describe('EditorToolbar', () => {
+  let fixture: ComponentFixture<EditorToolbar>;
+  let renamed: string[];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [EditorToolbar],
+      providers: [provideRouter([])],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(EditorToolbar);
+    fixture.componentRef.setInput('name', 'Landing page');
+    fixture.componentRef.setInput('tool', 'select');
+    renamed = [];
+    fixture.componentInstance.rename.subscribe((name) => renamed.push(name));
+    fixture.detectChanges();
+  });
+
+  function nameField(): HTMLInputElement {
+    return (fixture.nativeElement as HTMLElement).querySelector('lucent-inline-input input')!;
+  }
+
+  async function type(value: string): Promise<void> {
+    const field = nameField();
+    field.value = value;
+    field.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    field.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    await fixture.whenStable();
+  }
+
+  it('selects a tool', () => {
+    const buttons = (fixture.nativeElement as HTMLElement).querySelectorAll('[role="toolbar"] button');
+    (buttons[2] as HTMLButtonElement).click();
+
+    expect(fixture.componentInstance.tool()).toBe('rectangle');
+  });
+
+  it('emits a trimmed new name when the field loses focus', async () => {
+    await type('  Checkout  ');
+
+    expect(renamed).toEqual(['Checkout']);
+  });
+
+  it('restores the name instead of emitting a blank one', async () => {
+    await type('   ');
+
+    expect(renamed).toEqual([]);
+    expect(nameField().value).toBe('Landing page');
+  });
+
+  it('does not emit when the name is unchanged', async () => {
+    await type('Landing page');
+
+    expect(renamed).toEqual([]);
+  });
+});

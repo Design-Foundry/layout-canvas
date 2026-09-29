@@ -2,8 +2,11 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: #1e1f22;
-  color: #dfe1e5;
-  font: 13px system-ui, sans-serif;
+  background: var(--color--semantic--surface-base);
+  color: var(--color--semantic--text-default);
+  font-family: var(--typography--body-md--font-family);
+}
+
+body {
   overflow: hidden;
 }

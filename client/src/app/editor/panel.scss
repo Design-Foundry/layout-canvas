@@ -1,0 +1,21 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color--semantic--surface-default);
+}
+
+.title {
+  margin: 0;
+  padding: var(--dimension--primitive--spacing-3) var(--dimension--primitive--spacing-3) var(--dimension--primitive--spacing-2);
+  color: var(--color--semantic--text-strong);
+}
+
+.viewport {
+  flex: 1;
+}
+
+.row {
+  height: 32px;
+  box-sizing: border-box;
+}

@@ -1,0 +1,33 @@
+<header class="header">
+  <h1 class="typography-title-md">Documents</h1>
+  <lucent-button variant="primary" size="sm" [loading]="creating()" (clicked)="create()">
+    <lucent-icon lucentPrefix name="add" size="sm" />
+    New document
+  </lucent-button>
+</header>
+
+@if (documents.error()) {
+  <div class="state">
+    <span class="typography-body-md">Couldn't load documents.</span>
+    <lucent-button variant="secondary" size="sm" (clicked)="documents.reload()">Retry</lucent-button>
+  </div>
+} @else if (!documents.hasValue()) {
+  <div class="state"><lucent-spinner /></div>
+} @else if (documents.value().length) {
+  <lucent-list class="list">
+    @for (document of documents.value(); track document.id) {
+      <lucent-list-item [value]="document.id" (activated)="open(document.id)">
+        {{ document.name }}
+        <span lucentSupporting>Edited {{ document.updatedAt | date: 'medium' }}</span>
+        <lucent-icon-button
+          lucentTrailing
+          icon="delete"
+          variant="ghost"
+          size="sm"
+          [ariaLabel]="'Delete ' + document.name"
+          (clicked)="remove(document, $event)"
+        />
+      </lucent-list-item>
+    }
+  </lucent-list>
+}

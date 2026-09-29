@@ -1,0 +1,22 @@
+<app-editor-toolbar
+  class="toolbar"
+  [name]="name()"
+  [(tool)]="tool"
+  (rename)="rename($event)"
+/>
+
+<app-layers-panel class="layers" [layers]="layers()" [selectedIds]="selectedIds()" (select)="select($event)" />
+
+<main class="stage">
+  <canvas id="canvas" #surface></canvas>
+  @if (document.error()) {
+    <div class="missing">
+      <span class="typography-body-md">This document doesn't exist.</span>
+      <lucent-button variant="secondary" size="sm" routerLink="/">Back to documents</lucent-button>
+    </div>
+  }
+</main>
+
+<app-inspector-panel class="inspector" />
+
+<footer class="status typography-caption">{{ status() }}</footer>
