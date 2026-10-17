@@ -2,12 +2,12 @@ CompileFlags:
   CompilationDatabase: build/native-debug
 ---
 If:
-  PathMatch: [src/main_wasm\.cpp, src/render/.*]
+  PathMatch: [src/main_wasm\.cpp, src/render/.*, src/web/.*]
 CompileFlags:
   CompilationDatabase: build/wasm-debug
 ---
 If:
-  PathExclude: [src/main_wasm\.cpp, src/render/.*]
+  PathExclude: [src/main_wasm\.cpp, src/render/.*, src/web/.*]
 CompileFlags:
   Add:
     - /vctoolsdir

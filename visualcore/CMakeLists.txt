@@ -24,7 +24,7 @@ endif()
 # WASM build: the module the browser loads
 # ---------------------------------------------------------------------------
 if(EMSCRIPTEN)
-    add_executable(visualcore src/main_wasm.cpp src/render/renderer.cpp)
+    add_executable(visualcore src/main_wasm.cpp src/render/renderer.cpp src/web/input.cpp)
     target_compile_options(visualcore PRIVATE --use-port=emdawnwebgpu)
     target_link_libraries(visualcore PRIVATE vc_core)
 
