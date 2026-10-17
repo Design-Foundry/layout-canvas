@@ -5,7 +5,14 @@
   (rename)="rename($event)"
 />
 
-<app-layers-panel class="layers" [layers]="layers()" [selectedIds]="selectedIds()" (select)="select($event)" />
+<app-layers-panel
+  class="layers"
+  [layers]="layers()"
+  [selectedIds]="selectedIds()"
+  (activate)="select($event)"
+  (rename)="setProps($event.id, { name: $event.name })"
+  (visibility)="setProps($event.id, { visible: $event.visible })"
+/>
 
 <main class="stage">
   <canvas id="canvas"></canvas>
@@ -17,6 +24,13 @@
   }
 </main>
 
-<app-inspector-panel class="inspector" />
+<app-inspector-panel
+  class="inspector"
+  [node]="selectedNode()"
+  [colorFromHex]="colorFromHex"
+  (edit)="setSelectedProps($event)"
+  (previewEdit)="previewSelectedProps($event)"
+  (commitPreview)="commitPreview()"
+/>
 
 <footer class="status typography-caption">{{ status() }}</footer>

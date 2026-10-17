@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
-import { FrameStats, Layer, VisualCore } from '@canvas/bridge';
+import { FrameStats, Layer, NodePatch, NodeProps, OklchColor, VisualCore } from '@canvas/bridge';
 import { LucentButton } from '@design-foundry/lucent';
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
@@ -72,6 +72,7 @@ export class EditorPage {
   protected readonly tool = signal<EditorTool>('select');
   protected readonly layers = signal<readonly LayerRow[]>([]);
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
+  protected readonly selectedNode = signal<NodeProps | null>(null);
   protected readonly stats = signal('Loading visualcore');
   protected readonly syncFailing = signal(false);
   protected readonly status = computed(() =>
@@ -102,6 +103,27 @@ export class EditorPage {
   protected select(id: string): void {
     this.core()?.select(id);
   }
+
+  protected setProps(id: string, patch: NodePatch): void {
+    this.core()?.setProps(id, patch);
+  }
+
+  protected setSelectedProps(patch: NodePatch): void {
+    const node = this.selectedNode();
+    if (node) this.setProps(node.id, patch);
+  }
+
+  protected previewSelectedProps(patch: NodePatch): void {
+    const node = this.selectedNode();
+    if (node) this.core()?.previewProps(node.id, patch);
+  }
+
+  protected commitPreview(): void {
+    this.core()?.commitPreview();
+  }
+
+  protected readonly colorFromHex = (hex: string, alpha: number): OklchColor | null =>
+    this.core()?.hexToColor(hex, alpha) ?? null;
 
   protected onKeydown(event: KeyboardEvent): void {
     const core = this.core();
@@ -144,13 +166,20 @@ export class EditorPage {
       this.core.set(core);
 
       let revision = -1;
+      let structure = -1;
       let frame = 0;
       const tick = () => {
+        const nextStructure = core.structureRevision();
+        if (nextStructure !== structure) {
+          structure = nextStructure;
+          this.layers.set(core.layers().map(toRow));
+        }
         const next = core.revision();
         if (next !== revision) {
           revision = next;
-          this.layers.set(core.layers().map(toRow));
-          this.selectedIds.set(new Set(core.selection()));
+          const selection = core.selection();
+          this.selectedIds.set(new Set(selection));
+          this.selectedNode.set(selection.length === 1 ? core.node(selection[0]) : null);
           this.tool.set(core.tool);
         }
         frame = requestAnimationFrame(tick);
@@ -172,7 +201,7 @@ export class EditorPage {
 }
 
 function toRow(layer: Layer): LayerRow {
-  return { id: layer.id, name: layer.name, kind: LAYER_KINDS[layer.type], depth: layer.depth };
+  return { id: layer.id, name: layer.name, kind: LAYER_KINDS[layer.type], depth: layer.depth, visible: layer.visible };
 }
 
 function isTyping(target: EventTarget | null): boolean {

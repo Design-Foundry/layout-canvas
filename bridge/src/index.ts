@@ -14,6 +14,52 @@ export interface Layer {
   readonly type: NodeType;
   /** Nesting level, 0 for top-level nodes. */
   readonly depth: number;
+  readonly visible: boolean;
+}
+
+/** A color in OKLCH: lightness 0 to 1, chroma, hue in degrees, alpha 0 to 1. */
+export interface OklchColor {
+  readonly l: number;
+  readonly c: number;
+  readonly h: number;
+  readonly a: number;
+}
+
+/** A reference to a design token by name. */
+export interface TokenValue {
+  readonly token: string;
+}
+
+/** A node as the inspector sees it. A literal fill also carries its sRGB hex. */
+export interface NodeProps {
+  readonly id: string;
+  readonly type: NodeType;
+  readonly parent?: string;
+  readonly name: string;
+  /** Position relative to the parent frame. */
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly fill: (OklchColor & { readonly hex: string }) | TokenValue;
+  readonly cornerRadius: number | TokenValue;
+  readonly opacity: number;
+  readonly visible: boolean;
+  readonly clipContent: boolean;
+}
+
+/** The properties a `setProps` call may change. Absent fields stay as they are. */
+export interface NodePatch {
+  readonly name?: string;
+  readonly x?: number;
+  readonly y?: number;
+  readonly w?: number;
+  readonly h?: number;
+  readonly fill?: OklchColor | TokenValue;
+  readonly cornerRadius?: number | TokenValue;
+  readonly opacity?: number;
+  readonly visible?: boolean;
+  readonly clipContent?: boolean;
 }
 
 /** A local edit waiting to be sent to the server. */
@@ -89,6 +135,11 @@ export class VisualCore {
     return this.module.revision();
   }
 
+  /** Changes only when the layer tree changes: nodes added, removed or moved, renamed or hidden. */
+  structureRevision(): number {
+    return this.module.structureRevision();
+  }
+
   layers(): Layer[] {
     return JSON.parse(this.module.layers());
   }
@@ -107,6 +158,36 @@ export class VisualCore {
 
   set tool(tool: Tool) {
     this.module.setTool(tool);
+  }
+
+  node(id: string): NodeProps | null {
+    return JSON.parse(this.module.node(id));
+  }
+
+  /** Changes `id` as one undo step. Returns false if the patch was rejected. */
+  setProps(id: string, patch: NodePatch): boolean {
+    return this.module.setProps(id, JSON.stringify(patch));
+  }
+
+  /**
+   * Shows `patch` on `id` live without recording it, replacing the previous preview. Finish with
+   * `commitPreview` (one undo step) or `cancelPreview`. Any other edit commits it first.
+   */
+  previewProps(id: string, patch: NodePatch): boolean {
+    return this.module.previewProps(id, JSON.stringify(patch));
+  }
+
+  commitPreview(): boolean {
+    return this.module.commitPropsPreview();
+  }
+
+  cancelPreview(): void {
+    this.module.cancelPropsPreview();
+  }
+
+  /** Converts `#rgb` or `#rrggbb` to OKLCH, or returns null if it isn't a hex color. */
+  hexToColor(hex: string, alpha = 1): OklchColor | null {
+    return JSON.parse(this.module.hexToColor(hex, alpha));
   }
 
   /** Moves the selection by `dx`, `dy` world units as one undo step. */
