@@ -24,7 +24,16 @@ namespace vc {
 /// ignored. Returns nothing if any entry is malformed.
 [[nodiscard]] std::optional<std::vector<OpBody>> opsFromJson(std::string_view data);
 
-/// Rows for a layers panel: `{ id, name, type, depth }`, topmost layer first, children under their parent.
+/// A node for the inspector: the stored fields plus `fill.hex` when the fill is a literal color.
+[[nodiscard]] std::string inspectNodeJson(const Node& node);
+
+/// Parses a patch in the same shape `SetProps` uses on the wire.
+[[nodiscard]] std::optional<NodePatch> patchFromJson(std::string_view data);
+
+/// A color as `{ l, c, h, a }`, the shape fills use.
+[[nodiscard]] std::string colorToJson(const Oklch& color);
+
+/// Rows for a layers panel: `{ id, name, type, depth, visible }`, topmost layer first, children under their parent.
 [[nodiscard]] std::string layersToJson(const Document& document);
 
 /// Every node of `document`, parents before children, as a JSON snapshot.

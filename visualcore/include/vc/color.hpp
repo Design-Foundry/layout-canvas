@@ -1,4 +1,7 @@
 #pragma once
+#include <optional>
+#include <string>
+#include <string_view>
 
 namespace vc {
 
@@ -22,5 +25,14 @@ struct Oklch {
 
 /// Converts to sRGB, clipping colors outside the gamut.
 [[nodiscard]] Color toSrgb(const Oklch& color);
+
+/// Converts gamma-encoded sRGB channels in [0, 1]. Grays get hue 0.
+[[nodiscard]] Oklch fromSrgb(double r, double g, double b, double a = 1.0);
+
+/// `#rrggbb`, ignoring alpha.
+[[nodiscard]] std::string toHex(const Oklch& color);
+
+/// Parses `#rgb` or `#rrggbb` (the `#` is optional) into a color with alpha `a`.
+[[nodiscard]] std::optional<Oklch> fromHex(std::string_view hex, double a = 1.0);
 
 } // namespace vc

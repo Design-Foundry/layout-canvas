@@ -45,6 +45,9 @@ public:
 
     /// Increases whenever the document changes. Lets the UI skip unchanged frames.
     [[nodiscard]] std::uint64_t revision() const { return revision_; }
+    /// Increases only when the tree a layers panel shows changes: nodes added, removed or moved, or a
+    /// name or visibility changed. Geometry and paint edits leave it alone.
+    [[nodiscard]] std::uint64_t structureRevision() const { return structureRevision_; }
 
     /// Hands over the ops produced since the last call, in the order they were applied.
     [[nodiscard]] std::vector<Op> takeOutbox();
@@ -66,6 +69,7 @@ private:
     std::optional<OpBody> preview_;
     std::optional<OpBody> previewInverse_;
     std::uint64_t revision_ = 0;
+    std::uint64_t structureRevision_ = 0;
 };
 
 } // namespace vc

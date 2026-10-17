@@ -122,3 +122,21 @@ TEST_CASE("op lists accept server records and reject bad entries") {
     REQUIRE_FALSE(vc::opsFromJson(R"([{"kind":"DeleteNode"}])").has_value());
     REQUIRE_FALSE(vc::opsFromJson(R"({"kind":"DeleteNode"})").has_value());
 }
+
+TEST_CASE("inspected nodes carry the fill as hex next to its oklch value") {
+    Node n = sampleNode();
+    n.fill = *vc::fromHex("#3a86ff");
+    const std::string json = vc::inspectNodeJson(n);
+    REQUIRE(json.find("\"hex\":\"#3a86ff\"") != std::string::npos);
+
+    n.fill = vc::TokenRef{"brand"};
+    REQUIRE(vc::inspectNodeJson(n).find("hex") == std::string::npos);
+}
+
+TEST_CASE("patches parse from the wire shape") {
+    const auto patch = vc::patchFromJson(R"({"x":4,"fill":{"l":0.5,"c":0.1,"h":200,"a":1},"visible":false})");
+    REQUIRE(patch.has_value());
+    REQUIRE(patch->x == 4.0);
+    REQUIRE(patch->visible == false);
+    REQUIRE_FALSE(vc::patchFromJson(R"({"x":"4"})").has_value());
+}

@@ -92,3 +92,25 @@ TEST_CASE("appending or prepending many times keeps keys short") {
     REQUIRE(last.size() <= 4);
     REQUIRE(first.size() <= 4);
 }
+
+TEST_CASE("hex colors survive a round trip through oklch") {
+    for (const char* hex : {"#000000", "#ffffff", "#ff0000", "#1e1f22", "#7f7f80", "#3a86ff", "#d9d9d9"}) {
+        const auto color = vc::fromHex(hex);
+        REQUIRE(color.has_value());
+        REQUIRE(vc::toHex(*color) == hex);
+    }
+}
+
+TEST_CASE("hex parsing accepts short and unprefixed forms and rejects junk") {
+    REQUIRE(vc::toHex(*vc::fromHex("f00")) == "#ff0000");
+    REQUIRE(vc::toHex(*vc::fromHex("3A86FF")) == "#3a86ff");
+    REQUIRE(vc::fromHex("#12345", 1.0) == std::nullopt);
+    REQUIRE(vc::fromHex("#ggg") == std::nullopt);
+    REQUIRE(vc::fromHex("#fff", 0.5)->a == 0.5);
+}
+
+TEST_CASE("grays have no chroma and hue zero") {
+    const vc::Oklch gray = *vc::fromHex("#808080");
+    REQUIRE(gray.c == 0.0);
+    REQUIRE(gray.h == 0.0);
+}

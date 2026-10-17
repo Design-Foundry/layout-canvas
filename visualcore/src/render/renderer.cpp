@@ -9,6 +9,7 @@
 
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
+#include <emscripten/val.h>
 #include <webgpu/webgpu_cpp.h>
 
 #include "shaders.hpp"
@@ -86,7 +87,8 @@ struct Renderer::State {
     std::string selector;
     const Camera& camera;
     const Document& document;
-    const std::vector<Id>& selection;
+    const Editor& editor;
+    std::string cursor;
 
     wgpu::Instance instance;
     wgpu::Surface surface;
@@ -116,8 +118,8 @@ struct Renderer::State {
     double lastTime = 0.0;
     FrameStats stats;
 
-    State(std::string selector, const Camera& camera, const Document& document, const std::vector<Id>& selection)
-        : selector(std::move(selector)), camera(camera), document(document), selection(selection) {}
+    State(std::string selector, const Camera& camera, const Document& document, const Editor& editor)
+        : selector(std::move(selector)), camera(camera), document(document), editor(editor) {}
 
     void requestAdapter();
     void requestDevice();
@@ -130,12 +132,13 @@ struct Renderer::State {
     void buildInstances();
     void collect(const Id& parent, Vec2 offset, const Rect& clip, double opacity);
     void addSelectionOutlines();
+    void addBox(const Rect& world, const Color& color);
+    void applyCursor();
     bool frame(double time);
 };
 
-Renderer::Renderer(std::string canvasSelector, const Camera& camera, const Document& document,
-                   const std::vector<Id>& selection)
-    : state_(std::make_unique<State>(std::move(canvasSelector), camera, document, selection)) {}
+Renderer::Renderer(std::string canvasSelector, const Camera& camera, const Document& document, const Editor& editor)
+    : state_(std::make_unique<State>(std::move(canvasSelector), camera, document, editor)) {}
 
 Renderer::~Renderer() = default;
 
@@ -368,9 +371,31 @@ void Renderer::State::buildInstances() {
     }
 }
 
+void Renderer::State::addBox(const Rect& world, const Color& color) {
+    instances.push_back({
+        {float(world.x - origin.x), float(world.y - origin.y)},
+        {float(world.w), float(world.h)},
+        {color.r, color.g, color.b, color.a},
+        {float(-kUnbounded), float(-kUnbounded), float(kUnbounded), float(kUnbounded)},
+        0.0f,
+        kKindBox,
+        {},
+    });
+}
+
+void Renderer::State::applyCursor() {
+    const std::string_view next = editor.cursor();
+    if (next != cursor) {
+        cursor = next;
+        emscripten::val::global("document")
+            .call<emscripten::val>("querySelector", selector)["style"]
+            .set("cursor", cursor);
+    }
+}
+
 void Renderer::State::addSelectionOutlines() {
     const Color color = toSrgb(kSelectionColor);
-    for (const Id& id : selection) {
+    for (const Id& id : editor.selection()) {
         const auto bounds = worldBounds(document, id);
         if (!bounds) {
             continue;
@@ -384,6 +409,20 @@ void Renderer::State::addSelectionOutlines() {
             kKindOutline,
             {},
         });
+    }
+
+    const auto bounds = editor.handleBounds();
+    if (!bounds || editor.tool() != Tool::Select) {
+        return;
+    }
+    const double outer = Editor::kHandleSizePx / camera.zoom();
+    const double inner = outer - 2.0 / camera.zoom();
+    const Color white{1.0f, 1.0f, 1.0f, 1.0f};
+    for (double x : {bounds->x, bounds->x + bounds->w}) {
+        for (double y : {bounds->y, bounds->y + bounds->h}) {
+            addBox({x - outer / 2, y - outer / 2, outer, outer}, color);
+            addBox({x - inner / 2, y - inner / 2, inner, inner}, white);
+        }
     }
 }
 
@@ -433,6 +472,7 @@ bool Renderer::State::frame(double time) {
     const double cpuStart = emscripten_get_now();
     stats.total = document.size();
 
+    applyCursor();
     if (!resizeIfNeeded()) {
         return true;
     }

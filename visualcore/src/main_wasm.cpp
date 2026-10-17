@@ -22,7 +22,7 @@ struct Runtime {
     vc::render::Renderer renderer;
 
     explicit Runtime(const std::string& selector)
-        : renderer{selector, camera, session.document(), editor.selection()} {}
+        : renderer{selector, camera, session.document(), editor} {}
 };
 
 std::unique_ptr<Runtime> rt;
@@ -102,6 +102,10 @@ double revision() {
     return rt ? static_cast<double>(rt->editor.revision()) : 0.0;
 }
 
+double structureRevision() {
+    return rt ? static_cast<double>(rt->session.structureRevision()) : 0.0;
+}
+
 std::string layers() {
     return rt ? vc::layersToJson(rt->session.document()) : "[]";
 }
@@ -137,6 +141,39 @@ bool setTool(const std::string& name) {
 std::string tool() {
     static const char* const kNames[] = {"select", "frame", "rectangle", "ellipse", "hand"};
     return rt ? kNames[static_cast<int>(rt->editor.tool())] : "select";
+}
+
+std::string node(const std::string& id) {
+    const auto parsed = vc::Id::parse(id);
+    const vc::Node* found = rt && parsed ? rt->session.document().find(*parsed) : nullptr;
+    return found ? vc::inspectNodeJson(*found) : "null";
+}
+
+bool setProps(const std::string& id, const std::string& patch) {
+    const auto parsedId = vc::Id::parse(id);
+    const auto parsedPatch = vc::patchFromJson(patch);
+    return rt && parsedId && parsedPatch && rt->editor.setProps(*parsedId, *parsedPatch);
+}
+
+bool previewProps(const std::string& id, const std::string& patch) {
+    const auto parsedId = vc::Id::parse(id);
+    const auto parsedPatch = vc::patchFromJson(patch);
+    return rt && parsedId && parsedPatch && rt->editor.previewProps(*parsedId, *parsedPatch);
+}
+
+bool commitPropsPreview() {
+    return rt && rt->editor.commitPropsPreview();
+}
+
+void cancelPropsPreview() {
+    if (rt) {
+        rt->editor.cancelPropsPreview();
+    }
+}
+
+std::string hexToColor(const std::string& hex, double alpha) {
+    const auto color = vc::fromHex(hex, alpha);
+    return color ? vc::colorToJson(*color) : "null";
 }
 
 bool deleteSelection() {
@@ -215,11 +252,18 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("takeOutbox", &takeOutbox);
     function("snapshot", &snapshot);
     function("revision", &revision);
+    function("structureRevision", &structureRevision);
     function("layers", &layers);
     function("selection", &selection);
     function("select", &select);
     function("setTool", &setTool);
     function("tool", &tool);
+    function("node", &node);
+    function("setProps", &setProps);
+    function("previewProps", &previewProps);
+    function("commitPropsPreview", &commitPropsPreview);
+    function("cancelPropsPreview", &cancelPropsPreview);
+    function("hexToColor", &hexToColor);
     function("deleteSelection", &deleteSelection);
     function("nudge", &nudge);
     function("undo", &undo);

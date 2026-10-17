@@ -223,7 +223,7 @@ void writeLayers(const Document& document, const Id& parent, int depth, json& ro
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
         const Node& node = *document.find(*it);
         rows.push_back({{"id", node.id.toString()}, {"name", node.name}, {"type", typeName(node.type)},
-                        {"depth", depth}});
+                        {"depth", depth}, {"visible", node.visible}});
         writeLayers(document, node.id, depth + 1, rows);
     }
 }
@@ -265,6 +265,23 @@ std::optional<std::vector<OpBody>> opsFromJson(std::string_view data) {
         ops.push_back(std::move(*op));
     }
     return ops;
+}
+
+std::string inspectNodeJson(const Node& node) {
+    json out = write(node);
+    if (const auto* color = std::get_if<Oklch>(&node.fill)) {
+        out["fill"]["hex"] = toHex(*color);
+    }
+    return out.dump();
+}
+
+std::optional<NodePatch> patchFromJson(std::string_view data) {
+    const json j = json::parse(data, nullptr, false);
+    return j.is_object() ? readPatch(j) : std::nullopt;
+}
+
+std::string colorToJson(const Oklch& color) {
+    return write(Value<Oklch>{color}).dump();
 }
 
 std::string layersToJson(const Document& document) {

@@ -71,6 +71,7 @@ void Editor::pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers)
     if (gesture_ != Gesture::None) {
         return;
     }
+    settlePropsPreview();
     modifiers_ = modifiers;
     lastScreen_ = screen;
     downScreen_ = screen;
@@ -83,6 +84,8 @@ void Editor::pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers)
         return;
     } else if (isDrawTool(tool_)) {
         startDraw(downWorld_);
+    } else if (const Handle handle = handleAt(screen); !handle.isNone()) {
+        startResize(handle);
     } else {
         startMove(downWorld_);
     }
@@ -99,7 +102,7 @@ void Editor::setModifiers(Modifiers modifiers) {
         return;
     }
     modifiers_ = modifiers;
-    if (gesture_ == Gesture::Draw || gesture_ == Gesture::Move) {
+    if (gesture_ == Gesture::Draw || gesture_ == Gesture::Move || gesture_ == Gesture::Resize) {
         update();
     }
 }
@@ -118,6 +121,9 @@ void Editor::update() {
         if (distance(screen, downScreen_) >= kClickSlopPx || session_.hasPreview()) {
             updateMove(world);
         }
+        break;
+    case Gesture::Resize:
+        updateResize(world);
         break;
     case Gesture::None:
         break;
@@ -140,10 +146,46 @@ void Editor::wheel(Vec2 screen, double deltaY) {
     viewport_.wheel(screen, deltaY);
 }
 
+bool Editor::setProps(const Id& id, const NodePatch& patch) {
+    if (gesture_ != Gesture::None || patch == NodePatch{}) {
+        return false;
+    }
+    settlePropsPreview();
+    return session_.edit(SetProps{id, patch});
+}
+
+bool Editor::previewProps(const Id& id, const NodePatch& patch) {
+    if (gesture_ != Gesture::None || patch == NodePatch{}) {
+        return false;
+    }
+    propsPreview_ = session_.preview(SetProps{id, patch});
+    return propsPreview_;
+}
+
+bool Editor::commitPropsPreview() {
+    if (!propsPreview_) {
+        return false;
+    }
+    propsPreview_ = false;
+    return session_.commitPreview();
+}
+
+void Editor::cancelPropsPreview() {
+    if (propsPreview_) {
+        propsPreview_ = false;
+        session_.cancelPreview();
+    }
+}
+
+void Editor::settlePropsPreview() {
+    commitPropsPreview();
+}
+
 bool Editor::nudge(Vec2 delta) {
     if (selection_.empty() || gesture_ != Gesture::None) {
         return false;
     }
+    settlePropsPreview();
     session_.begin();
     for (const Id& id : selection_) {
         const Node& node = *session_.document().find(id);
@@ -177,6 +219,7 @@ bool Editor::deleteSelection() {
     if (selection_.empty() || gesture_ != Gesture::None) {
         return false;
     }
+    settlePropsPreview();
     session_.begin();
     for (const Id& id : selection_) {
         session_.deleteTree(id);
@@ -190,6 +233,7 @@ bool Editor::undo() {
     if (gesture_ != Gesture::None) {
         return false;
     }
+    settlePropsPreview();
     const bool undone = session_.undo();
     pruneSelection();
     return undone;
@@ -199,6 +243,7 @@ bool Editor::redo() {
     if (gesture_ != Gesture::None) {
         return false;
     }
+    settlePropsPreview();
     const bool redone = session_.redo();
     pruneSelection();
     return redone;
@@ -300,11 +345,146 @@ void Editor::finish() {
         setTool(Tool::Select);
         break;
     case Gesture::Move:
+    case Gesture::Resize:
         session_.commitPreview();
         break;
     case Gesture::None:
         break;
     }
+}
+
+std::optional<Rect> Editor::handleBounds() const {
+    if (selection_.size() != 1) {
+        return std::nullopt;
+    }
+    return worldBounds(session_.document(), selection_[0]);
+}
+
+Handle Editor::handleAt(Vec2 screen) const {
+    const auto bounds = handleBounds();
+    if (tool_ != Tool::Select || !bounds) {
+        return {};
+    }
+    const Vec2 topLeft = camera_.toScreen({bounds->x, bounds->y});
+    const Vec2 bottomRight = camera_.toScreen({bounds->x + bounds->w, bounds->y + bounds->h});
+    const auto near = [](double value, double edge, double reach) { return std::abs(value - edge) <= reach; };
+
+    for (int x : {-1, 1}) {
+        for (int y : {-1, 1}) {
+            const double cornerX = x < 0 ? topLeft.x : bottomRight.x;
+            const double cornerY = y < 0 ? topLeft.y : bottomRight.y;
+            if (near(screen.x, cornerX, kHandleSizePx / 2) && near(screen.y, cornerY, kHandleSizePx / 2)) {
+                return {x, y};
+            }
+        }
+    }
+    const bool withinX = screen.x >= topLeft.x && screen.x <= bottomRight.x;
+    const bool withinY = screen.y >= topLeft.y && screen.y <= bottomRight.y;
+    if (withinY && near(screen.x, topLeft.x, kEdgeGrabPx)) return {-1, 0};
+    if (withinY && near(screen.x, bottomRight.x, kEdgeGrabPx)) return {1, 0};
+    if (withinX && near(screen.y, topLeft.y, kEdgeGrabPx)) return {0, -1};
+    if (withinX && near(screen.y, bottomRight.y, kEdgeGrabPx)) return {0, 1};
+    return {};
+}
+
+std::string_view Editor::cursor() const {
+    const auto resizeCursor = [](Handle h) -> std::string_view {
+        if (h.x * h.y > 0) return "nwse-resize";
+        if (h.x * h.y < 0) return "nesw-resize";
+        if (h.x != 0) return "ew-resize";
+        if (h.y != 0) return "ns-resize";
+        return "default";
+    };
+    switch (gesture_) {
+    case Gesture::Pan:
+        return "grabbing";
+    case Gesture::Draw:
+        return "crosshair";
+    case Gesture::Resize:
+        return resizeCursor(handle_);
+    case Gesture::Move:
+        return "default";
+    case Gesture::None:
+        break;
+    }
+    if (tool_ == Tool::Hand) return "grab";
+    if (isDrawTool(tool_)) return "crosshair";
+    return resizeCursor(handleAt(lastScreen_));
+}
+
+void Editor::startResize(Handle handle) {
+    gesture_ = Gesture::Resize;
+    handle_ = handle;
+    target_ = selection_[0];
+    resizeStart_ = *worldBounds(session_.document(), target_);
+    parentOrigin_ = originOf(session_.document().find(target_)->parent);
+}
+
+void Editor::updateResize(Vec2 world) {
+    const Vec2 delta = world - downWorld_;
+    const Rect& start = resizeStart_;
+    const double startX1 = start.x + start.w;
+    const double startY1 = start.y + start.h;
+    double x0 = start.x;
+    double x1 = startX1;
+    double y0 = start.y;
+    double y1 = startY1;
+
+    const auto moveEdges = [this](int side, double d, double& low, double& high) {
+        if (side < 0) {
+            low += d;
+            if (modifiers_.alt) high -= d;
+        } else if (side > 0) {
+            high += d;
+            if (modifiers_.alt) low -= d;
+        }
+    };
+    moveEdges(handle_.x, delta.x, x0, x1);
+    moveEdges(handle_.y, delta.y, y0, y1);
+
+    if (modifiers_.shift && start.w > 0.0 && start.h > 0.0) {
+        double w = x1 - x0;
+        double h = y1 - y0;
+        if (handle_.x != 0 && handle_.y != 0) {
+            const double scale = std::max(std::abs(w) / start.w, std::abs(h) / start.h);
+            w = std::copysign(scale * start.w, w);
+            h = std::copysign(scale * start.h, h);
+        } else if (handle_.x != 0) {
+            h = std::abs(w) / start.w * start.h;
+        } else {
+            w = std::abs(h) / start.h * start.w;
+        }
+        const auto place = [this](int side, double size, double startLow, double startHigh, double& low,
+                                  double& high) {
+            if (side == 0 || modifiers_.alt) {
+                const double center = (startLow + startHigh) / 2;
+                low = center - size / 2;
+                high = center + size / 2;
+            } else if (side > 0) {
+                high = startLow + size;
+            } else {
+                low = startHigh - size;
+            }
+        };
+        place(handle_.x, w, start.x, startX1, x0, x1);
+        place(handle_.y, h, start.y, startY1, y0, y1);
+    }
+
+    const auto snapMoved = [this](double value, double original) {
+        return value == original ? value : snap(value);
+    };
+    x0 = snapMoved(x0, start.x);
+    x1 = snapMoved(x1, startX1);
+    y0 = snapMoved(y0, start.y);
+    y1 = snapMoved(y1, startY1);
+
+    const double minSize = pixelSnap_ ? 1.0 : 0.0;
+    NodePatch patch;
+    patch.x = std::min(x0, x1) - parentOrigin_.x;
+    patch.y = std::min(y0, y1) - parentOrigin_.y;
+    patch.w = std::max(std::abs(x1 - x0), minSize);
+    patch.h = std::max(std::abs(y1 - y0), minSize);
+    session_.preview(SetProps{target_, patch});
 }
 
 void Editor::pruneSelection() {

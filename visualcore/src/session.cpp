@@ -18,10 +18,22 @@ void Session::commit() {
     }
 }
 
+namespace {
+
+bool changesStructure(const OpBody& op) {
+    const auto* set = std::get_if<SetProps>(&op);
+    return !set || set->patch.name || set->patch.visible;
+}
+
+} // namespace
+
 std::optional<OpBody> Session::apply(const OpBody& op) {
     auto inverse = document_.apply(op);
     if (inverse) {
         ++revision_;
+        if (changesStructure(op)) {
+            ++structureRevision_;
+        }
     }
     return inverse;
 }

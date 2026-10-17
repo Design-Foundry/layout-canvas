@@ -301,3 +301,195 @@ TEST_CASE("nudging with nothing selected does nothing") {
     Fixture f;
     REQUIRE_FALSE(f.editor.nudge({1, 0}));
 }
+
+namespace {
+
+Fixture withRect() {
+    Fixture f;
+    f.editor.setTool(Tool::Rect);
+    f.drag({100, 100}, {200, 150});
+    return f;
+}
+
+} // namespace
+
+TEST_CASE("handles are found at corners and along edges of the single selection") {
+    Fixture f = withRect();
+
+    REQUIRE(f.editor.handleAt({100, 100}) == vc::Handle{-1, -1});
+    REQUIRE(f.editor.handleAt({203, 152}) == vc::Handle{1, 1});
+    REQUIRE(f.editor.handleAt({150, 101}) == vc::Handle{0, -1});
+    REQUIRE(f.editor.handleAt({198, 125}) == vc::Handle{1, 0});
+    REQUIRE(f.editor.handleAt({150, 125}).isNone());
+
+    f.editor.clearSelection();
+    REQUIRE(f.editor.handleAt({100, 100}).isNone());
+}
+
+TEST_CASE("dragging the bottom-right corner resizes with one op and undoes") {
+    Fixture f = withRect();
+    (void)f.session.takeOutbox();
+
+    f.drag({200, 150}, {260, 190});
+    REQUIRE(f.selected().x == 100);
+    REQUIRE(f.selected().w == 160);
+    REQUIRE(f.selected().h == 90);
+    REQUIRE(f.session.takeOutbox().size() == 1);
+
+    f.editor.undo();
+    REQUIRE(f.selected().w == 100);
+}
+
+TEST_CASE("dragging the left edge moves only the left side") {
+    Fixture f = withRect();
+    f.drag({100, 125}, {70, 140});
+
+    REQUIRE(f.selected().x == 70);
+    REQUIRE(f.selected().w == 130);
+    REQUIRE(f.selected().y == 100);
+    REQUIRE(f.selected().h == 50);
+}
+
+TEST_CASE("dragging past the opposite edge flips instead of going negative") {
+    Fixture f = withRect();
+    f.drag({200, 125}, {60, 125});
+
+    REQUIRE(f.selected().x == 60);
+    REQUIRE(f.selected().w == 40);
+}
+
+TEST_CASE("shift keeps proportions on a corner, alt resizes from the center") {
+    Fixture f = withRect();
+    f.editor.pointerDown({200, 150}, PointerButton::Primary);
+    f.editor.pointerMove({300, 160}, {.shift = true});
+    f.editor.pointerUp();
+    REQUIRE(f.selected().w == 200);
+    REQUIRE(f.selected().h == 100);
+
+    Fixture g = withRect();
+    g.editor.pointerDown({200, 125}, PointerButton::Primary);
+    g.editor.pointerMove({210, 125}, {.alt = true});
+    g.editor.pointerUp();
+    REQUIRE(g.selected().x == 90);
+    REQUIRE(g.selected().w == 120);
+}
+
+TEST_CASE("resizing snaps only the edges that move") {
+    Fixture f = withRect();
+    vc::NodePatch offGrid;
+    offGrid.x = 100.5;
+    f.editor.setProps(f.editor.selection().at(0), offGrid);
+
+    f.camera.zoomAt({0, 0}, 1.3);
+    const vc::Vec2 right = f.camera.toScreen({200.5, 125});
+    f.drag(right, {right.x + 37, right.y});
+
+    REQUIRE(f.selected().x == 100.5);
+    const double rightEdge = f.selected().x + f.selected().w;
+    REQUIRE(rightEdge == std::round(rightEdge));
+}
+
+TEST_CASE("the cursor follows the tool, the gesture and the handle under the pointer") {
+    Fixture f = withRect();
+    f.editor.pointerMove({100, 100});
+    REQUIRE(f.editor.cursor() == "nwse-resize");
+    f.editor.pointerMove({200, 100});
+    REQUIRE(f.editor.cursor() == "nesw-resize");
+    f.editor.pointerMove({150, 125});
+    REQUIRE(f.editor.cursor() == "default");
+
+    f.editor.setTool(Tool::Hand);
+    REQUIRE(f.editor.cursor() == "grab");
+    f.editor.pointerDown({10, 10}, PointerButton::Primary);
+    REQUIRE(f.editor.cursor() == "grabbing");
+    f.editor.pointerUp();
+
+    f.editor.setTool(Tool::Ellipse);
+    REQUIRE(f.editor.cursor() == "crosshair");
+}
+
+TEST_CASE("setProps from outside the canvas is one undoable op") {
+    Fixture f = withRect();
+    (void)f.session.takeOutbox();
+    vc::NodePatch patch;
+    patch.opacity = 0.5;
+    patch.name = "Card";
+
+    REQUIRE(f.editor.setProps(f.editor.selection().at(0), patch));
+    REQUIRE(f.selected().opacity == 0.5);
+    REQUIRE(f.session.takeOutbox().size() == 1);
+    f.editor.undo();
+    REQUIRE(f.selected().name == "Rectangle");
+}
+
+TEST_CASE("an empty patch is rejected instead of becoming an op") {
+    Fixture f = withRect();
+    (void)f.session.takeOutbox();
+
+    REQUIRE_FALSE(f.editor.setProps(f.editor.selection().at(0), {}));
+    REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("a props preview shows live and commits as one op") {
+    Fixture f = withRect();
+    (void)f.session.takeOutbox();
+    const vc::Id id = f.editor.selection().at(0);
+
+    for (double l : {0.2, 0.4, 0.6}) {
+        vc::NodePatch patch;
+        patch.fill = vc::Oklch{l, 0.1, 30};
+        REQUIRE(f.editor.previewProps(id, patch));
+        REQUIRE(std::get<vc::Oklch>(f.selected().fill).l == l);
+    }
+    REQUIRE(f.session.takeOutbox().empty());
+
+    REQUIRE(f.editor.commitPropsPreview());
+    REQUIRE(f.session.takeOutbox().size() == 1);
+    f.editor.undo();
+    REQUIRE(std::get<vc::Oklch>(f.selected().fill).l == 0.89);
+}
+
+TEST_CASE("cancelling a props preview restores the node") {
+    Fixture f = withRect();
+    vc::NodePatch patch;
+    patch.opacity = 0.2;
+    f.editor.previewProps(f.editor.selection().at(0), patch);
+
+    f.editor.cancelPropsPreview();
+    REQUIRE(f.selected().opacity == 1.0);
+    REQUIRE_FALSE(f.editor.commitPropsPreview());
+}
+
+TEST_CASE("starting a canvas gesture or undoing commits a pending props preview first") {
+    Fixture f = withRect();
+    vc::NodePatch patch;
+    patch.opacity = 0.5;
+    f.editor.previewProps(f.editor.selection().at(0), patch);
+
+    f.drag({150, 125}, {160, 125});
+    REQUIRE(f.selected().opacity == 0.5);
+    REQUIRE(f.selected().x == 110);
+
+    f.editor.undo();
+    f.editor.undo();
+    REQUIRE(f.selected().opacity == 1.0);
+}
+
+TEST_CASE("the structure revision ignores paint and geometry edits") {
+    Fixture f = withRect();
+    const vc::Id id = f.editor.selection().at(0);
+    const auto structure = f.session.structureRevision();
+    const auto any = f.editor.revision();
+
+    vc::NodePatch paint;
+    paint.fill = vc::Oklch{0.5, 0.1, 100};
+    paint.x = 3;
+    f.editor.setProps(id, paint);
+    REQUIRE(f.session.structureRevision() == structure);
+    REQUIRE(f.editor.revision() != any);
+
+    vc::NodePatch rename;
+    rename.name = "Card";
+    f.editor.setProps(id, rename);
+    REQUIRE(f.session.structureRevision() != structure);
+}

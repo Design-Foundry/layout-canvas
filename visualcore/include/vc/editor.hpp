@@ -3,6 +3,7 @@
 #include <optional>
 #include <string_view>
 #include <vector>
+#include "vc/math.hpp"
 #include "vc/camera.hpp"
 #include "vc/session.hpp"
 #include "vc/viewport_controller.hpp"
@@ -14,10 +15,20 @@ enum class Tool { Select, Frame, Rect, Ellipse, Hand };
 enum class PointerButton { Primary = 0, Middle = 1, Secondary = 2 };
 
 struct Modifiers {
-    /// Square shapes while drawing; one axis while moving.
+    /// Square shapes while drawing, one axis while moving, keep proportions while resizing.
     bool shift = false;
-    /// Draw from the center.
+    /// Draw and resize from the center.
     bool alt = false;
+};
+
+/// A resize handle: which vertical edge (-1 left, 1 right, 0 none) and which horizontal edge
+/// (-1 top, 1 bottom, 0 none) it moves. Corners move both.
+struct Handle {
+    int x = 0;
+    int y = 0;
+
+    [[nodiscard]] bool isNone() const { return x == 0 && y == 0; }
+    friend bool operator==(const Handle&, const Handle&) = default;
 };
 
 /// Turns pointer input into camera moves and document edits for the active tool.
@@ -37,6 +48,14 @@ public:
     /// Ends the gesture without applying it, for example when the pointer leaves the canvas.
     void pointerCancel();
     void wheel(Vec2 screen, double deltaY);
+    /// Applies `patch` to `id` as one undo step, for edits made outside the canvas.
+    bool setProps(const Id& id, const NodePatch& patch);
+    /// Shows `patch` on `id` without recording it, replacing the previous props preview. For live
+    /// controls such as a color picker; finish with `commitPropsPreview` or `cancelPropsPreview`.
+    /// Anything else that edits the document commits a pending preview first.
+    bool previewProps(const Id& id, const NodePatch& patch);
+    bool commitPropsPreview();
+    void cancelPropsPreview();
     /// Moves the selected nodes by `delta` world units, as one undo step.
     bool nudge(Vec2 delta);
 
@@ -52,14 +71,25 @@ public:
     void setPixelSnap(bool enabled);
     [[nodiscard]] bool pixelSnap() const { return pixelSnap_; }
 
+    /// World bounds of the single selected node, the one resize handles attach to.
+    [[nodiscard]] std::optional<Rect> handleBounds() const;
+    /// The handle under `screen`, if any.
+    [[nodiscard]] Handle handleAt(Vec2 screen) const;
+    /// CSS cursor for the pointer at its last position, given the tool and gesture.
+    [[nodiscard]] std::string_view cursor() const;
+
     /// Increases whenever the document, the selection or the tool changes.
     [[nodiscard]] std::uint64_t revision() const { return session_.revision() + revision_; }
 
     static constexpr double kDefaultShapeSize = 100.0;
     static constexpr double kClickSlopPx = 3.0;
+    /// Corner handles are drawn this size and grabbed within it, in CSS pixels.
+    static constexpr double kHandleSizePx = 8.0;
+    /// How far from an edge it can be grabbed, in CSS pixels.
+    static constexpr double kEdgeGrabPx = 4.0;
 
 private:
-    enum class Gesture { None, Pan, Draw, Move };
+    enum class Gesture { None, Pan, Draw, Move, Resize };
 
     void update();
     void startDraw(Vec2 world);
@@ -67,8 +97,11 @@ private:
     void previewDraw(Vec2 from, Vec2 to);
     void startMove(Vec2 world);
     void updateMove(Vec2 world);
+    void startResize(Handle handle);
+    void updateResize(Vec2 world);
     void finish();
     void pruneSelection();
+    void settlePropsPreview();
     [[nodiscard]] double snap(double world) const;
     [[nodiscard]] Vec2 originOf(const Id& parent) const;
     void touch() { ++revision_; }
@@ -77,6 +110,7 @@ private:
     Camera& camera_;
     ViewportController viewport_;
     Tool tool_ = Tool::Select;
+    bool propsPreview_ = false;
     bool pixelSnap_ = true;
     std::vector<Id> selection_;
     std::uint64_t revision_ = 0;
@@ -91,6 +125,9 @@ private:
     Vec2 parentOrigin_{};
     /// Absolute position of the moved node when the gesture started.
     Vec2 targetStart_{};
+    Handle handle_;
+    /// Absolute bounds of the resized node when the gesture started.
+    Rect resizeStart_{};
 };
 
 [[nodiscard]] std::optional<Tool> toolFromName(std::string_view name);
