@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 add_library(vc_core STATIC
     src/camera.cpp
+    src/scene.cpp
     src/viewport_controller.cpp
 )
 target_include_directories(vc_core PUBLIC include)
@@ -67,6 +68,7 @@ else()
 
         add_executable(vc_tests
             tests/test_camera.cpp
+            tests/test_scene.cpp
             tests/test_viewport_controller.cpp
         )
         target_link_libraries(vc_tests PRIVATE vc_core Catch2::Catch2WithMain)

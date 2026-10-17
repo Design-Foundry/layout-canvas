@@ -12,6 +12,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@canvas/client", "start"],
       "port": 4200
+    },
+    {
+      "name": "wasm",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-u", "-m", "http.server", "8080", "--bind", "127.0.0.1", "-d", "visualcore/build/wasm-debug"],
+      "port": 8080
     }
   ]
 }

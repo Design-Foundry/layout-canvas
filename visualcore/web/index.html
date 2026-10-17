@@ -15,12 +15,12 @@
 
     const core = await createVisualCore({ canvas: document.getElementById('canvas') });
 
-    // Bridge smoke test: call into C++ from JS
-    const cam = new core.Camera();
-    cam.zoomAt({ x: 100, y: 100 }, 2);
-    console.log('zoom', cam.zoom());
-    console.log('world under (100,100) stays put:', cam.toWorld({ x: 100, y: 100 }));
-    cam.delete(); // embind objects live in WASM memory, free them explicitly
+    core.attach('#canvas');
+    core.addRandomShapes(10000, 1);
+    setInterval(() => {
+      const s = core.frameStats();
+      document.title = `${s.frameMs.toFixed(1)} ms, cpu ${s.cpuMs.toFixed(2)} ms, ${s.visible}/${s.total}`;
+    }, 500);
 
     window.core = core; // poke at it from DevTools
   </script>
