@@ -29,7 +29,7 @@
                 "input": "public"
               },
               {
-                "glob": "visualcore.wasm",
+                "glob": "visualcore.{js,wasm}",
                 "input": "node_modules/@canvas/bridge/wasm",
                 "output": "wasm"
               }
