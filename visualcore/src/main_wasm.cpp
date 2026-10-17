@@ -7,19 +7,22 @@
 
 #include "render/renderer.hpp"
 #include "vc/camera.hpp"
-#include "vc/scene.hpp"
-#include "vc/viewport_controller.hpp"
+#include "vc/demo.hpp"
+#include "vc/editor.hpp"
+#include "vc/json.hpp"
+#include "vc/session.hpp"
 #include "web/input.hpp"
 
 namespace {
 
 struct Runtime {
     vc::Camera camera;
-    vc::Scene scene;
-    vc::ViewportController controller{camera};
+    vc::Session session;
+    vc::Editor editor{session, camera};
     vc::render::Renderer renderer;
 
-    explicit Runtime(const std::string& selector) : renderer{selector, camera, scene} {}
+    explicit Runtime(const std::string& selector)
+        : renderer{selector, camera, session.document(), editor.selection()} {}
 };
 
 std::unique_ptr<Runtime> rt;
@@ -34,7 +37,7 @@ void attach(const std::string& selector) {
         attachedSelector = selector;
         rt = std::make_unique<Runtime>(attachedSelector);
     }
-    vc::web::attachInput(attachedSelector.c_str(), rt->controller);
+    vc::web::attachInput(attachedSelector.c_str(), rt->editor);
     rt->renderer.start();
 }
 
@@ -47,9 +50,109 @@ void detach() {
 
 void addRandomShapes(int count, int seed) {
     if (rt) {
-        vc::addRandomShapes(rt->scene, static_cast<std::size_t>(count), {-5000, -5000, 10000, 10000},
-                            static_cast<std::uint32_t>(seed));
+        vc::addRandomNodes(rt->session, static_cast<std::size_t>(count), {-5000, -5000, 10000, 10000},
+                           static_cast<std::uint64_t>(seed));
     }
+}
+
+bool loadDocument(const std::string& snapshot) {
+    if (!rt) {
+        return false;
+    }
+    rt->editor.pointerCancel();
+    rt->editor.clearSelection();
+    rt->session = vc::Session{};
+    if (snapshot.empty()) {
+        return true;
+    }
+    const auto nodes = vc::snapshotFromJson(snapshot);
+    if (!nodes) {
+        return false;
+    }
+    for (const vc::CreateNode& op : *nodes) {
+        rt->session.applyRemote(op);
+    }
+    return true;
+}
+
+int applyRemoteOps(const std::string& ops) {
+    if (!rt) {
+        return -1;
+    }
+    const auto parsed = vc::opsFromJson(ops);
+    if (!parsed) {
+        return -1;
+    }
+    int applied = 0;
+    for (const vc::OpBody& op : *parsed) {
+        applied += rt->session.applyRemote(op) ? 1 : 0;
+    }
+    return applied;
+}
+
+std::string takeOutbox() {
+    return rt ? vc::opsToJson(rt->session.takeOutbox()) : "[]";
+}
+
+std::string snapshot() {
+    return rt ? vc::snapshotToJson(rt->session.document()) : "";
+}
+
+double revision() {
+    return rt ? static_cast<double>(rt->editor.revision()) : 0.0;
+}
+
+std::string layers() {
+    return rt ? vc::layersToJson(rt->session.document()) : "[]";
+}
+
+std::string selection() {
+    std::string out = "[";
+    if (rt) {
+        for (const vc::Id& id : rt->editor.selection()) {
+            out += (out.size() > 1 ? ",\"" : "\"") + id.toString() + "\"";
+        }
+    }
+    return out + "]";
+}
+
+bool select(const std::string& id) {
+    const auto parsed = vc::Id::parse(id);
+    if (!rt || !parsed) {
+        return false;
+    }
+    rt->editor.select(*parsed);
+    return true;
+}
+
+bool setTool(const std::string& name) {
+    const auto tool = vc::toolFromName(name);
+    if (!rt || !tool) {
+        return false;
+    }
+    rt->editor.setTool(*tool);
+    return true;
+}
+
+std::string tool() {
+    static const char* const kNames[] = {"select", "frame", "rectangle", "ellipse", "hand"};
+    return rt ? kNames[static_cast<int>(rt->editor.tool())] : "select";
+}
+
+bool deleteSelection() {
+    return rt && rt->editor.deleteSelection();
+}
+
+bool nudge(double dx, double dy) {
+    return rt && rt->editor.nudge({dx, dy});
+}
+
+bool undo() {
+    return rt && rt->editor.undo();
+}
+
+bool redo() {
+    return rt && rt->editor.redo();
 }
 
 struct FrameStatsJs {
@@ -107,4 +210,18 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("detach", &detach);
     function("addRandomShapes", &addRandomShapes);
     function("frameStats", &frameStats);
+    function("loadDocument", &loadDocument);
+    function("applyRemoteOps", &applyRemoteOps);
+    function("takeOutbox", &takeOutbox);
+    function("snapshot", &snapshot);
+    function("revision", &revision);
+    function("layers", &layers);
+    function("selection", &selection);
+    function("select", &select);
+    function("setTool", &setTool);
+    function("tool", &tool);
+    function("deleteSelection", &deleteSelection);
+    function("nudge", &nudge);
+    function("undo", &undo);
+    function("redo", &redo);
 }

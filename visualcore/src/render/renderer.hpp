@@ -2,8 +2,9 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <vector>
 #include "vc/camera.hpp"
-#include "vc/scene.hpp"
+#include "vc/document.hpp"
 
 namespace vc::render {
 
@@ -16,7 +17,10 @@ struct FrameStats {
 
 class Renderer {
 public:
-    Renderer(std::string canvasSelector, const Camera& camera, const Scene& scene);
+    /// Draws `document` through `camera`, outlining the nodes in `selection`. All three must outlive
+    /// the renderer.
+    Renderer(std::string canvasSelector, const Camera& camera, const Document& document,
+             const std::vector<Id>& selection);
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;

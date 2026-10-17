@@ -12,6 +12,8 @@
 #include <webgpu/webgpu_cpp.h>
 
 #include "shaders.hpp"
+#include "vc/color.hpp"
+#include "vc/geometry.hpp"
 
 namespace vc::render {
 namespace {
@@ -25,20 +27,49 @@ struct FrameUniform {
     float gridMinorAlpha;
 };
 
-struct RectInstance {
+struct ShapeInstance {
     float pos[2];
     float size[2];
     float color[4];
+    float clip[4];
+    float radius;
+    std::uint32_t kind;
+    float pad[2];
 };
+
+constexpr std::uint32_t kKindBox = 0;
+constexpr std::uint32_t kKindEllipse = 1;
+constexpr std::uint32_t kKindOutline = 2;
+constexpr double kUnbounded = 1e30;
+constexpr Color kUnresolvedTokenColor{1.0f, 0.0f, 1.0f, 1.0f};
+constexpr Oklch kSelectionColor{0.62, 0.19, 255.0};
 
 constexpr double kMinGridSpacingPx = 8.0;
 constexpr double kGridFadeEndPx = 32.0;
-constexpr std::size_t kInitialRectCapacity = 1024;
+constexpr std::size_t kInitialShapeCapacity = 1024;
 constexpr double kStatsSmoothing = 0.1;
 
 double positiveMod(double value, double modulus) {
     const double r = std::fmod(value, modulus);
     return r < 0.0 ? r + modulus : r;
+}
+
+Rect intersect(const Rect& a, const Rect& b) {
+    const double x0 = std::max(a.x, b.x);
+    const double y0 = std::max(a.y, b.y);
+    const double x1 = std::min(a.x + a.w, b.x + b.w);
+    const double y1 = std::min(a.y + a.h, b.y + b.h);
+    return {x0, y0, std::max(0.0, x1 - x0), std::max(0.0, y1 - y0)};
+}
+
+Color resolveFill(const Value<Oklch>& fill) {
+    const auto* color = std::get_if<Oklch>(&fill);
+    return color ? toSrgb(*color) : kUnresolvedTokenColor;
+}
+
+double resolveLength(const Value<double>& value) {
+    const auto* length = std::get_if<double>(&value);
+    return length ? *length : 0.0;
 }
 
 wgpu::ShaderModule createShader(const wgpu::Device& device, const std::string& code) {
@@ -54,7 +85,8 @@ wgpu::ShaderModule createShader(const wgpu::Device& device, const std::string& c
 struct Renderer::State {
     std::string selector;
     const Camera& camera;
-    const Scene& scene;
+    const Document& document;
+    const std::vector<Id>& selection;
 
     wgpu::Instance instance;
     wgpu::Surface surface;
@@ -69,37 +101,41 @@ struct Renderer::State {
 
     wgpu::BindGroupLayout bindGroupLayout;
     wgpu::RenderPipeline gridPipeline;
-    wgpu::RenderPipeline rectsPipeline;
+    wgpu::RenderPipeline shapesPipeline;
     wgpu::Buffer frameBuffer;
-    wgpu::Buffer rectsBuffer;
-    std::size_t rectsCapacity = 0;
+    wgpu::Buffer shapesBuffer;
+    std::size_t shapesCapacity = 0;
     wgpu::BindGroup bindGroup;
 
-    std::vector<Shape> visible;
-    std::vector<RectInstance> instances;
+    std::vector<ShapeInstance> instances;
+    Rect view;
+    Vec2 origin;
 
     bool running = false;
     bool looping = false;
     double lastTime = 0.0;
     FrameStats stats;
 
-    State(std::string selector, const Camera& camera, const Scene& scene)
-        : selector(std::move(selector)), camera(camera), scene(scene) {}
+    State(std::string selector, const Camera& camera, const Document& document, const std::vector<Id>& selection)
+        : selector(std::move(selector)), camera(camera), document(document), selection(selection) {}
 
     void requestAdapter();
     void requestDevice();
     void onDevice();
     void createPipelines();
-    void ensureRectsCapacity(std::size_t count);
+    void ensureShapesCapacity(std::size_t count);
     void startLoop();
     bool resizeIfNeeded();
     void writeFrameUniform();
     void buildInstances();
+    void collect(const Id& parent, Vec2 offset, const Rect& clip, double opacity);
+    void addSelectionOutlines();
     bool frame(double time);
 };
 
-Renderer::Renderer(std::string canvasSelector, const Camera& camera, const Scene& scene)
-    : state_(std::make_unique<State>(std::move(canvasSelector), camera, scene)) {}
+Renderer::Renderer(std::string canvasSelector, const Camera& camera, const Document& document,
+                   const std::vector<Id>& selection)
+    : state_(std::make_unique<State>(std::move(canvasSelector), camera, document, selection)) {}
 
 Renderer::~Renderer() = default;
 
@@ -174,7 +210,7 @@ void Renderer::State::onDevice() {
     format = caps.formats[0];
 
     createPipelines();
-    ensureRectsCapacity(kInitialRectCapacity);
+    ensureShapesCapacity(kInitialShapeCapacity);
 
     if (running) {
         startLoop();
@@ -229,7 +265,7 @@ void Renderer::State::createPipelines() {
     };
 
     gridPipeline = createPipeline(kGridWgsl, wgpu::PrimitiveTopology::TriangleList);
-    rectsPipeline = createPipeline(kRectsWgsl, wgpu::PrimitiveTopology::TriangleStrip);
+    shapesPipeline = createPipeline(kShapesWgsl, wgpu::PrimitiveTopology::TriangleStrip);
 
     wgpu::BufferDescriptor frameDesc{};
     frameDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -237,22 +273,22 @@ void Renderer::State::createPipelines() {
     frameBuffer = device.CreateBuffer(&frameDesc);
 }
 
-void Renderer::State::ensureRectsCapacity(std::size_t count) {
-    if (count <= rectsCapacity) {
+void Renderer::State::ensureShapesCapacity(std::size_t count) {
+    if (count <= shapesCapacity) {
         return;
     }
-    rectsCapacity = std::max(count, rectsCapacity * 2);
+    shapesCapacity = std::max(count, shapesCapacity * 2);
 
     wgpu::BufferDescriptor desc{};
     desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
-    desc.size = rectsCapacity * sizeof(RectInstance);
-    rectsBuffer = device.CreateBuffer(&desc);
+    desc.size = shapesCapacity * sizeof(ShapeInstance);
+    shapesBuffer = device.CreateBuffer(&desc);
 
     wgpu::BindGroupEntry entries[2]{};
     entries[0].binding = 0;
     entries[0].buffer = frameBuffer;
     entries[1].binding = 1;
-    entries[1].buffer = rectsBuffer;
+    entries[1].buffer = shapesBuffer;
 
     wgpu::BindGroupDescriptor groupDesc{};
     groupDesc.layout = bindGroupLayout;
@@ -299,7 +335,7 @@ bool Renderer::State::resizeIfNeeded() {
 
 void Renderer::State::writeFrameUniform() {
     const double zoom = camera.zoom();
-    const double minor = std::pow(10.0, std::ceil(std::log10(kMinGridSpacingPx / zoom)));
+    const double minor = std::max(1.0, std::pow(10.0, std::ceil(std::log10(kMinGridSpacingPx / zoom))));
     const double major = minor * 10.0;
     const double minorPx = minor * zoom;
     const double fade =
@@ -318,24 +354,69 @@ void Renderer::State::writeFrameUniform() {
 }
 
 void Renderer::State::buildInstances() {
-    scene.visible(camera.visibleWorld({cssWidth, cssHeight}), visible);
-
-    const Vec2 origin = camera.position();
+    view = camera.visibleWorld({cssWidth, cssHeight});
+    origin = camera.position();
     instances.clear();
-    instances.reserve(visible.size());
-    for (const Shape& shape : visible) {
-        const Rect& r = shape.bounds;
+    collect(Id{}, {}, {-kUnbounded, -kUnbounded, 2 * kUnbounded, 2 * kUnbounded}, 1.0);
+    stats.visible = instances.size();
+    addSelectionOutlines();
+
+    ensureShapesCapacity(instances.size());
+    if (!instances.empty()) {
+        device.GetQueue().WriteBuffer(shapesBuffer, 0, instances.data(),
+                                      instances.size() * sizeof(ShapeInstance));
+    }
+}
+
+void Renderer::State::addSelectionOutlines() {
+    const Color color = toSrgb(kSelectionColor);
+    for (const Id& id : selection) {
+        const auto bounds = worldBounds(document, id);
+        if (!bounds) {
+            continue;
+        }
         instances.push_back({
-            {float(r.x - origin.x), float(r.y - origin.y)},
-            {float(r.w), float(r.h)},
-            {shape.fill.r, shape.fill.g, shape.fill.b, shape.fill.a},
+            {float(bounds->x - origin.x), float(bounds->y - origin.y)},
+            {float(bounds->w), float(bounds->h)},
+            {color.r, color.g, color.b, color.a},
+            {float(-kUnbounded), float(-kUnbounded), float(kUnbounded), float(kUnbounded)},
+            0.0f,
+            kKindOutline,
+            {},
         });
     }
+}
 
-    ensureRectsCapacity(instances.size());
-    if (!instances.empty()) {
-        device.GetQueue().WriteBuffer(rectsBuffer, 0, instances.data(),
-                                      instances.size() * sizeof(RectInstance));
+void Renderer::State::collect(const Id& parent, Vec2 offset, const Rect& clip, double opacity) {
+    const Rect visibleArea = intersect(view, clip);
+    for (const Id& id : document.children(parent)) {
+        const Node& node = *document.find(id);
+        if (!node.visible) {
+            continue;
+        }
+        const Rect world{offset.x + node.x, offset.y + node.y, node.w, node.h};
+        const double alpha = opacity * node.opacity;
+
+        if (world.intersects(visibleArea)) {
+            const Color fill = resolveFill(node.fill);
+            instances.push_back({
+                {float(world.x - origin.x), float(world.y - origin.y)},
+                {float(world.w), float(world.h)},
+                {fill.r, fill.g, fill.b, float(fill.a * alpha)},
+                {float(clip.x - origin.x), float(clip.y - origin.y), float(clip.x + clip.w - origin.x),
+                 float(clip.y + clip.h - origin.y)},
+                float(resolveLength(node.cornerRadius)),
+                node.type == NodeType::Ellipse ? kKindEllipse : kKindBox,
+                {},
+            });
+        }
+
+        if (canHaveChildren(node.type)) {
+            const Rect childClip = node.clipContent ? intersect(clip, world) : clip;
+            if (!node.clipContent || childClip.intersects(view)) {
+                collect(id, {world.x, world.y}, childClip, alpha);
+            }
+        }
     }
 }
 
@@ -350,7 +431,7 @@ bool Renderer::State::frame(double time) {
     }
     lastTime = time;
     const double cpuStart = emscripten_get_now();
-    stats.total = scene.shapes().size();
+    stats.total = document.size();
 
     if (!resizeIfNeeded()) {
         return true;
@@ -382,7 +463,7 @@ bool Renderer::State::frame(double time) {
     pass.SetPipeline(gridPipeline);
     pass.Draw(3);
     if (!instances.empty()) {
-        pass.SetPipeline(rectsPipeline);
+        pass.SetPipeline(shapesPipeline);
         pass.Draw(4, static_cast<uint32_t>(instances.size()));
     }
     pass.End();
@@ -391,7 +472,6 @@ bool Renderer::State::frame(double time) {
     device.GetQueue().Submit(1, &commands);
 
     stats.cpuMs += (emscripten_get_now() - cpuStart - stats.cpuMs) * kStatsSmoothing;
-    stats.visible = instances.size();
     return true;
 }
 

@@ -5,15 +5,33 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(FetchContent)
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+)
+FetchContent_MakeAvailable(json)
+
 # ---------------------------------------------------------------------------
 # vc_core: plain C++. No browser, no GPU. Compiles and tests natively.
 # ---------------------------------------------------------------------------
 add_library(vc_core STATIC
     src/camera.cpp
-    src/scene.cpp
+    src/color.cpp
+    src/demo.cpp
+    src/document.cpp
+    src/editor.cpp
+    src/fractional_index.cpp
+    src/geometry.cpp
+    src/id.cpp
+    src/json.cpp
+    src/node.cpp
+    src/session.cpp
     src/viewport_controller.cpp
 )
 target_include_directories(vc_core PUBLIC include)
+target_link_libraries(vc_core PRIVATE nlohmann_json::nlohmann_json)
 
 if(MSVC)  # true for clang-cl too
     target_compile_options(vc_core PRIVATE /W4)
@@ -57,7 +75,6 @@ if(EMSCRIPTEN)
 else()
     option(VC_BUILD_TESTS "Build unit tests" ON)
     if(VC_BUILD_TESTS)
-        include(FetchContent)
         FetchContent_Declare(
             Catch2
             GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -68,7 +85,10 @@ else()
 
         add_executable(vc_tests
             tests/test_camera.cpp
-            tests/test_scene.cpp
+            tests/test_document.cpp
+            tests/test_editor.cpp
+            tests/test_json.cpp
+            tests/test_model.cpp
             tests/test_viewport_controller.cpp
         )
         target_link_libraries(vc_tests PRIVATE vc_core Catch2::Catch2WithMain)
