@@ -1,6 +1,6 @@
 import {
   Component,
-  ElementRef,
+  DestroyRef,
   afterNextRender,
   computed,
   effect,
@@ -8,11 +8,10 @@ import {
   input,
   resource,
   signal,
-  viewChild,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
-import { VisualCore } from '@canvas/bridge';
+import { FrameStats, VisualCore } from '@canvas/bridge';
 import { LucentButton } from '@design-foundry/lucent';
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
@@ -32,7 +31,7 @@ export class EditorPage {
 
   private readonly api = inject(Api);
   private readonly title = inject(Title);
-  private readonly surface = viewChild.required<ElementRef<HTMLCanvasElement>>('surface');
+  private readonly destroyRef = inject(DestroyRef);
 
   protected readonly document = resource({
     params: () => ({ id: this.id() }),
@@ -46,7 +45,10 @@ export class EditorPage {
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   protected readonly status = signal('loading visualcore…');
 
+  private destroyed = false;
+
   constructor() {
+    this.destroyRef.onDestroy(() => (this.destroyed = true));
     effect(() => {
       const name = this.name();
       this.title.setTitle(name ? `${name} - Canvas` : 'Canvas');
@@ -66,18 +68,25 @@ export class EditorPage {
   private async start(): Promise<void> {
     try {
       const core = await VisualCore.load({ wasmUrl: 'wasm/visualcore.wasm' });
+      if (this.destroyed) return;
 
-      const camera = core.createCamera();
-      try {
-        camera.zoomAt({ x: 100, y: 100 }, 2);
-        const { width, height } = this.surface().nativeElement.getBoundingClientRect();
-        this.status.set(`visualcore ready, zoom ${camera.zoom}, surface ${width}×${height}`);
-      } finally {
-        camera.dispose();
-      }
+      core.attach('#canvas');
+      core.addRandomShapes(10_000, 1);
+
+      const timer = setInterval(() => this.status.set(formatStats(core.frameStats())), STATS_INTERVAL_MS);
+      this.destroyRef.onDestroy(() => {
+        clearInterval(timer);
+        core.detach();
+      });
     } catch (err) {
       this.status.set(`visualcore failed to load: ${err}`);
       console.error(err);
     }
   }
+}
+
+const STATS_INTERVAL_MS = 500;
+
+function formatStats({ frameMs, cpuMs, visible, total }: FrameStats): string {
+  return `${frameMs.toFixed(1)} ms frame, ${cpuMs.toFixed(2)} ms cpu, ${visible} of ${total} shapes drawn`;
 }

@@ -8,7 +8,7 @@
 <app-layers-panel class="layers" [layers]="layers()" [selectedIds]="selectedIds()" (select)="select($event)" />
 
 <main class="stage">
-  <canvas id="canvas" #surface></canvas>
+  <canvas id="canvas"></canvas>
   @if (document.error()) {
     <div class="missing">
       <span class="typography-body-md">This document doesn't exist.</span>

@@ -1,7 +1,7 @@
 import createModule from '../wasm/visualcore.js';
-import type { Camera as CameraHandle, MainModule, Rect, Vec2 } from '../wasm/visualcore.js';
+import type { Camera as CameraHandle, FrameStats, MainModule, Rect, Vec2 } from '../wasm/visualcore.js';
 
-export type { Rect, Vec2 };
+export type { FrameStats, Rect, Vec2 };
 
 export interface LoadOptions {
   /** URL where the host app serves visualcore.wasm. */
@@ -16,6 +16,26 @@ export class VisualCore {
       locateFile: (path: string) => (path.endsWith('.wasm') ? wasmUrl : path),
     });
     return new VisualCore(module);
+  }
+
+  /** Takes over the canvas matching `selector`: rendering and pointer input run in WASM from here on. */
+  attach(selector: string): void {
+    this.module.attach(selector);
+  }
+
+  /** Stops the frame loop and removes the input listeners. */
+  detach(): void {
+    this.module.detach();
+  }
+
+  /** Adds `count` random rects around the origin. Same seed, same rects. */
+  addRandomShapes(count: number, seed: number): void {
+    this.module.addRandomShapes(count, seed);
+  }
+
+  /** Smoothed timings of the last frames and how many shapes were drawn. */
+  frameStats(): FrameStats {
+    return this.module.frameStats();
   }
 
   /** The caller owns the camera: `using cam = core.createCamera()` or call `dispose()`. */
