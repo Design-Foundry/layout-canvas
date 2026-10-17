@@ -81,7 +81,8 @@
               "exclude": [
                 "@canvas/bridge"
               ]
-            }
+            },
+            "poll": 500
           }
         },
         "test": {
