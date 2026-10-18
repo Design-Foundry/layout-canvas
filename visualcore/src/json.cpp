@@ -12,10 +12,11 @@ using nlohmann::json;
 
 constexpr int kSnapshotVersion = 2;
 
-constexpr std::array<std::pair<NodeType, std::string_view>, 4> kNodeTypes{{
+constexpr std::array<std::pair<NodeType, std::string_view>, 5> kNodeTypes{{
     {NodeType::Frame, "frame"},
     {NodeType::Rect, "rect"},
     {NodeType::Ellipse, "ellipse"},
+    {NodeType::Component, "component"},
     {NodeType::Instance, "instance"},
 }};
 
@@ -156,6 +157,18 @@ void writePatch(json& out, const NodePatch& p) {
     if (p.heightSizing) out["heightSizing"] = nameOf(kSizings, *p.heightSizing);
     if (p.limits) out["limits"] = write(*p.limits);
     if (p.absolute) out["absolute"] = *p.absolute;
+    if (p.type) out["type"] = typeName(*p.type);
+    if (p.component && !p.component->isNil()) out["component"] = p.component->toString();
+}
+
+json writeOverrides(const std::vector<Override>& overrides) {
+    json out = json::array();
+    for (const Override& o : overrides) {
+        json patch = json::object();
+        writePatch(patch, o.patch);
+        out.push_back({{"node", o.node.toString()}, {"patch", patch}});
+    }
+    return out;
 }
 
 /// The whole node, leaving out properties that still have their default value.
@@ -174,7 +187,9 @@ json write(const Node& n) {
     if (n.heightSizing == defaults.heightSizing) p.heightSizing.reset();
     if (n.limits == defaults.limits) p.limits.reset();
     if (n.absolute == defaults.absolute) p.absolute.reset();
+    if (n.component.isNil()) p.component.reset();
     writePatch(out, p);
+    if (!n.overrides.empty()) out["overrides"] = writeOverrides(n.overrides);
     return out;
 }
 
@@ -362,7 +377,11 @@ std::optional<NodePatch> readPatch(const json& j) {
                     readField(j, "widthSizing", p.widthSizing, readSizing) &&
                     readField(j, "heightSizing", p.heightSizing, readSizing) &&
                     readField(j, "limits", p.limits, readLimits) &&
-                    readField(j, "absolute", p.absolute, readBool);
+                    readField(j, "absolute", p.absolute, readBool) &&
+                    readField(j, "type", p.type, [](const json& v) {
+                        return v.is_string() ? typeFromName(v.get_ref<const std::string&>()) : std::nullopt;
+                    }) &&
+                    readField(j, "component", p.component, readId);
     return ok ? std::optional{p} : std::nullopt;
 }
 
@@ -389,6 +408,16 @@ std::optional<Node> readNode(const json& j) {
     const auto patch = readPatch(j);
     if (!patch) return std::nullopt;
     applyPatch(n, *patch);
+    n.type = *type;
+    if (const auto it = j.find("overrides"); it != j.end()) {
+        if (!it->is_array()) return std::nullopt;
+        for (const json& item : *it) {
+            const auto node = item.is_object() && item.contains("node") ? readId(item["node"]) : std::nullopt;
+            const auto overridePatch = item.is_object() && item.contains("patch") ? readPatch(item["patch"]) : std::nullopt;
+            if (!node || !overridePatch) return std::nullopt;
+            n.overrides.push_back({*node, *overridePatch});
+        }
+    }
     return n;
 }
 
@@ -658,6 +687,12 @@ std::optional<OpBody> readOp(std::string_view kind, const json& j) {
     if (kind == "DeleteToken") {
         return DeleteToken{*id};
     }
+    if (kind == "SetOverride") {
+        const auto node = readIdField(j, "node");
+        auto patch = j.contains("patch") && j["patch"].is_object() ? readPatch(j["patch"]) : std::nullopt;
+        if (!node || !patch) return std::nullopt;
+        return SetOverride{*id, *node, std::move(*patch)};
+    }
     if (kind == "DeleteMode") {
         return DeleteMode{*id};
     }
@@ -700,6 +735,10 @@ json writeOp(const OpBody& op) {
                 return {{"token", writeTokenDef(body.token)}};
             } else if constexpr (std::is_same_v<T, CreateMode> || std::is_same_v<T, ReplaceMode>) {
                 return {{"mode", writeMode(body.mode)}};
+            } else if constexpr (std::is_same_v<T, SetOverride>) {
+                json patch = json::object();
+                writePatch(patch, body.patch);
+                return {{"id", body.instance.toString()}, {"node", body.node.toString()}, {"patch", patch}};
             } else {
                 return {{"id", body.id.toString()}};
             }
@@ -708,11 +747,13 @@ json writeOp(const OpBody& op) {
 }
 
 void writeLayers(const Document& document, const Id& parent, int depth, json& rows) {
-    const auto& children = document.children(parent);
+    const auto& children = document.viewChildren(parent);
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
-        const Node& node = *document.find(*it);
-        rows.push_back({{"id", node.id.toString()}, {"name", node.name}, {"type", typeName(node.type)},
-                        {"depth", depth}, {"visible", node.visible}, {"locked", node.locked}});
+        const Node& node = *document.view(*it);
+        json row{{"id", node.id.toString()}, {"name", node.name}, {"type", typeName(node.type)},
+                 {"depth", depth}, {"visible", node.visible}, {"locked", node.locked}};
+        if (document.ownerOf(*it) != *it) row["inInstance"] = true;
+        rows.push_back(std::move(row));
         writeLayers(document, node.id, depth + 1, rows);
     }
 }
@@ -724,10 +765,10 @@ std::optional<OpBody> opFromJson(std::string_view kind, std::string_view data) {
 }
 
 std::string_view opKind(const OpBody& op) {
-    constexpr std::array<std::string_view, 10> kKinds{"CreateNode",  "DeleteNode",  "SetProps",
+    constexpr std::array<std::string_view, 11> kKinds{"CreateNode",  "DeleteNode",  "SetProps",
                                                       "MoveNode",    "CreateToken", "DeleteToken",
                                                       "ReplaceToken", "CreateMode", "DeleteMode",
-                                                      "ReplaceMode"};
+                                                      "ReplaceMode", "SetOverride"};
     return kKinds[op.index()];
 }
 
@@ -759,8 +800,16 @@ std::optional<std::vector<OpBody>> opsFromJson(std::string_view data) {
     return ops;
 }
 
-std::string inspectNodeJson(const Document& document, const Node& node, const Id& mode) {
+std::string inspectNodeJson(const Document& document, const Node& source, const Id& mode) {
+    const Node* viewed = source.type == NodeType::Instance ? document.view(source.id) : nullptr;
+    const Node& node = viewed ? *viewed : source;
     json out{{"id", node.id.toString()}, {"type", typeName(node.type)}, {"order", node.order}};
+    if (source.type == NodeType::Instance) {
+        out["overrides"] = source.overrides.size();
+        if (const Node* component = document.find(source.component)) out["componentName"] = component->name;
+    }
+    if (source.type == NodeType::Component) out["inUse"] = document.isComponentUsed(source.id);
+    if (document.ownerOf(source.id) != source.id) out["inInstance"] = true;
     if (!node.parent.isNil()) out["parent"] = node.parent.toString();
     writePatch(out, fullPatch(node));
     if (const auto* color = std::get_if<Oklch>(&node.fill)) {
@@ -768,7 +817,8 @@ std::string inspectNodeJson(const Document& document, const Node& node, const Id
     }
     const Rect box = document.box(node.id, mode);
     out["box"] = {{"x", box.x}, {"y", box.y}, {"w", box.w}, {"h", box.h}};
-    const Node* parent = document.find(node.parent);
+    const Node* parent = document.view(node.parent);
+    if (!parent) parent = document.find(node.parent);
     out["inFlow"] = parent && parent->layout.type != LayoutType::None && !node.absolute;
     out["parentLayout"] = parent ? nameOf(kLayoutTypes, parent->layout.type) : "none";
     return out.dump();
@@ -787,10 +837,11 @@ std::string frameLabelsToJson(const Document& document, const Camera& camera, co
     json labels = json::array();
     for (const Id& id : document.children(Id{})) {
         const Node& node = *document.find(id);
-        if (node.type != NodeType::Frame || !node.visible) continue;
+        if (!isContainer(node.type) || !node.visible) continue;
         const Rect box = document.box(id, mode);
         const Vec2 topLeft = camera.toScreen({box.x, box.y});
-        labels.push_back({{"id", id.toString()}, {"name", node.name}, {"x", topLeft.x}, {"y", topLeft.y},
+        labels.push_back({{"id", id.toString()}, {"name", node.name}, {"type", typeName(node.type)},
+                          {"x", topLeft.x}, {"y", topLeft.y},
                           {"w", box.w * camera.zoom()}});
     }
     return labels.dump();

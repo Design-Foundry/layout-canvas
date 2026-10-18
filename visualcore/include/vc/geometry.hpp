@@ -1,5 +1,6 @@
 #pragma once
 #include <optional>
+#include <unordered_set>
 #include "vc/document.hpp"
 #include "vc/math.hpp"
 
@@ -13,5 +14,9 @@ namespace vc {
 /// frames are considered. Returns a nil id when nothing is hit.
 [[nodiscard]] Id hitTest(const Document& document, Vec2 world, bool framesOnly = false,
                          const Id& mode = kDefaultModeId);
+
+/// The deepest visible, unlocked frame under `world`, skipping `excluded` nodes and everything inside
+/// them. Returns a nil id for the canvas itself.
+[[nodiscard]] Id frameAt(const Document& document, Vec2 world, const Id& mode, const std::unordered_set<Id>& excluded);
 
 } // namespace vc

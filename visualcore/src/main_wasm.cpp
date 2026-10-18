@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include <emscripten/bind.h>
 #include <emscripten/html5.h>
@@ -133,6 +134,37 @@ bool select(const std::string& id) {
     return true;
 }
 
+bool toggleSelection(const std::string& id) {
+    const auto parsed = vc::Id::parse(id);
+    if (!rt || !parsed) {
+        return false;
+    }
+    rt->editor.toggleSelection(*parsed);
+    return true;
+}
+
+/// Sizes as `id:width:height` entries separated by `;`, measured by the page.
+void setFrameLabelSizes(const std::string& sizes) {
+    if (!rt) {
+        return;
+    }
+    std::unordered_map<vc::Id, vc::Vec2> parsed;
+    std::size_t start = 0;
+    while (start < sizes.size()) {
+        const std::size_t end = std::min(sizes.find(';', start), sizes.size());
+        const std::string entry = sizes.substr(start, end - start);
+        const std::size_t first = entry.find(':');
+        const std::size_t second = entry.find(':', first + 1);
+        if (first != std::string::npos && second != std::string::npos) {
+            if (const auto id = vc::Id::parse(entry.substr(0, first))) {
+                parsed[*id] = {std::stod(entry.substr(first + 1, second - first - 1)), std::stod(entry.substr(second + 1))};
+            }
+        }
+        start = end + 1;
+    }
+    rt->editor.setFrameLabelSizes(std::move(parsed));
+}
+
 bool setTool(const std::string& name) {
     const auto tool = vc::toolFromName(name);
     if (!rt || !tool) {
@@ -150,6 +182,7 @@ std::string tool() {
 std::string node(const std::string& id) {
     const auto parsed = vc::Id::parse(id);
     const vc::Node* found = rt && parsed ? rt->session.document().find(*parsed) : nullptr;
+    if (!found && rt && parsed) found = rt->session.document().view(*parsed);
     return found ? vc::inspectNodeJson(rt->session.document(), *found, rt->editor.activeMode()) : "null";
 }
 
@@ -242,6 +275,37 @@ bool deleteMode(const std::string& id) {
     return rt && parsed && rt->editor.deleteMode(*parsed);
 }
 
+std::string createComponent() {
+    const auto id = rt ? rt->editor.createComponent() : std::nullopt;
+    return id ? id->toString() : "";
+}
+
+std::string createInstance(const std::string& component) {
+    const auto parsed = vc::Id::parse(component);
+    const auto id = rt && parsed ? rt->editor.createInstance(*parsed) : std::nullopt;
+    return id ? id->toString() : "";
+}
+
+std::string detachInstance(const std::string& instance) {
+    const auto parsed = vc::Id::parse(instance);
+    const auto id = rt && parsed ? rt->editor.detachInstance(*parsed) : std::nullopt;
+    return id ? id->toString() : "";
+}
+
+bool resetOverrides(const std::string& instance) {
+    const auto parsed = vc::Id::parse(instance);
+    return rt && parsed && rt->editor.resetOverrides(*parsed);
+}
+
+bool reveal(const std::string& id, double width, double height) {
+    const auto parsed = vc::Id::parse(id);
+    if (!rt || !parsed) {
+        return false;
+    }
+    rt->editor.reveal(*parsed, {width, height});
+    return true;
+}
+
 bool deleteSelection() {
     return rt && rt->editor.deleteSelection();
 }
@@ -324,6 +388,8 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("frameLabels", &frameLabels);
     function("select", &select);
     function("setTool", &setTool);
+    function("toggleSelection", &toggleSelection);
+    function("setFrameLabelSizes", &setFrameLabelSizes);
     function("tool", &tool);
     function("node", &node);
     function("setProps", &setProps);
@@ -343,6 +409,11 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("addMode", &addMode);
     function("replaceMode", &replaceMode);
     function("deleteMode", &deleteMode);
+    function("createComponent", &createComponent);
+    function("createInstance", &createInstance);
+    function("detachInstance", &detachInstance);
+    function("resetOverrides", &resetOverrides);
+    function("reveal", &reveal);
     function("deleteSelection", &deleteSelection);
     function("nudge", &nudge);
     function("undo", &undo);

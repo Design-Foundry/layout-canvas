@@ -17,8 +17,8 @@ public:
     Engine(const Document& document, const Id& mode) : document_(document), mode_(mode) {}
 
     std::unordered_map<Id, Rect> run() {
-        for (const Id& id : document_.children(Id{})) {
-            const Node& node = *document_.find(id);
+        for (const Id& id : document_.viewChildren(Id{})) {
+            const Node& node = *document_.view(id);
             const Size size = measure(node);
             place(node, {node.x, node.y, size.w, size.h});
         }
@@ -43,13 +43,13 @@ private:
     }
 
     static bool hasAutoLayout(const Node& node) {
-        return node.type == NodeType::Frame && node.layout.type != LayoutType::None;
+        return isContainer(node.type) && node.layout.type != LayoutType::None;
     }
 
     std::vector<const Node*> flowChildren(const Node& node) const {
         std::vector<const Node*> out;
-        for (const Id& id : document_.children(node.id)) {
-            const Node* child = document_.find(id);
+        for (const Id& id : document_.viewChildren(node.id)) {
+            const Node* child = document_.view(id);
             if (child->visible && !child->absolute) out.push_back(child);
         }
         return out;
@@ -81,12 +81,12 @@ private:
 
     void place(const Node& node, const Rect& box) {
         boxes_[node.id] = box;
-        if (!canHaveChildren(node.type)) {
+        if (!isContainer(node.type)) {
             return;
         }
         if (!hasAutoLayout(node)) {
-            for (const Id& id : document_.children(node.id)) {
-                const Node& child = *document_.find(id);
+            for (const Id& id : document_.viewChildren(node.id)) {
+                const Node& child = *document_.view(id);
                 const Size size = measure(child);
                 place(child, {child.x, child.y, size.w, size.h});
             }
@@ -193,8 +193,8 @@ private:
             cursor += item.main + spacing;
         }
 
-        for (const Id& id : document_.children(node.id)) {
-            const Node& child = *document_.find(id);
+        for (const Id& id : document_.viewChildren(node.id)) {
+            const Node& child = *document_.view(id);
             if (child.absolute || !child.visible) {
                 const Size size = measure(child);
                 place(child, {child.x, child.y, size.w, size.h});

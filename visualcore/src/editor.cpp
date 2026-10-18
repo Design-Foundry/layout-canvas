@@ -176,10 +176,31 @@ void Editor::pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers)
         return;
     } else if (isDrawTool(tool_)) {
         startDraw(downWorld_);
+    } else if (const Id label = frameLabelAt(screen); !label.isNil()) {
+        if (modifiers_.shift) {
+            toggleSelection(label);
+        } else {
+            if (!isSelected(label)) select(label);
+            beginMoving();
+        }
     } else if (const Handle handle = handleAt(screen); !handle.isNone()) {
         startResize(handle);
     } else {
         startMove(downWorld_);
+    }
+}
+
+void Editor::doubleClick(Vec2 screen) {
+    if (gesture_ != Gesture::None || tool_ != Tool::Select || selection_.size() != 1) {
+        return;
+    }
+    const Document& document = session_.document();
+    for (Id id = hitTest(document, camera_.toWorld(screen), false, activeMode_); !id.isNil();
+         id = document.view(id)->parent) {
+        if (document.view(id)->parent == selection_[0]) {
+            select(id);
+            return;
+        }
     }
 }
 
@@ -217,6 +238,9 @@ void Editor::update() {
     case Gesture::Resize:
         updateResize(world);
         break;
+    case Gesture::Marquee:
+        updateMarquee(world);
+        break;
     case Gesture::None:
         break;
     }
@@ -231,6 +255,7 @@ void Editor::pointerCancel() {
         viewport_.pointerUp();
     }
     session_.cancelPreview();
+    marquee_.reset();
     gesture_ = Gesture::None;
 }
 
@@ -238,20 +263,252 @@ void Editor::wheel(Vec2 screen, double deltaY) {
     viewport_.wheel(screen, deltaY);
 }
 
+std::vector<OpBody> Editor::propsOps(const Id& id, const NodePatch& patch) const {
+    const Document& document = session_.document();
+    const auto existing = [](const Node& instance, const Id& key) {
+        for (const Override& o : instance.overrides) {
+            if (o.node == key) return o.patch;
+        }
+        return NodePatch{};
+    };
+    if (isCopy(id)) {
+        const Node* instance = document.find(document.ownerOf(id));
+        const Id key = document.overrideKeyOf(id);
+        NodePatch style = patch;
+        style.type.reset();
+        style.component.reset();
+        if (!instance || key.isNil() || style == NodePatch{}) return {};
+        return {SetOverride{instance->id, key, mergePatch(existing(*instance, key), style)}};
+    }
+    const Node* node = document.find(id);
+    if (!node || node->type != NodeType::Instance) {
+        return {SetProps{id, patch}};
+    }
+    NodePatch own;
+    own.name = patch.name;
+    own.x = patch.x;
+    own.y = patch.y;
+    own.w = patch.w;
+    own.h = patch.h;
+    own.widthSizing = patch.widthSizing;
+    own.heightSizing = patch.heightSizing;
+    own.limits = patch.limits;
+    own.absolute = patch.absolute;
+    own.visible = patch.visible;
+    own.locked = patch.locked;
+    own.component = patch.component;
+
+    NodePatch style = patch;
+    for (auto* field : {&style.x, &style.y, &style.w, &style.h}) field->reset();
+    style.name.reset();
+    style.widthSizing.reset();
+    style.heightSizing.reset();
+    style.limits.reset();
+    style.absolute.reset();
+    style.visible.reset();
+    style.locked.reset();
+    style.component.reset();
+    style.type.reset();
+
+    std::vector<OpBody> ops;
+    if (own != NodePatch{}) ops.push_back(SetProps{id, own});
+    if (style != NodePatch{}) {
+        ops.push_back(SetOverride{id, node->component, mergePatch(existing(*node, node->component), style)});
+    }
+    return ops;
+}
+
 bool Editor::setProps(const Id& id, const NodePatch& patch) {
     if (gesture_ != Gesture::None || patch == NodePatch{}) {
         return false;
     }
     settlePropsPreview();
-    return session_.edit(SetProps{id, patch});
+    const auto ops = propsOps(id, patch);
+    if (ops.empty()) {
+        return false;
+    }
+    if (ops.size() == 1) {
+        return session_.edit(ops[0]);
+    }
+    session_.begin();
+    bool applied = true;
+    for (const OpBody& op : ops) applied = session_.edit(op) && applied;
+    session_.commit();
+    return applied;
 }
 
 bool Editor::previewProps(const Id& id, const NodePatch& patch) {
     if (gesture_ != Gesture::None || patch == NodePatch{}) {
         return false;
     }
-    propsPreview_ = session_.preview(SetProps{id, patch});
+    const auto ops = propsOps(id, patch);
+    propsPreview_ = !ops.empty() && session_.preview(ops);
     return propsPreview_;
+}
+
+std::optional<Id> Editor::createComponent() {
+    if (gesture_ != Gesture::None || selection_.empty()) {
+        return std::nullopt;
+    }
+    settlePropsPreview();
+    const Document& document = session_.document();
+    if (selection_.size() == 1) {
+        const Node* node = document.find(selection_[0]);
+        if (node && node->type == NodeType::Frame) {
+            NodePatch patch;
+            patch.type = NodeType::Component;
+            return session_.edit(SetProps{node->id, patch}) ? std::optional{node->id} : std::nullopt;
+        }
+    }
+
+    const Id parent = document.find(selection_[0])->parent;
+    Rect bounds = *worldBounds(document, selection_[0], activeMode_);
+    for (const Id& id : selection_) {
+        if (document.find(id)->parent != parent) return std::nullopt;
+        const Rect r = *worldBounds(document, id, activeMode_);
+        const double x1 = std::max(bounds.x + bounds.w, r.x + r.w);
+        const double y1 = std::max(bounds.y + bounds.h, r.y + r.h);
+        bounds.x = std::min(bounds.x, r.x);
+        bounds.y = std::min(bounds.y, r.y);
+        bounds.w = x1 - bounds.x;
+        bounds.h = y1 - bounds.y;
+    }
+    const Vec2 origin = originOf(parent);
+    std::string last;
+    for (const Id& id : document.children(parent)) last = document.find(id)->order;
+
+    Node component;
+    component.id = session_.newId();
+    component.type = NodeType::Component;
+    component.parent = parent;
+    component.order = keyBetween(last, std::nullopt);
+    component.name = "Component";
+    component.x = bounds.x - origin.x;
+    component.y = bounds.y - origin.y;
+    component.w = bounds.w;
+    component.h = bounds.h;
+    component.fill = Oklch{1.0, 0.0, 0.0};
+    component.fillVisible = false;
+
+    std::vector<Id> moved = selection_;
+    std::sort(moved.begin(), moved.end(), [&](const Id& a, const Id& b) {
+        return document.find(a)->order < document.find(b)->order;
+    });
+    session_.begin();
+    bool ok = session_.edit(CreateNode{component});
+    std::string order;
+    for (const Id& id : moved) {
+        const Rect r = *worldBounds(session_.document(), id, activeMode_);
+        order = keyBetween(order, std::nullopt);
+        ok = ok && session_.edit(MoveNode{id, component.id, order});
+        NodePatch at;
+        at.x = r.x - bounds.x;
+        at.y = r.y - bounds.y;
+        ok = ok && session_.edit(SetProps{id, at});
+    }
+    session_.commit();
+    if (!ok) {
+        session_.undo();
+        return std::nullopt;
+    }
+    select(component.id);
+    return component.id;
+}
+
+std::optional<Id> Editor::createInstance(const Id& componentId) {
+    const Document& document = session_.document();
+    const Node* component = document.find(componentId);
+    if (gesture_ != Gesture::None || !component || component->type != NodeType::Component) {
+        return std::nullopt;
+    }
+    settlePropsPreview();
+    const Rect box = document.box(componentId, activeMode_);
+    std::string last;
+    for (const Id& id : document.children(component->parent)) last = document.find(id)->order;
+
+    Node instance;
+    instance.id = session_.newId();
+    instance.type = NodeType::Instance;
+    instance.component = componentId;
+    instance.parent = component->parent;
+    instance.order = keyBetween(last, std::nullopt);
+    instance.name = component->name;
+    instance.x = box.x + box.w + 40.0;
+    instance.y = box.y;
+    instance.w = box.w;
+    instance.h = box.h;
+    instance.widthSizing = component->widthSizing;
+    instance.heightSizing = component->heightSizing;
+    if (!session_.edit(CreateNode{instance})) {
+        return std::nullopt;
+    }
+    select(instance.id);
+    return instance.id;
+}
+
+std::optional<Id> Editor::detachInstance(const Id& instanceId) {
+    const Document& document = session_.document();
+    const Node* instance = document.find(instanceId);
+    if (gesture_ != Gesture::None || !instance || instance->type != NodeType::Instance) {
+        return std::nullopt;
+    }
+    settlePropsPreview();
+
+    std::vector<Node> copies;
+    const auto copy = [&](const Id& key, const Id& parent, auto&& self) -> void {
+        Node node = *document.view(key);
+        node.id = session_.newId();
+        node.parent = parent;
+        if (node.type == NodeType::Instance) {
+            node.type = NodeType::Frame;
+            node.component = {};
+            node.overrides.clear();
+        }
+        const Id id = node.id;
+        copies.push_back(std::move(node));
+        for (const Id& child : document.viewChildren(key)) self(child, id, self);
+    };
+    copy(instanceId, instance->parent, copy);
+    copies.front().order = instance->order;
+
+    session_.begin();
+    bool ok = session_.edit(DeleteNode{instanceId});
+    for (const Node& node : copies) ok = ok && session_.edit(CreateNode{node});
+    session_.commit();
+    if (!ok) {
+        session_.undo();
+        return std::nullopt;
+    }
+    select(copies.front().id);
+    return copies.front().id;
+}
+
+void Editor::reveal(const Id& id, Vec2 viewport) {
+    const auto bounds = worldBounds(session_.document(), id, activeMode_);
+    if (!bounds) {
+        return;
+    }
+    select(id);
+    const Rect view = camera_.visibleWorld(viewport);
+    if (bounds->x >= view.x && bounds->y >= view.y && bounds->x + bounds->w <= view.x + view.w &&
+        bounds->y + bounds->h <= view.y + view.h) {
+        return;
+    }
+    const Vec2 center = camera_.toScreen({bounds->x + bounds->w / 2.0, bounds->y + bounds->h / 2.0});
+    camera_.pan({viewport.x / 2.0 - center.x, viewport.y / 2.0 - center.y});
+}
+
+bool Editor::resetOverrides(const Id& instanceId) {
+    const Node* instance = session_.document().find(instanceId);
+    if (gesture_ != Gesture::None || !instance || instance->type != NodeType::Instance || instance->overrides.empty()) {
+        return false;
+    }
+    settlePropsPreview();
+    const std::vector<Override> overrides = instance->overrides;
+    session_.begin();
+    for (const Override& o : overrides) session_.edit(SetOverride{instanceId, o.node, {}});
+    session_.commit();
+    return true;
 }
 
 bool Editor::commitPropsPreview() {
@@ -280,7 +537,9 @@ bool Editor::nudge(Vec2 delta) {
     settlePropsPreview();
     session_.begin();
     for (const Id& id : selection_) {
-        const Node& node = *session_.document().find(id);
+        const Node* found = session_.document().find(id);
+        if (!found || found->locked) continue;
+        const Node& node = *found;
         NodePatch patch;
         patch.x = node.x + delta.x;
         patch.y = node.y + delta.y;
@@ -291,7 +550,7 @@ bool Editor::nudge(Vec2 delta) {
 }
 
 void Editor::select(const Id& id) {
-    if (!session_.document().find(id)) {
+    if (!exists(id)) {
         return;
     }
     if (selection_.size() != 1 || selection_[0] != id) {
@@ -308,13 +567,14 @@ void Editor::clearSelection() {
 }
 
 bool Editor::deleteSelection() {
-    if (selection_.empty() || gesture_ != Gesture::None) {
+    const bool onlyCopies = std::all_of(selection_.begin(), selection_.end(), [this](const Id& id) { return isCopy(id); });
+    if (gesture_ != Gesture::None || onlyCopies) {
         return false;
     }
     settlePropsPreview();
     session_.begin();
     for (const Id& id : selection_) {
-        session_.deleteTree(id);
+        if (!isCopy(id)) session_.deleteTree(id);
     }
     session_.commit();
     clearSelection();
@@ -357,7 +617,7 @@ Vec2 Editor::originOf(const Id& parent) const {
 void Editor::startDraw(Vec2 world) {
     gesture_ = Gesture::Draw;
     target_ = session_.newId();
-    drawParent_ = hitTest(session_.document(), world, true, activeMode_);
+    drawParent_ = frameAt(session_.document(), world, activeMode_, {});
     parentOrigin_ = originOf(drawParent_);
 }
 
@@ -392,61 +652,61 @@ void Editor::previewDraw(Vec2 from, Vec2 to) {
     session_.preview(CreateNode{std::move(node)});
 }
 
-void Editor::startMove(Vec2 world) {
-    const Id hit = hitTest(session_.document(), world, false, activeMode_);
-    if (hit.isNil()) {
-        clearSelection();
-        return;
+Id Editor::pickAt(const Id& deepest) const {
+    const Document& document = session_.document();
+    const Id owner = document.ownerOf(deepest);
+    if (owner == deepest || modifiers_.deep) {
+        return deepest;
     }
-    select(hit);
-    gesture_ = Gesture::Move;
-    target_ = hit;
-    const Node& node = *session_.document().find(hit);
-    const Node* parent = session_.document().find(node.parent);
-    reorder_ = parent && parent->layout.type != LayoutType::None && !node.absolute;
-    parentOrigin_ = originOf(node.parent);
-    const Rect bounds = *worldBounds(session_.document(), hit, activeMode_);
-    targetStart_ = {bounds.x, bounds.y};
+    for (const Id& selected : selection_) {
+        if (!isCopy(selected) || document.ownerOf(selected) != owner) continue;
+        const Id level = document.view(selected)->parent;
+        for (Id id = deepest; !id.isNil(); id = document.view(id)->parent) {
+            if (document.view(id)->parent == level) return id;
+        }
+        return deepest;
+    }
+    return owner;
 }
 
-void Editor::updateReorder(Vec2 world) {
-    const Document& document = session_.document();
-    const Node& node = *document.find(target_);
-    const Node& parent = *document.find(node.parent);
-    const bool row = parent.layout.type == LayoutType::Row;
-
-    std::vector<const Node*> flow;
-    std::size_t current = 0;
-    for (const Id& id : document.children(parent.id)) {
-        const Node* sibling = document.find(id);
-        if (sibling->id == target_) {
-            current = flow.size();
-        } else if (sibling->visible && !sibling->absolute) {
-            flow.push_back(sibling);
-        }
-    }
-
-    std::size_t index = 0;
-    for (const Node* sibling : flow) {
-        const Rect bounds = *worldBounds(document, sibling->id, activeMode_);
-        const double center = row ? bounds.x + bounds.w / 2.0 : bounds.y + bounds.h / 2.0;
-        if ((row ? world.x : world.y) > center) ++index;
-    }
-    if (index == current) {
-        session_.cancelPreview();
+void Editor::startMove(Vec2 world) {
+    const Id hit = pickAt(hitTest(session_.document(), world, false, activeMode_));
+    if (hit.isNil()) {
+        startMarquee();
         return;
     }
-    const std::string before = index > 0 ? flow[index - 1]->order : "";
-    const std::optional<std::string_view> after =
-        index < flow.size() ? std::optional<std::string_view>{flow[index]->order} : std::nullopt;
-    session_.preview(MoveNode{target_, parent.id, keyBetween(before, after)});
+    if (modifiers_.shift) {
+        toggleSelection(hit);
+        return;
+    }
+    if (!isSelected(hit)) {
+        select(hit);
+    }
+    beginMoving();
+}
+
+void Editor::beginMoving() {
+    const Document& document = session_.document();
+    moving_.clear();
+    for (const Id& id : selection_) {
+        const Node* node = document.find(id);
+        if (!node || node->locked) continue;
+        bool insideSelected = false;
+        for (const Node* p = document.find(node->parent); p && !insideSelected; p = document.find(p->parent)) {
+            insideSelected = isSelected(p->id);
+        }
+        if (insideSelected) continue;
+        const Rect bounds = *worldBounds(document, id, activeMode_);
+        moving_.push_back({id, {bounds.x, bounds.y}});
+    }
+    if (!moving_.empty()) {
+        gesture_ = Gesture::Move;
+    }
 }
 
 void Editor::updateMove(Vec2 world) {
-    if (reorder_) {
-        updateReorder(world);
-        return;
-    }
+    session_.cancelPreview();
+    const Document& document = session_.document();
     Vec2 delta = world - downWorld_;
     if (modifiers_.shift) {
         if (std::abs(delta.x) >= std::abs(delta.y)) {
@@ -455,10 +715,147 @@ void Editor::updateMove(Vec2 world) {
             delta.x = 0.0;
         }
     }
-    NodePatch patch;
-    patch.x = snap(targetStart_.x + delta.x) - parentOrigin_.x;
-    patch.y = snap(targetStart_.y + delta.y) - parentOrigin_.y;
-    session_.preview(SetProps{target_, patch});
+
+    std::unordered_set<Id> excluded;
+    for (const Moving& m : moving_) excluded.insert(m.id);
+    const Id container = frameAt(document, world, activeMode_, excluded);
+    const Node* target = document.find(container);
+    const Vec2 origin = originOf(container);
+
+    std::vector<OpBody> ops;
+    if (target && target->layout.type != LayoutType::None) {
+        const bool row = target->layout.type == LayoutType::Row;
+        std::vector<const Node*> flow;
+        for (const Id& id : document.children(container)) {
+            const Node* child = document.find(id);
+            if (!excluded.contains(id) && child->visible && !child->absolute) flow.push_back(child);
+        }
+        std::size_t index = 0;
+        for (const Node* sibling : flow) {
+            const Rect bounds = *worldBounds(document, sibling->id, activeMode_);
+            const double center = row ? bounds.x + bounds.w / 2.0 : bounds.y + bounds.h / 2.0;
+            if ((row ? world.x : world.y) > center) ++index;
+        }
+        std::string before = index > 0 ? flow[index - 1]->order : "";
+        const std::optional<std::string> after =
+            index < flow.size() ? std::optional<std::string>{flow[index]->order} : std::nullopt;
+
+        bool changed = false;
+        for (const Moving& m : moving_) {
+            const Node& node = *document.find(m.id);
+            if (node.absolute && node.parent == container) {
+                NodePatch patch;
+                patch.x = snap(m.start.x + delta.x) - origin.x;
+                patch.y = snap(m.start.y + delta.y) - origin.y;
+                ops.push_back(SetProps{m.id, patch});
+                changed = true;
+                continue;
+            }
+            const std::string key = keyBetween(before, after ? std::optional<std::string_view>{*after} : std::nullopt);
+            before = key;
+            ops.push_back(MoveNode{m.id, container, key});
+            changed = changed || node.parent != container;
+        }
+        if (!changed && moving_.size() == 1) {
+            std::size_t current = 0;
+            for (const Id& id : document.children(container)) {
+                if (id == moving_[0].id) break;
+                const Node* child = document.find(id);
+                if (child->visible && !child->absolute) ++current;
+            }
+            if (current == index) ops.clear();
+        }
+    } else {
+        const auto& siblings = document.children(container);
+        std::string last;
+        for (const Id& id : siblings) {
+            if (!excluded.contains(id)) last = document.find(id)->order;
+        }
+        for (const Moving& m : moving_) {
+            const Node& node = *document.find(m.id);
+            if (node.parent != container) {
+                last = keyBetween(last, std::nullopt);
+                ops.push_back(MoveNode{m.id, container, last});
+            }
+            NodePatch patch;
+            patch.x = snap(m.start.x + delta.x) - origin.x;
+            patch.y = snap(m.start.y + delta.y) - origin.y;
+            ops.push_back(SetProps{m.id, patch});
+        }
+    }
+
+    if (ops.empty()) {
+        session_.cancelPreview();
+    } else {
+        session_.preview(ops);
+    }
+}
+
+void Editor::startMarquee() {
+    gesture_ = Gesture::Marquee;
+    marqueeBase_ = modifiers_.shift ? selection_ : std::vector<Id>{};
+    if (!modifiers_.shift) {
+        clearSelection();
+    }
+}
+
+void Editor::updateMarquee(Vec2 world) {
+    const Rect area{std::min(downWorld_.x, world.x), std::min(downWorld_.y, world.y), std::abs(world.x - downWorld_.x),
+                    std::abs(world.y - downWorld_.y)};
+    marquee_ = area;
+    std::vector<Id> picked = marqueeBase_;
+    const Document& document = session_.document();
+    for (const Id& id : document.children(Id{})) {
+        const Node& node = *document.find(id);
+        if (!node.visible || node.locked) continue;
+        if (worldBounds(document, id, activeMode_)->intersects(area) &&
+            std::find(picked.begin(), picked.end(), id) == picked.end()) {
+            picked.push_back(id);
+        }
+    }
+    setSelection(std::move(picked));
+    touch();
+}
+
+bool Editor::isSelected(const Id& id) const {
+    return std::find(selection_.begin(), selection_.end(), id) != selection_.end();
+}
+
+void Editor::toggleSelection(const Id& id) {
+    if (!exists(id)) {
+        return;
+    }
+    if (isSelected(id)) {
+        std::erase(selection_, id);
+    } else {
+        selection_.push_back(id);
+    }
+    touch();
+}
+
+void Editor::setSelection(std::vector<Id> ids) {
+    std::erase_if(ids, [this](const Id& id) { return !exists(id); });
+    if (ids != selection_) {
+        selection_ = std::move(ids);
+        touch();
+    }
+}
+
+void Editor::setFrameLabelSizes(std::unordered_map<Id, Vec2> sizes) {
+    labelSizes_ = std::move(sizes);
+}
+
+Id Editor::frameLabelAt(Vec2 screen) const {
+    const Document& document = session_.document();
+    for (const auto& [id, size] : labelSizes_) {
+        const Node* node = document.find(id);
+        if (!node || !node->visible || node->locked || !node->parent.isNil()) continue;
+        const Rect box = document.box(id, activeMode_);
+        const Vec2 corner = camera_.toScreen({box.x, box.y});
+        const Rect label{corner.x, corner.y - kLabelGapPx - size.y, std::min(size.x, box.w * camera_.zoom()), size.y};
+        if (label.contains(screen)) return id;
+    }
+    return {};
 }
 
 void Editor::finish() {
@@ -479,6 +876,10 @@ void Editor::finish() {
     case Gesture::Move:
     case Gesture::Resize:
         session_.commitPreview();
+        break;
+    case Gesture::Marquee:
+        marquee_.reset();
+        touch();
         break;
     case Gesture::None:
         break;
@@ -539,6 +940,7 @@ std::string_view Editor::cursor() const {
     case Gesture::Resize:
         return resizeCursor(handle_);
     case Gesture::Move:
+    case Gesture::Marquee:
         return "default";
     case Gesture::None:
         break;
@@ -629,10 +1031,19 @@ void Editor::updateResize(Vec2 world) {
 }
 
 void Editor::pruneSelection() {
-    const auto removed = std::erase_if(selection_, [this](const Id& id) { return !session_.document().find(id); });
+    const auto removed = std::erase_if(selection_, [this](const Id& id) { return !exists(id); });
     if (removed > 0) {
         touch();
     }
+}
+
+bool Editor::exists(const Id& id) const {
+    return session_.document().view(id) != nullptr;
+}
+
+bool Editor::isCopy(const Id& id) const {
+    const Id owner = session_.document().ownerOf(id);
+    return !owner.isNil() && owner != id;
 }
 
 } // namespace vc

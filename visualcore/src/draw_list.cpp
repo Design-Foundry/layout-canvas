@@ -57,8 +57,8 @@ public:
 private:
     void collect(const Id& parent, Vec2 origin, const Rect& clip, double opacity) {
         const Rect visibleArea = intersect(view_, clip);
-        for (const Id& id : document_.children(parent)) {
-            const Node& node = *document_.find(id);
+        for (const Id& id : document_.viewChildren(parent)) {
+            const Node& node = *document_.view(id);
             if (!node.visible) {
                 continue;
             }
@@ -91,7 +91,7 @@ private:
                 }
             }
 
-            if (canHaveChildren(node.type)) {
+            if (isContainer(node.type)) {
                 const Rect childClip = node.clipContent ? intersect(clip, box) : clip;
                 if (!node.clipContent || childClip.intersects(view_)) {
                     collect(id, {box.x, box.y}, childClip, alpha);

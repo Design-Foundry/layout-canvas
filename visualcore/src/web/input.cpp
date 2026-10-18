@@ -17,7 +17,7 @@ Vec2 positionOf(const EmscriptenMouseEvent& e) {
 }
 
 Modifiers modifiersOf(const EmscriptenMouseEvent& e) {
-    return {e.shiftKey, e.altKey};
+    return {e.shiftKey, e.altKey, e.ctrlKey || e.metaKey};
 }
 
 bool onMouseDown(int, const EmscriptenMouseEvent* e, void* user) {
@@ -27,6 +27,11 @@ bool onMouseDown(int, const EmscriptenMouseEvent* e, void* user) {
 
 bool onMouseMove(int, const EmscriptenMouseEvent* e, void* user) {
     editorFrom(user).pointerMove(positionOf(*e), modifiersOf(*e));
+    return true;
+}
+
+bool onDoubleClick(int, const EmscriptenMouseEvent* e, void* user) {
+    editorFrom(user).doubleClick(positionOf(*e));
     return true;
 }
 
@@ -48,7 +53,7 @@ bool onWheel(int, const EmscriptenWheelEvent* e, void* user) {
 }
 
 bool onKey(int, const EmscriptenKeyboardEvent* e, void* user) {
-    editorFrom(user).setModifiers({e->shiftKey, e->altKey});
+    editorFrom(user).setModifiers({e->shiftKey, e->altKey, e->ctrlKey || e->metaKey});
     return false;
 }
 
@@ -59,6 +64,7 @@ void attachInput(const char* canvasSelector, Editor& editor) {
     emscripten_set_mousemove_callback(canvasSelector, &editor, true, onMouseMove);
     emscripten_set_mouseup_callback(canvasSelector, &editor, true, onMouseUp);
     emscripten_set_mouseleave_callback(canvasSelector, &editor, true, onMouseUp);
+    emscripten_set_dblclick_callback(canvasSelector, &editor, true, onDoubleClick);
     emscripten_set_wheel_callback(canvasSelector, &editor, true, onWheel);
     emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, &editor, true, onKey);
     emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, &editor, true, onKey);

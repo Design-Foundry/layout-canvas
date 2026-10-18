@@ -89,6 +89,7 @@ else()
 
         add_executable(vc_tests
             tests/test_camera.cpp
+            tests/test_components.cpp
             tests/test_document.cpp
             tests/test_draw_list.cpp
             tests/test_editor.cpp

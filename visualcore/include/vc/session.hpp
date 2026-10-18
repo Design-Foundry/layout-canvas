@@ -40,10 +40,12 @@ public:
     /// Shows `op` in the document without recording it, replacing the previous preview. Used while a
     /// gesture is in progress so that only its final state becomes an op.
     bool preview(const OpBody& op);
+    /// Shows several ops as one preview. All apply or none do; they commit as one undo step.
+    bool preview(const std::vector<OpBody>& ops);
     /// Turns the current preview into a regular edit.
     bool commitPreview();
     void cancelPreview();
-    [[nodiscard]] bool hasPreview() const { return preview_.has_value(); }
+    [[nodiscard]] bool hasPreview() const { return !preview_.empty(); }
 
     /// Increases whenever the document changes. Lets the UI skip unchanged frames.
     [[nodiscard]] std::uint64_t revision() const { return revision_; }
@@ -70,8 +72,8 @@ private:
     Step open_;
     int depth_ = 0;
     std::vector<Op> outbox_;
-    std::optional<OpBody> preview_;
-    std::optional<OpBody> previewInverse_;
+    std::vector<OpBody> preview_;
+    std::vector<OpBody> previewInverse_;
     std::uint64_t revision_ = 0;
     std::uint64_t structureRevision_ = 0;
     std::uint64_t tokenRevision_ = 0;

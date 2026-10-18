@@ -507,3 +507,125 @@ TEST_CASE("locked nodes can't be picked on the canvas or resized") {
     f.editor.pointerUp();
     REQUIRE(f.editor.selection().empty());
 }
+
+namespace {
+
+Fixture withTwoRects() {
+    Fixture f;
+    f.editor.setTool(Tool::Rect);
+    f.drag({0, 0}, {50, 50});
+    f.editor.setTool(Tool::Rect);
+    f.drag({100, 0}, {150, 50});
+    f.editor.clearSelection();
+    return f;
+}
+
+} // namespace
+
+TEST_CASE("shift-click adds and removes nodes from the selection") {
+    Fixture f = withTwoRects();
+    f.editor.pointerDown({25, 25}, PointerButton::Primary);
+    f.editor.pointerUp();
+    f.editor.pointerDown({125, 25}, PointerButton::Primary, {.shift = true});
+    f.editor.pointerUp();
+    REQUIRE(f.editor.selection().size() == 2);
+
+    f.editor.pointerDown({25, 25}, PointerButton::Primary, {.shift = true});
+    f.editor.pointerUp();
+    REQUIRE(f.editor.selection().size() == 1);
+}
+
+TEST_CASE("a marquee from empty canvas selects the top-level nodes it touches") {
+    Fixture f = withTwoRects();
+    f.editor.pointerDown({-20, 60}, PointerButton::Primary);
+    f.editor.pointerMove({60, 40});
+    REQUIRE(f.editor.marquee().has_value());
+    REQUIRE(f.editor.selection().size() == 1);
+    f.editor.pointerMove({120, 40});
+    REQUIRE(f.editor.selection().size() == 2);
+    f.editor.pointerUp();
+    REQUIRE_FALSE(f.editor.marquee().has_value());
+    REQUIRE(f.session.takeOutbox().size() == 2);
+}
+
+TEST_CASE("dragging moves every selected node as one undo step") {
+    Fixture f = withTwoRects();
+    f.editor.setSelection({f.session.document().children({}).at(0), f.session.document().children({}).at(1)});
+    (void)f.session.takeOutbox();
+
+    f.drag({25, 25}, {45, 35});
+    const auto& top = f.session.document().children({});
+    REQUIRE(f.session.document().find(top[0])->x == 20);
+    REQUIRE(f.session.document().find(top[1])->x == 120);
+    REQUIRE(f.session.document().find(top[1])->y == 10);
+
+    f.editor.undo();
+    REQUIRE(f.session.document().find(top[0])->x == 0);
+    REQUIRE(f.session.document().find(top[1])->x == 100);
+}
+
+TEST_CASE("dropping a node over a frame moves it inside, keeping its place on the canvas") {
+    Fixture f;
+    f.editor.setTool(Tool::Frame);
+    f.drag({200, 200}, {400, 400});
+    const vc::Id frame = f.editor.selection().at(0);
+    f.editor.setTool(Tool::Rect);
+    f.drag({0, 0}, {40, 40});
+    const vc::Id rect = f.editor.selection().at(0);
+
+    f.drag({20, 20}, {270, 280});
+    const Node& moved = *f.session.document().find(rect);
+    REQUIRE(moved.parent == frame);
+    REQUIRE(moved.x == 50);
+    REQUIRE(moved.y == 60);
+
+    f.drag({270, 280}, {20, 20});
+    REQUIRE(f.session.document().find(rect)->parent.isNil());
+    REQUIRE(f.session.document().find(rect)->x == 0);
+}
+
+TEST_CASE("dropping into an auto-layout frame inserts at the pointer's position") {
+    Fixture f;
+    vc::Node row;
+    row.id = f.session.newId();
+    row.type = NodeType::Frame;
+    row.order = "a0";
+    row.w = 300;
+    row.h = 100;
+    row.layout.type = vc::LayoutType::Row;
+    f.session.edit(vc::CreateNode{row});
+    for (const char* order : {"a0", "a1"}) {
+        vc::Node item;
+        item.id = f.session.newId();
+        item.parent = row.id;
+        item.order = order;
+        item.w = 50;
+        item.h = 50;
+        f.session.edit(vc::CreateNode{item});
+    }
+    f.editor.setTool(Tool::Rect);
+    f.drag({0, 200}, {30, 230});
+    const vc::Id loose = f.editor.selection().at(0);
+
+    f.drag({15, 215}, {60, 25});
+    const auto& children = f.session.document().children(row.id);
+    REQUIRE(children.size() == 3);
+    REQUIRE(children[1] == loose);
+    REQUIRE(f.session.document().box(loose).x == 50);
+}
+
+TEST_CASE("pressing a frame label selects the frame and drags it") {
+    Fixture f;
+    f.editor.setTool(Tool::Frame);
+    f.drag({100, 100}, {300, 300});
+    const vc::Id frame = f.editor.selection().at(0);
+    f.editor.clearSelection();
+    f.editor.setFrameLabelSizes({{frame, {60, 14}}});
+
+    REQUIRE(f.editor.frameLabelAt({120, 90}) == frame);
+    REQUIRE(f.editor.frameLabelAt({120, 120}).isNil());
+
+    f.drag({120, 90}, {150, 90});
+    REQUIRE(f.editor.isSelected(frame));
+    REQUIRE(f.session.document().find(frame)->x == 130);
+}

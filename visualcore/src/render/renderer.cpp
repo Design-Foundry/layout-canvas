@@ -47,6 +47,7 @@ struct GpuItem {
 
 constexpr double kUnbounded = 1e30;
 constexpr Oklch kSelectionColor{0.62, 0.19, 255.0};
+constexpr Oklch kComponentColor{0.58, 0.22, 300.0};
 constexpr Rect kNoClip{-kUnbounded, -kUnbounded, 2 * kUnbounded, 2 * kUnbounded};
 
 constexpr double kMinGridSpacingPx = 8.0;
@@ -410,10 +411,23 @@ void Renderer::State::applyCursor() {
 
 void Renderer::State::addSelectionOutlines() {
     const Color color = toSrgb(kSelectionColor);
+    if (const auto& marquee = editor.marquee()) {
+        Color tint = color;
+        tint.a = 0.12f;
+        drawItems.push_back({DrawKind::Fill, false, *marquee, {*marquee, {}}, {}, tint, kNoClip});
+        drawItems.push_back({DrawKind::Outline, false, *marquee, {*marquee, {}}, {}, color, kNoClip});
+    }
     const Id& mode = editor.activeMode();
+    const Color componentColor = toSrgb(kComponentColor);
+    const auto colorOf = [&](const Id& id) {
+        const Node* node = document.view(id);
+        const bool component = node && (node->type == NodeType::Component || node->type == NodeType::Instance ||
+                                        document.ownerOf(id) != id);
+        return component ? componentColor : color;
+    };
     for (const Id& id : editor.selection()) {
         if (const auto bounds = worldBounds(document, id, mode)) {
-            drawItems.push_back({DrawKind::Outline, false, *bounds, {*bounds, {}}, {}, color, kNoClip});
+            drawItems.push_back({DrawKind::Outline, false, *bounds, {*bounds, {}}, {}, colorOf(id), kNoClip});
         }
     }
 
@@ -424,11 +438,12 @@ void Renderer::State::addSelectionOutlines() {
     const double outer = Editor::kHandleSizePx / camera.zoom();
     const double inner = outer - 2.0 / camera.zoom();
     const Color white{1.0f, 1.0f, 1.0f, 1.0f};
+    const Color handle = editor.selection().size() == 1 ? colorOf(editor.selection()[0]) : color;
     for (double x : {bounds->x, bounds->x + bounds->w}) {
         for (double y : {bounds->y, bounds->y + bounds->h}) {
             const Rect border{x - outer / 2, y - outer / 2, outer, outer};
             const Rect fill{x - inner / 2, y - inner / 2, inner, inner};
-            drawItems.push_back({DrawKind::Fill, false, border, {border, {}}, {}, color, kNoClip});
+            drawItems.push_back({DrawKind::Fill, false, border, {border, {}}, {}, handle, kNoClip});
             drawItems.push_back({DrawKind::Fill, false, fill, {fill, {}}, {}, white, kNoClip});
         }
     }

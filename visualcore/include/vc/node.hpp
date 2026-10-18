@@ -13,7 +13,9 @@ enum class NodeType {
     Frame,
     Rect,
     Ellipse,
-    /// Reserved for component instances from a Design Foundry release.
+    /// A frame that defines a component: its children are the component's anatomy.
+    Component,
+    /// A copy of a component that follows it, with its own size and overrides.
     Instance,
 };
 
@@ -76,6 +78,45 @@ struct SizeLimits {
     friend bool operator==(const SizeLimits&, const SizeLimits&) = default;
 };
 
+/// A partial update of a node's properties. Unset fields stay as they are. Grouped properties
+/// (stroke, shadows, layout, limits, corner radii) are replaced whole.
+struct NodePatch {
+    std::optional<std::string> name;
+    std::optional<double> x;
+    std::optional<double> y;
+    std::optional<double> w;
+    std::optional<double> h;
+    std::optional<Value<Oklch>> fill;
+    std::optional<bool> fillVisible;
+    std::optional<Value<double>> cornerRadius;
+    std::optional<std::array<std::optional<Value<double>>, 4>> cornerRadii;
+    std::optional<Value<Stroke>> stroke;
+    std::optional<Value<std::vector<Shadow>>> shadows;
+    std::optional<Value<double>> opacity;
+    std::optional<bool> visible;
+    std::optional<bool> locked;
+    std::optional<bool> clipContent;
+    std::optional<Layout> layout;
+    std::optional<Sizing> widthSizing;
+    std::optional<Sizing> heightSizing;
+    std::optional<SizeLimits> limits;
+    std::optional<bool> absolute;
+    /// Only between frame and component.
+    std::optional<NodeType> type;
+    /// For instances: swaps the component they copy.
+    std::optional<Id> component;
+
+    friend bool operator==(const NodePatch&, const NodePatch&) = default;
+};
+
+/// An instance's changes to one node of its component.
+struct Override {
+    Id node;
+    NodePatch patch;
+
+    friend bool operator==(const Override&, const Override&) = default;
+};
+
 struct Node {
     Id id;
     NodeType type = NodeType::Rect;
@@ -113,43 +154,29 @@ struct Node {
     /// Inside an auto-layout parent, keeps its own position instead of joining the flow.
     bool absolute = false;
 
+    /// For instances: the component they copy.
+    Id component;
+    /// For instances: property changes to the component's nodes, sorted by node id.
+    std::vector<Override> overrides;
+
     friend bool operator==(const Node&, const Node&) = default;
 };
 
-/// A partial update of a node's properties. Unset fields stay as they are. Grouped properties
-/// (stroke, shadows, layout, limits, corner radii) are replaced whole.
-struct NodePatch {
-    std::optional<std::string> name;
-    std::optional<double> x;
-    std::optional<double> y;
-    std::optional<double> w;
-    std::optional<double> h;
-    std::optional<Value<Oklch>> fill;
-    std::optional<bool> fillVisible;
-    std::optional<Value<double>> cornerRadius;
-    std::optional<std::array<std::optional<Value<double>>, 4>> cornerRadii;
-    std::optional<Value<Stroke>> stroke;
-    std::optional<Value<std::vector<Shadow>>> shadows;
-    std::optional<Value<double>> opacity;
-    std::optional<bool> visible;
-    std::optional<bool> locked;
-    std::optional<bool> clipContent;
-    std::optional<Layout> layout;
-    std::optional<Sizing> widthSizing;
-    std::optional<Sizing> heightSizing;
-    std::optional<SizeLimits> limits;
-    std::optional<bool> absolute;
-
-    friend bool operator==(const NodePatch&, const NodePatch&) = default;
-};
 
 /// Applies `patch` to `node` and returns the patch that restores the previous values.
 NodePatch applyPatch(Node& node, const NodePatch& patch);
 
+/// `base` with every field `top` sets taken from `top`.
+[[nodiscard]] NodePatch mergePatch(const NodePatch& base, const NodePatch& top);
+
 /// The patch that sets every property of `node`, for writing a whole node.
 [[nodiscard]] NodePatch fullPatch(const Node& node);
 
+/// Whether a node of this type can own children in the document.
 [[nodiscard]] bool canHaveChildren(NodeType type);
+/// Whether a node lays out, clips and draws children in the expanded tree: frames, components and
+/// instances (whose children are copies of their component's).
+[[nodiscard]] bool isContainer(NodeType type);
 
 enum class TokenFamilyHint { Color, Dimension, Opacity, Border, Shadow };
 

@@ -22,10 +22,10 @@ namespace {
 
 bool changesStructure(const OpBody& op) {
     if (const auto* set = std::get_if<SetProps>(&op)) {
-        return set->patch.name || set->patch.visible;
+        return set->patch.name || set->patch.visible || set->patch.locked || set->patch.type;
     }
     return std::holds_alternative<CreateNode>(op) || std::holds_alternative<DeleteNode>(op) ||
-           std::holds_alternative<MoveNode>(op);
+           std::holds_alternative<MoveNode>(op) || std::holds_alternative<SetOverride>(op);
 }
 
 bool changesTokens(const OpBody& op) {
@@ -110,30 +110,44 @@ bool Session::applyRemote(const OpBody& op) {
 }
 
 bool Session::preview(const OpBody& op) {
+    return preview(std::vector<OpBody>{op});
+}
+
+bool Session::preview(const std::vector<OpBody>& ops) {
     cancelPreview();
-    previewInverse_ = apply(op);
-    if (!previewInverse_) {
-        return false;
+    for (const OpBody& op : ops) {
+        auto inverse = apply(op);
+        if (!inverse) {
+            cancelPreview();
+            return false;
+        }
+        previewInverse_.push_back(std::move(*inverse));
     }
-    preview_ = op;
-    return true;
+    preview_ = ops;
+    return !ops.empty();
 }
 
 bool Session::commitPreview() {
-    if (!preview_) {
+    if (preview_.empty()) {
         return false;
     }
-    const OpBody op = std::move(*preview_);
+    const std::vector<OpBody> ops = std::move(preview_);
     cancelPreview();
-    return edit(op);
+    begin();
+    bool applied = true;
+    for (const OpBody& op : ops) {
+        applied = edit(op) && applied;
+    }
+    commit();
+    return applied;
 }
 
 void Session::cancelPreview() {
-    if (previewInverse_) {
-        apply(*previewInverse_);
+    for (auto it = previewInverse_.rbegin(); it != previewInverse_.rend(); ++it) {
+        apply(*it);
     }
-    preview_.reset();
-    previewInverse_.reset();
+    preview_.clear();
+    previewInverse_.clear();
 }
 
 std::vector<Op> Session::takeOutbox() {

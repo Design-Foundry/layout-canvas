@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <deque>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -48,6 +49,21 @@ public:
         visit(Id{}, fn);
     }
 
+    /// The expanded tree: the document's nodes plus a copy of each instance's component inside it.
+    /// Keys are node ids for real nodes and stable derived ids for copies. The effective node has
+    /// overrides applied; instances appear as frames. Rebuilt lazily after each edit.
+    [[nodiscard]] const Node* view(const Id& key) const;
+    [[nodiscard]] const std::vector<Id>& viewChildren(const Id& key) const;
+    /// The real node a key belongs to: itself, or the outermost instance it was copied into.
+    [[nodiscard]] Id ownerOf(const Id& key) const;
+    /// The document node a key was copied from (itself for real nodes).
+    [[nodiscard]] Id sourceOf(const Id& key) const;
+    /// The node id an override on the owning instance uses for a copy: the source id for nodes of
+    /// the instance's own component, a path through nested instances otherwise. Nil for real nodes.
+    [[nodiscard]] Id overrideKeyOf(const Id& key) const;
+    /// True if an instance uses `component`.
+    [[nodiscard]] bool isComponentUsed(const Id& component) const;
+
     /// The node's box relative to its parent after auto layout, in `mode`. Cached until the next
     /// edit or a different mode.
     [[nodiscard]] Rect box(const Id& id, const Id& mode = kDefaultModeId) const;
@@ -90,6 +106,25 @@ private:
     std::optional<OpBody> createMode(const CreateMode& op);
     std::optional<OpBody> deleteMode(const DeleteMode& op);
     std::optional<OpBody> replaceMode(const ReplaceMode& op);
+    std::optional<OpBody> setOverride(const SetOverride& op);
+
+    /// The component `id` sits in (itself if it is one), or nil.
+    [[nodiscard]] Id enclosingComponent(const Id& id) const;
+    /// True if `component`'s subtree contains an instance of `target`, directly or through other
+    /// instances.
+    [[nodiscard]] bool componentUses(const Id& component, const Id& target) const;
+    /// True if placing an instance of `used` under `parent` would make a component contain itself.
+    [[nodiscard]] bool wouldCycle(const Id& parent, const Id& used) const;
+    [[nodiscard]] bool isValidInstance(const Node& node) const;
+    void buildTree() const;
+    /// One instance's overrides as seen from inside it: `prefix` is the path of the nested instance
+    /// being expanded, nil within the instance's own component.
+    struct OverrideLayer {
+        const std::vector<Override>* overrides = nullptr;
+        Id prefix;
+    };
+    void expand(const Id& source, const Id& key, const Id& parent, const Id& owner,
+                const std::vector<OverrideLayer>& layers, int depth) const;
 
     [[nodiscard]] bool isValidToken(const Token& token) const;
     [[nodiscard]] bool isValidNodeRefs(const Node& node) const;
@@ -115,6 +150,17 @@ private:
     std::unordered_map<Id, std::vector<Id>> children_;
     std::unordered_map<Id, Token> tokens_;
     std::unordered_map<Id, Mode> modes_;
+
+    struct TreeEntry {
+        const Node* node = nullptr;
+        Id source;
+        Id owner;
+        Id overrideKey;
+    };
+    mutable std::unordered_map<Id, TreeEntry> tree_;
+    mutable std::unordered_map<Id, std::vector<Id>> treeChildren_;
+    mutable std::deque<Node> treeNodes_;
+    mutable bool treeDirty_ = true;
 
     mutable std::unordered_map<Id, Rect> layout_;
     mutable Id layoutMode_;

@@ -64,8 +64,16 @@ struct ReplaceMode {
     friend bool operator==(const ReplaceMode&, const ReplaceMode&) = default;
 };
 
+/// Replaces an instance's override of one component node. An empty patch removes it.
+struct SetOverride {
+    Id instance;
+    Id node;
+    NodePatch patch;
+    friend bool operator==(const SetOverride&, const SetOverride&) = default;
+};
+
 using OpBody = std::variant<CreateNode, DeleteNode, SetProps, MoveNode, CreateToken, DeleteToken, ReplaceToken,
-                            CreateMode, DeleteMode, ReplaceMode>;
+                            CreateMode, DeleteMode, ReplaceMode, SetOverride>;
 
 /// An edit as it travels to the server: a client-generated id plus the change.
 struct Op {
