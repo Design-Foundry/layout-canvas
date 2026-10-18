@@ -14,7 +14,10 @@ export const EDITOR_TOOLS: readonly EditorToolOption[] = [
   { id: 'hand', label: 'Hand', icon: 'pan_tool' },
 ];
 
-export type LayerKind = 'frame' | 'rectangle' | 'ellipse' | 'text' | 'image' | 'instance';
+export type LayerKind = 'frame' | 'rectangle' | 'ellipse' | 'text' | 'image' | 'component' | 'instance';
+
+/** A component action from the inspector, applied to the selected node. */
+export type ComponentCommand = 'createInstance' | 'goToMain' | 'detach' | 'resetOverrides';
 
 /** One visible row of the layers panel, flattened from the document tree. */
 export interface LayerRow {
@@ -33,5 +36,6 @@ export const LAYER_ICONS: Readonly<Record<LayerKind, string>> = {
   ellipse: 'radio_button_unchecked',
   text: 'title',
   image: 'image',
-  instance: 'widgets',
+  component: 'widgets',
+  instance: 'diamond',
 };

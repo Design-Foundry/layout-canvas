@@ -19,12 +19,14 @@ import {
   TokenRow,
 } from '@canvas/bridge';
 import {
+  LucentButton,
   LucentCheckbox,
   LucentIconButton,
   LucentReferenceTag,
   LucentSegmentedControl,
   LucentSelect,
 } from '@design-foundry/lucent';
+import { ComponentCommand } from './editor-model';
 import { BindableFamily, ColorField, PickRequest, ValueField, isToken } from './inspector-fields';
 import { NumberField } from './number-field';
 import { TokenPicker } from './token-picker';
@@ -104,6 +106,7 @@ function replaceAt<T>(items: Four<T>, index: number, value: T): Four<T> {
   imports: [
     ReactiveFormsModule,
     CdkConnectedOverlay,
+    LucentButton,
     LucentCheckbox,
     LucentIconButton,
     LucentReferenceTag,
@@ -130,6 +133,7 @@ export class InspectorPanel {
   readonly commitPreview = output<void>();
   /** The continuous control was abandoned: the last preview is dropped. */
   readonly cancelPreview = output<void>();
+  readonly componentCommand = output<ComponentCommand>();
 
   protected readonly positions = PICKER_POSITIONS;
   protected readonly sideLabels = SIDE_LABELS;

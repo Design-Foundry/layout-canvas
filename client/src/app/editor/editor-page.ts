@@ -2,6 +2,7 @@ import {
   Component,
   DestroyRef,
   afterNextRender,
+  afterRenderEffect,
   computed,
   effect,
   inject,
@@ -28,7 +29,7 @@ import { LucentButton, LucentTab, LucentTabList } from '@design-foundry/lucent';
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';
-import { EditorTool, LayerKind, LayerRow } from './editor-model';
+import { ComponentCommand, EditorTool, LayerKind, LayerRow } from './editor-model';
 import { EditorToolbar } from './editor-toolbar';
 import { InspectorPanel } from './inspector-panel';
 import { LayersPanel } from './layers-panel';
@@ -59,6 +60,7 @@ const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
   frame: 'frame',
   rect: 'rectangle',
   ellipse: 'ellipse',
+  component: 'component',
   instance: 'instance',
 };
 
@@ -114,6 +116,7 @@ export class EditorPage {
 
   protected readonly core = signal<VisualCore | undefined>(undefined);
   private destroyed = false;
+  private labelSizesKey = '';
 
   constructor() {
     this.destroyRef.onDestroy(() => (this.destroyed = true));
@@ -126,6 +129,21 @@ export class EditorPage {
       if (core) core.tool = this.tool();
     });
     afterNextRender(() => void this.start());
+    afterRenderEffect(() => {
+      this.frameLabels();
+      const core = this.core();
+      if (!core) return;
+      const sizes = [...document.querySelectorAll<HTMLElement>('.frame-label')].map((el) => ({
+        id: el.dataset['id'] ?? '',
+        w: el.offsetWidth,
+        h: el.offsetHeight,
+      }));
+      const key = sizes.map((s) => `${s.id}:${s.w}:${s.h}`).join(';');
+      if (key !== this.labelSizesKey) {
+        this.labelSizesKey = key;
+        core.setFrameLabelSizes(sizes);
+      }
+    });
   }
 
   protected async rename(name: string): Promise<void> {
@@ -153,6 +171,28 @@ export class EditorPage {
 
   protected commitPreview(): void {
     this.core()?.commitPreview();
+  }
+
+  protected runComponentCommand(command: ComponentCommand): void {
+    const core = this.core();
+    const node = this.selectedNode();
+    if (!core || !node) return;
+    switch (command) {
+      case 'createInstance':
+        core.createInstance(node.id);
+        break;
+      case 'goToMain': {
+        const canvas = document.querySelector<HTMLCanvasElement>('#canvas');
+        if (node.component && canvas) core.reveal(node.component, canvas.clientWidth, canvas.clientHeight);
+        break;
+      }
+      case 'detach':
+        core.detachInstance(node.id);
+        break;
+      case 'resetOverrides':
+        core.resetOverrides(node.id);
+        break;
+    }
   }
 
   protected addToken(type: TokenType): void {
@@ -199,6 +239,11 @@ export class EditorPage {
       else core.undo();
     } else if (command && key === 'y') {
       core.redo();
+    } else if (command && event.altKey && key === 'k') {
+      core.createComponent();
+    } else if (command && event.altKey && key === 'b') {
+      const node = this.selectedNode();
+      if (node?.type === 'instance') core.detachInstance(node.id);
     } else if (!command && (key === 'delete' || key === 'backspace')) {
       core.deleteSelection();
     } else if (!command && NUDGE_DIRECTIONS[key]) {

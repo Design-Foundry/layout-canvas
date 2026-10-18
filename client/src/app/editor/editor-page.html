@@ -2,7 +2,9 @@
   class="toolbar"
   [name]="name()"
   [(tool)]="tool"
+  [canCreateComponent]="selectedIds().size > 0"
   (rename)="rename($event)"
+  (createComponent)="core()?.createComponent()"
 />
 
 <aside class="layers side">
@@ -16,6 +18,7 @@
       [layers]="layers()"
       [selectedIds]="selectedIds()"
       (activate)="select($event)"
+      (toggleSelect)="core()?.toggleSelection($event)"
       (rename)="setProps($event.id, { name: $event.name })"
       (visibility)="setProps($event.id, { visible: $event.visible })"
       (lock)="setProps($event.id, { locked: $event.locked })"
@@ -42,17 +45,17 @@
   <div class="labels">
     @for (label of frameLabels(); track label.id) {
       @if (label.w > 24) {
-        <button
-          type="button"
+        <span
           class="frame-label typography-caption"
+          [attr.data-id]="label.id"
           [class.selected]="selectedIds().has(label.id)"
+          [class.component]="label.type === 'component' || label.type === 'instance'"
           [style.left.px]="label.x"
           [style.top.px]="label.y"
           [style.max-width.px]="label.w"
-          (click)="select(label.id)"
         >
           {{ label.name }}
-        </button>
+        </span>
       }
     }
   </div>
@@ -85,6 +88,7 @@
     (previewEdit)="previewSelectedProps($event)"
     (commitPreview)="commitPreview()"
     (cancelPreview)="core()?.cancelPreview()"
+    (componentCommand)="runComponentCommand($event)"
   />
 }
 

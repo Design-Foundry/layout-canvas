@@ -43,7 +43,8 @@ export interface LayerLock {
         [icon]="icons[layer.kind]"
         [selected]="selectedIds().has(layer.id)"
         [style.padding-inline-start.px]="baseIndent + layer.depth * indent"
-        (activated)="activate.emit(layer.id)"
+        (click)="rowClick($event, layer.id)"
+        (keydown.enter)="activate.emit(layer.id)"
         (dblclick)="startRename(layer)"
       >
         @if (renamingId() === layer.id) {
@@ -103,6 +104,8 @@ export class LayersPanel {
   readonly layers = input.required<readonly LayerRow[]>();
   readonly selectedIds = input<ReadonlySet<string>>(new Set());
   readonly activate = output<string>();
+  /** Shift-click: add the layer to the selection or remove it. */
+  readonly toggleSelect = output<string>();
   readonly rename = output<LayerRename>();
   readonly visibility = output<LayerVisibility>();
   readonly lock = output<LayerLock>();
@@ -113,6 +116,14 @@ export class LayersPanel {
   protected readonly baseIndent = 8;
   protected readonly renamingId = signal<string | null>(null);
   protected readonly nameControl = new FormControl('', { nonNullable: true });
+
+  protected rowClick(event: MouseEvent, id: string): void {
+    if (event.shiftKey || event.metaKey || event.ctrlKey) {
+      this.toggleSelect.emit(id);
+    } else {
+      this.activate.emit(id);
+    }
+  }
 
   protected trackById(_: number, layer: LayerRow): string {
     return layer.id;

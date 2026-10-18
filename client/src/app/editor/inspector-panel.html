@@ -1,5 +1,41 @@
 <h2 class="title typography-label-md">Design</h2>
 @if (node(); as n) {
+  @if (n.type === 'component') {
+    <section class="section">
+      <h3 class="heading typography-caption">Component</h3>
+      <lucent-button variant="secondary" size="sm" (clicked)="componentCommand.emit('createInstance')">
+        Create instance
+      </lucent-button>
+    </section>
+  } @else if (n.type === 'instance') {
+    <section class="section">
+      <header class="section-header">
+        <h3 class="heading typography-caption">Instance</h3>
+        <div class="actions">
+          @if (n.overrides) {
+            <lucent-icon-button
+              icon="restart_alt"
+              size="sm"
+              variant="ghost"
+              ariaLabel="Reset overrides"
+              (clicked)="componentCommand.emit('resetOverrides')"
+            />
+          }
+          <lucent-icon-button
+            icon="link_off"
+            size="sm"
+            variant="ghost"
+            ariaLabel="Detach instance"
+            (clicked)="componentCommand.emit('detach')"
+          />
+        </div>
+      </header>
+      <lucent-button variant="secondary" size="sm" (clicked)="componentCommand.emit('goToMain')">
+        Go to {{ n.componentName }}
+      </lucent-button>
+    </section>
+  }
+
   <section class="section">
     <h3 class="heading typography-caption">Position</h3>
     <div class="pair">

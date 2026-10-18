@@ -40,14 +40,27 @@ import { EDITOR_TOOLS, EditorTool } from './editor-model';
         />
       }
     </div>
-    <div class="end"></div>
+    <div class="end">
+      <lucent-icon-button
+        icon="widgets"
+        variant="ghost"
+        size="sm"
+        ariaLabel="Create component"
+        lucentTooltip="Create component"
+        lucentTooltipPosition="bottom"
+        [disabled]="!canCreateComponent()"
+        (clicked)="createComponent.emit()"
+      />
+    </div>
   `,
   styleUrl: './editor-toolbar.scss',
 })
 export class EditorToolbar {
   readonly name = input.required<string>();
   readonly tool = model.required<EditorTool>();
+  readonly canCreateComponent = input(false);
   readonly rename = output<string>();
+  readonly createComponent = output<void>();
 
   protected readonly tools = EDITOR_TOOLS;
   protected readonly nameControl = new FormControl('', { nonNullable: true });

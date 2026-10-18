@@ -5,7 +5,7 @@ export type { FrameStats, Rect, Vec2 };
 
 export type Tool = 'select' | 'frame' | 'rectangle' | 'ellipse' | 'hand';
 
-export type NodeType = 'frame' | 'rect' | 'ellipse' | 'instance';
+export type NodeType = 'frame' | 'rect' | 'ellipse' | 'component' | 'instance';
 
 /** One row of the layers panel. Rows come topmost first, each followed by its children. */
 export interface Layer {
@@ -16,12 +16,15 @@ export interface Layer {
   readonly depth: number;
   readonly visible: boolean;
   readonly locked: boolean;
+  /** True for a node copied into an instance. */
+  readonly inInstance?: boolean;
 }
 
 /** A top-level frame's name on the canvas: its top-left corner and width in screen CSS pixels. */
 export interface FrameLabel {
   readonly id: string;
   readonly name: string;
+  readonly type: NodeType;
   readonly x: number;
   readonly y: number;
   readonly w: number;
@@ -125,6 +128,15 @@ export interface NodeProps extends Omit<NodeFields, 'fill'> {
   /** True when an auto-layout parent positions it. */
   readonly inFlow: boolean;
   readonly parentLayout: LayoutType;
+  /** On an instance: the component it copies. */
+  readonly component?: string;
+  readonly componentName?: string;
+  /** On an instance: how many nodes it overrides. */
+  readonly overrides?: number;
+  /** On a component: true when instances of it exist. */
+  readonly inUse?: boolean;
+  /** True for a node copied into an instance. Its edits become overrides. */
+  readonly inInstance?: boolean;
 }
 
 /** The properties a `setProps` call may change. Grouped properties are replaced whole. */
@@ -338,6 +350,16 @@ export class VisualCore {
     this.module.select(id);
   }
 
+  /** Adds `id` to the selection, or removes it if it was there. */
+  toggleSelection(id: string): void {
+    this.module.toggleSelection(id);
+  }
+
+  /** Measured sizes of the frame labels the page draws, so pressing a label selects its frame. */
+  setFrameLabelSizes(sizes: readonly { id: string; w: number; h: number }[]): void {
+    this.module.setFrameLabelSizes(sizes.map((s) => `${s.id}:${s.w}:${s.h}`).join(';'));
+  }
+
   get tool(): Tool {
     return this.module.tool() as Tool;
   }
@@ -435,6 +457,30 @@ export class VisualCore {
   /** Moves the selection by `dx`, `dy` world units as one undo step. */
   nudge(dx: number, dy: number): boolean {
     return this.module.nudge(dx, dy);
+  }
+
+  /** Turns the selected frame into a component, or wraps the selection in one. Returns its id. */
+  createComponent(): string | null {
+    return this.module.createComponent() || null;
+  }
+
+  /** Places a new instance of `component` next to it and selects it. */
+  createInstance(component: string): string | null {
+    return this.module.createInstance(component) || null;
+  }
+
+  /** Replaces an instance with ordinary nodes that look the same. Returns the new frame. */
+  detachInstance(instance: string): string | null {
+    return this.module.detachInstance(instance) || null;
+  }
+
+  resetOverrides(instance: string): boolean {
+    return this.module.resetOverrides(instance);
+  }
+
+  /** Selects `id` and pans to center it when it isn't fully inside a viewport of that size. */
+  reveal(id: string, width: number, height: number): boolean {
+    return this.module.reveal(id, width, height);
   }
 
   deleteSelection(): boolean {
