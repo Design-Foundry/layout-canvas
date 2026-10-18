@@ -26,8 +26,8 @@ public sealed record RenameDocumentRequest([Required, StringLength(200)] string 
 
 /// <summary>An edit produced by the client.</summary>
 /// <param name="Id">Client-generated id. Resending an op with a known id returns its original sequence number.</param>
-/// <param name="Kind">Op type, such as <c>CreateNode</c> or <c>SetProp</c>.</param>
-/// <param name="Data">Op payload, opaque to the server.</param>
+/// <param name="Kind">Op type, such as <c>CreateNode</c> or <c>SetProps</c>.</param>
+/// <param name="Data">Op payload in visualcore's wire format.</param>
 public sealed record OpInput(Guid Id, [Required, StringLength(64)] string Kind, JsonElement Data);
 
 public sealed record AppendOpsRequest([Required, MinLength(1), MaxLength(AppendOpsRequest.MaxOps)] IReadOnlyList<OpInput> Ops)
@@ -35,8 +35,9 @@ public sealed record AppendOpsRequest([Required, MinLength(1), MaxLength(AppendO
     public const int MaxOps = 1000;
 }
 
-/// <summary>The sequence number the server assigned to an op.</summary>
-public sealed record OpAck(Guid Id, long Seq);
+/// <summary>What the server did with an op.</summary>
+/// <param name="Seq">Its sequence number in the log, or null if the document refused it and it was not logged.</param>
+public sealed record OpAck(Guid Id, long? Seq);
 
 public sealed record AppendOpsResponse(IReadOnlyList<OpAck> Acks, long HeadSeq);
 
@@ -45,6 +46,3 @@ public sealed record OpRecord(long Seq, Guid Id, string Kind, JsonElement Data, 
 
 /// <summary>A page of the op log. Keep reading from the last <c>seq</c> until it reaches <paramref name="HeadSeq"/>.</summary>
 public sealed record OpsPage(IReadOnlyList<OpRecord> Ops, long HeadSeq);
-
-/// <summary>Folds the log up to <paramref name="Seq"/> into a snapshot.</summary>
-public sealed record SaveSnapshotRequest(long Seq, JsonElement Data);

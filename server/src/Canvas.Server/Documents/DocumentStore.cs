@@ -11,9 +11,16 @@ public sealed record OpsQueryResult(OpsQueryStatus Status, OpsPage? Page = null,
 
 public enum SnapshotSaveStatus { Saved, NotFound, NotNewer, BeyondHead }
 
+public enum AppendStatus { Appended, NotFound, Conflict }
+
+/// <summary>Where a document's log stands.</summary>
+public sealed record DocumentHead(long HeadSeq, long SnapshotSeq);
+
 public sealed class DocumentStore(Database database, TimeProvider clock)
 {
     public const int MaxOpsPerPage = 5000;
+
+    private const int SqliteConstraint = 19;
 
     public async Task<IReadOnlyList<DocumentSummary>> ListAsync(CancellationToken ct)
     {
@@ -104,7 +111,48 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
         return await command.ExecuteNonQueryAsync(ct) > 0;
     }
 
-    public async Task<AppendOpsResponse?> AppendOpsAsync(Guid documentId, IReadOnlyList<OpInput> ops, CancellationToken ct)
+    public async Task<DocumentHead?> GetHeadAsync(Guid id, CancellationToken ct)
+    {
+        await using var connection = await database.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT head_seq, snapshot_seq FROM documents WHERE id = $id";
+        command.Parameters.AddWithValue("$id", Key(id));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? new DocumentHead(reader.GetInt64(0), reader.GetInt64(1)) : null;
+    }
+
+    /// <summary>The sequence numbers of the ops among <paramref name="opIds"/> that are already in the log.</summary>
+    public async Task<IReadOnlyDictionary<Guid, long>> FindOpsAsync(Guid documentId, IReadOnlyCollection<Guid> opIds, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, long>();
+        if (opIds.Count == 0)
+        {
+            return found;
+        }
+
+        await using var connection = await database.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        var names = opIds.Select((_, i) => $"$op{i}").ToList();
+        command.CommandText = $"SELECT op_id, seq FROM ops WHERE document_id = $document AND op_id IN ({string.Join(", ", names)})";
+        command.Parameters.AddWithValue("$document", Key(documentId));
+        foreach (var (name, id) in names.Zip(opIds))
+        {
+            command.Parameters.AddWithValue(name, Key(id));
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            found[Guid.Parse(reader.GetString(0))] = reader.GetInt64(1);
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// Appends <paramref name="ops"/> after <paramref name="expectedHead"/>, numbering them from there.
+    /// Nothing is written if another writer moved the head first or already logged one of the op ids.
+    /// </summary>
+    public async Task<AppendStatus> AppendAsync(Guid documentId, long expectedHead, IReadOnlyList<OpInput> ops, CancellationToken ct)
     {
         await using var connection = await database.OpenAsync(ct);
         await using var transaction = connection.BeginTransaction(deferred: false);
@@ -113,43 +161,40 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
             ("$id", Key(documentId)));
         if (head is null)
         {
-            return null;
+            return AppendStatus.NotFound;
+        }
+        if (head != expectedHead)
+        {
+            return AppendStatus.Conflict;
+        }
+        if (ops.Count == 0)
+        {
+            return AppendStatus.Appended;
         }
 
         var now = Timestamp(clock.GetUtcNow());
-        var acks = new List<OpAck>(ops.Count);
-        var appended = false;
-
-        foreach (var op in ops)
+        try
         {
-            var existing = await ScalarAsync<long?>(connection,
-                "SELECT seq FROM ops WHERE document_id = $document AND op_id = $op",
-                ("$document", Key(documentId)), ("$op", Key(op.Id)));
-            if (existing is { } seq)
+            foreach (var op in ops)
             {
-                acks.Add(new OpAck(op.Id, seq));
-                continue;
+                head++;
+                await ExecuteAsync(connection, """
+                    INSERT INTO ops (document_id, seq, op_id, kind, data, created_at)
+                    VALUES ($document, $seq, $op, $kind, $data, $now)
+                    """,
+                    ("$document", Key(documentId)), ("$seq", head), ("$op", Key(op.Id)),
+                    ("$kind", op.Kind), ("$data", op.Data.GetRawText()), ("$now", now));
             }
-
-            head++;
-            await ExecuteAsync(connection, """
-                INSERT INTO ops (document_id, seq, op_id, kind, data, created_at)
-                VALUES ($document, $seq, $op, $kind, $data, $now)
-                """,
-                ("$document", Key(documentId)), ("$seq", head), ("$op", Key(op.Id)),
-                ("$kind", op.Kind), ("$data", op.Data.GetRawText()), ("$now", now));
-            acks.Add(new OpAck(op.Id, head.Value));
-            appended = true;
         }
-
-        if (appended)
+        catch (SqliteException e) when (e.SqliteErrorCode == SqliteConstraint)
         {
-            await ExecuteAsync(connection, "UPDATE documents SET head_seq = $head, updated_at = $now WHERE id = $id",
-                ("$head", head), ("$now", now), ("$id", Key(documentId)));
+            return AppendStatus.Conflict;
         }
 
+        await ExecuteAsync(connection, "UPDATE documents SET head_seq = $head, updated_at = $now WHERE id = $id",
+            ("$head", head), ("$now", now), ("$id", Key(documentId)));
         await transaction.CommitAsync(ct);
-        return new AppendOpsResponse(acks, head.Value);
+        return AppendStatus.Appended;
     }
 
     public async Task<OpsQueryResult> GetOpsAsync(Guid documentId, long after, int limit, CancellationToken ct)
@@ -209,7 +254,7 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
     /// Stores the snapshot and drops the payloads of the ops it folds in. Op ids are kept so a
     /// client retrying an already-compacted op still gets its original sequence number.
     /// </summary>
-    public async Task<SnapshotSaveStatus> SaveSnapshotAsync(Guid documentId, long seq, JsonElement data, CancellationToken ct)
+    public async Task<SnapshotSaveStatus> SaveSnapshotAsync(Guid documentId, long seq, string data, CancellationToken ct)
     {
         await using var connection = await database.OpenAsync(ct);
         await using var transaction = connection.BeginTransaction(deferred: false);
@@ -238,7 +283,7 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
         }
 
         await ExecuteAsync(connection, "UPDATE documents SET snapshot_seq = $seq, snapshot = $data WHERE id = $id",
-            ("$seq", seq), ("$data", data.GetRawText()), ("$id", Key(documentId)));
+            ("$seq", seq), ("$data", data), ("$id", Key(documentId)));
         await ExecuteAsync(connection, "UPDATE ops SET data = NULL WHERE document_id = $document AND seq <= $seq",
             ("$document", Key(documentId)), ("$seq", seq));
 

@@ -13,7 +13,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.Section));
 builder.Services.AddSingleton<Database>();
 builder.Services.AddHostedService<DatabaseInitializer>();
-builder.Services.AddScoped<DocumentStore>();
+builder.Services.AddSingleton<DocumentStore>();
+builder.Services.Configure<DocumentHostOptions>(builder.Configuration.GetSection(DocumentHostOptions.Section));
+builder.Services.AddSingleton<DocumentHost>();
 
 var app = builder.Build();
 

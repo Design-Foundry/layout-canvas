@@ -310,63 +310,6 @@
           }
         }
       }
-    },
-    "/api/documents/{id}/snapshot": {
-      "put": {
-        "tags": [
-          "Documents"
-        ],
-        "operationId": "SaveSnapshot",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SaveSnapshotRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "404": {
-            "description": "Not Found"
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -582,11 +525,15 @@
             "format": "uuid"
           },
           "seq": {
-            "type": "integer",
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "Its sequence number in the log, or null if the document refused it and it was not logged.",
             "format": "int64"
           }
         },
-        "description": "The sequence number the server assigned to an op."
+        "description": "What the server did with an op."
       },
       "OpInput": {
         "required": [
@@ -603,10 +550,10 @@
           },
           "kind": {
             "type": "string",
-            "description": "Op type, such as `CreateNode` or `SetProp`."
+            "description": "Op type, such as `CreateNode` or `SetProps`."
           },
           "data": {
-            "description": "Op payload, opaque to the server.",
+            "description": "Op payload in visualcore's wire format.",
             "$ref": "#/components/schemas/JsonElement"
           }
         },
@@ -709,23 +656,6 @@
             "type": "string"
           }
         }
-      },
-      "SaveSnapshotRequest": {
-        "required": [
-          "seq",
-          "data"
-        ],
-        "type": "object",
-        "properties": {
-          "seq": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "data": {
-            "$ref": "#/components/schemas/JsonElement"
-          }
-        },
-        "description": "Folds the log up to Seq into a snapshot."
       }
     }
   },

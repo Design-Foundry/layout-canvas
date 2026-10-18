@@ -42,9 +42,17 @@
             }
         },
         {
+            "label": "native: build",
+            "type": "shell",
+            "command": "pnpm native",
+            "group": "build",
+            "problemMatcher": ["$msCompile"]
+        },
+        {
             "label": "server: watch",
             "type": "shell",
             "command": "dotnet watch run --project server/src/Canvas.Server --launch-profile http",
+            "dependsOn": "native: build",
             "isBackground": true,
             "problemMatcher": {
                 "base": "$msCompile",

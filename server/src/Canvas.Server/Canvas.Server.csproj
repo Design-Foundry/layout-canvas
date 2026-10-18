@@ -6,7 +6,21 @@
     <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
     <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)/../../openapi</OpenApiDocumentsDirectory>
     <OpenApiGenerateDocumentsOptions>--file-name canvas</OpenApiGenerateDocumentsOptions>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <VisualCoreNativeDir Condition="'$(VisualCoreNativeDir)' == ''">$(MSBuildProjectDirectory)/../../../visualcore/build/native-debug</VisualCoreNativeDir>
   </PropertyGroup>
+
+  <ItemGroup>
+    <VisualCoreNative Include="$(VisualCoreNativeDir)/vc_native.dll" Condition="Exists('$(VisualCoreNativeDir)/vc_native.dll')" />
+    <VisualCoreNative Include="$(VisualCoreNativeDir)/vc_native.pdb" Condition="Exists('$(VisualCoreNativeDir)/vc_native.pdb')" />
+    <VisualCoreNative Include="$(VisualCoreNativeDir)/libvc_native.so" Condition="Exists('$(VisualCoreNativeDir)/libvc_native.so')" />
+    <None Include="@(VisualCoreNative)" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="WarnMissingVisualCore" BeforeTargets="Build"
+          Condition="!Exists('$(VisualCoreNativeDir)/vc_native.dll') And !Exists('$(VisualCoreNativeDir)/libvc_native.so')">
+    <Warning Text="vc_native was not found in $(VisualCoreNativeDir). Build visualcore natively (cmake --build --preset native-debug) or set VisualCoreNativeDir." />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
