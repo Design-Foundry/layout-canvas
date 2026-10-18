@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <unordered_map>
 #include <unordered_set>
 #include <nlohmann/json.hpp>
 
@@ -901,11 +902,25 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
             ops.push_back(CreateToken{std::move(*token)});
         }
     }
+    std::vector<Node> nodes;
+    std::unordered_map<Id, std::size_t> indexOf;
     for (const json& item : j["nodes"]) {
         auto node = readNode(item);
         if (!node) return std::nullopt;
-        ops.push_back(CreateNode{std::move(*node)});
+        indexOf.emplace(node->id, nodes.size());
+        nodes.push_back(std::move(*node));
     }
+    // Parents and the components instances copy must exist before the nodes that refer to them.
+    std::vector<char> emitted(nodes.size(), 0);
+    const auto emit = [&](std::size_t i, auto&& self) -> void {
+        if (emitted[i]) return;
+        emitted[i] = 1;
+        for (const Id& dependency : {nodes[i].parent, nodes[i].component}) {
+            if (const auto it = indexOf.find(dependency); it != indexOf.end()) self(it->second, self);
+        }
+        ops.push_back(CreateNode{std::move(nodes[i])});
+    };
+    for (std::size_t i = 0; i < nodes.size(); ++i) emit(i, emit);
     return ops;
 }
 

@@ -74,9 +74,15 @@ if(EMSCRIPTEN)
         DESTINATION .)
 
 # ---------------------------------------------------------------------------
-# Native build: unit tests
+# Native build: the shared library the server loads, and unit tests
 # ---------------------------------------------------------------------------
 else()
+    set_target_properties(vc_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    add_library(vc_native SHARED src/native.cpp)
+    target_link_libraries(vc_native PRIVATE vc_core)
+    target_compile_definitions(vc_native PRIVATE VC_NATIVE_BUILD)
+    set_target_properties(vc_native PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden)
+
     option(VC_BUILD_TESTS "Build unit tests" ON)
     if(VC_BUILD_TESTS)
         FetchContent_Declare(
@@ -96,10 +102,11 @@ else()
             tests/test_json.cpp
             tests/test_layout.cpp
             tests/test_model.cpp
+            tests/test_native.cpp
             tests/test_tokens.cpp
             tests/test_viewport_controller.cpp
         )
-        target_link_libraries(vc_tests PRIVATE vc_core Catch2::Catch2WithMain)
+        target_link_libraries(vc_tests PRIVATE vc_core vc_native Catch2::Catch2WithMain)
 
         enable_testing()
         list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

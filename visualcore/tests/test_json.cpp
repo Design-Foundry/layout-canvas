@@ -108,6 +108,31 @@ TEST_CASE("a snapshot rebuilds the same document") {
     REQUIRE(*copy.find(child.id) == child);
 }
 
+TEST_CASE("a snapshot restores instances painted below their component") {
+    vc::Document doc;
+    Node component;
+    component.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000010");
+    component.type = vc::NodeType::Component;
+    component.order = "V";
+    component.w = component.h = 100;
+    Node instance;
+    instance.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000011");
+    instance.type = vc::NodeType::Instance;
+    instance.component = component.id;
+    instance.order = "U";
+    instance.w = instance.h = 100;
+    REQUIRE(doc.apply(CreateNode{component}));
+    REQUIRE(doc.apply(CreateNode{instance}));
+
+    const auto ops = vc::snapshotFromJson(vc::snapshotToJson(doc));
+    REQUIRE(ops.has_value());
+    vc::Document copy;
+    for (const OpBody& op : *ops) {
+        REQUIRE(copy.apply(op));
+    }
+    REQUIRE(*copy.find(instance.id) == instance);
+}
+
 TEST_CASE("snapshots with an unknown version are rejected") {
     REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":99,"nodes":[]})").has_value());
     REQUIRE(vc::snapshotFromJson(R"({"version":1,"nodes":[]})").has_value());
