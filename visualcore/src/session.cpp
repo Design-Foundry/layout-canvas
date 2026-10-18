@@ -21,8 +21,17 @@ void Session::commit() {
 namespace {
 
 bool changesStructure(const OpBody& op) {
-    const auto* set = std::get_if<SetProps>(&op);
-    return !set || set->patch.name || set->patch.visible;
+    if (const auto* set = std::get_if<SetProps>(&op)) {
+        return set->patch.name || set->patch.visible;
+    }
+    return std::holds_alternative<CreateNode>(op) || std::holds_alternative<DeleteNode>(op) ||
+           std::holds_alternative<MoveNode>(op);
+}
+
+bool changesTokens(const OpBody& op) {
+    return std::holds_alternative<CreateToken>(op) || std::holds_alternative<DeleteToken>(op) ||
+           std::holds_alternative<ReplaceToken>(op) || std::holds_alternative<CreateMode>(op) ||
+           std::holds_alternative<DeleteMode>(op) || std::holds_alternative<ReplaceMode>(op);
 }
 
 } // namespace
@@ -33,6 +42,9 @@ std::optional<OpBody> Session::apply(const OpBody& op) {
         ++revision_;
         if (changesStructure(op)) {
             ++structureRevision_;
+        }
+        if (changesTokens(op)) {
+            ++tokenRevision_;
         }
     }
     return inverse;
@@ -66,6 +78,23 @@ bool Session::deleteTree(const Id& id) {
     }
     commit();
     return true;
+}
+
+bool Session::deleteMode(const Id& mode) {
+    if (mode == kDefaultModeId || !document_.findMode(mode)) {
+        return false;
+    }
+    begin();
+    for (const Token* token : document_.tokens()) {
+        if (token->source.contains(mode)) {
+            Token stripped = *token;
+            stripped.source.erase(mode);
+            edit(ReplaceToken{std::move(stripped)});
+        }
+    }
+    const bool deleted = edit(DeleteMode{mode});
+    commit();
+    return deleted;
 }
 
 bool Session::undo() {

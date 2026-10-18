@@ -65,11 +65,11 @@ bool loadDocument(const std::string& snapshot) {
     if (snapshot.empty()) {
         return true;
     }
-    const auto nodes = vc::snapshotFromJson(snapshot);
-    if (!nodes) {
+    const auto ops = vc::snapshotFromJson(snapshot);
+    if (!ops) {
         return false;
     }
-    for (const vc::CreateNode& op : *nodes) {
+    for (const vc::OpBody& op : *ops) {
         rt->session.applyRemote(op);
     }
     return true;
@@ -176,6 +176,62 @@ std::string hexToColor(const std::string& hex, double alpha) {
     return color ? vc::colorToJson(*color) : "null";
 }
 
+double tokenRevision() {
+    return rt ? static_cast<double>(rt->session.tokenRevision()) : 0.0;
+}
+
+std::string tokens() {
+    return rt ? vc::tokensToJson(rt->session.document(), rt->editor.activeMode()) : "[]";
+}
+
+std::string modes() {
+    return rt ? vc::modesToJson(rt->session.document()) : "[]";
+}
+
+std::string activeMode() {
+    return rt ? rt->editor.activeMode().toString() : vc::kDefaultModeId.toString();
+}
+
+bool setActiveMode(const std::string& id) {
+    const auto parsed = vc::Id::parse(id);
+    if (!rt || !parsed) {
+        return false;
+    }
+    rt->editor.setActiveMode(*parsed);
+    return rt->editor.activeMode() == *parsed;
+}
+
+std::string addToken(const std::string& type) {
+    const auto parsed = vc::tokenTypeFromName(type);
+    const auto id = rt && parsed ? rt->editor.addToken(*parsed) : std::nullopt;
+    return id ? id->toString() : "";
+}
+
+bool replaceToken(const std::string& token) {
+    auto parsed = vc::tokenFromJson(token);
+    return rt && parsed && rt->editor.edit(vc::ReplaceToken{std::move(*parsed)});
+}
+
+bool deleteToken(const std::string& id) {
+    const auto parsed = vc::Id::parse(id);
+    return rt && parsed && rt->editor.edit(vc::DeleteToken{*parsed});
+}
+
+std::string addMode() {
+    const auto id = rt ? rt->editor.addMode() : std::nullopt;
+    return id ? id->toString() : "";
+}
+
+bool replaceMode(const std::string& mode) {
+    auto parsed = vc::modeFromJson(mode);
+    return rt && parsed && rt->editor.edit(vc::ReplaceMode{std::move(*parsed)});
+}
+
+bool deleteMode(const std::string& id) {
+    const auto parsed = vc::Id::parse(id);
+    return rt && parsed && rt->editor.deleteMode(*parsed);
+}
+
 bool deleteSelection() {
     return rt && rt->editor.deleteSelection();
 }
@@ -264,6 +320,17 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("commitPropsPreview", &commitPropsPreview);
     function("cancelPropsPreview", &cancelPropsPreview);
     function("hexToColor", &hexToColor);
+    function("tokenRevision", &tokenRevision);
+    function("tokens", &tokens);
+    function("modes", &modes);
+    function("activeMode", &activeMode);
+    function("setActiveMode", &setActiveMode);
+    function("addToken", &addToken);
+    function("replaceToken", &replaceToken);
+    function("deleteToken", &deleteToken);
+    function("addMode", &addMode);
+    function("replaceMode", &replaceMode);
+    function("deleteMode", &deleteMode);
     function("deleteSelection", &deleteSelection);
     function("nudge", &nudge);
     function("undo", &undo);

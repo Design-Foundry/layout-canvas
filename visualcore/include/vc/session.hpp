@@ -26,6 +26,8 @@ public:
     bool edit(const OpBody& op);
     /// Deletes `id` and its descendants as one undo step.
     bool deleteTree(const Id& id);
+    /// Removes `mode` from every alias that names it, then deletes it, as one undo step.
+    bool deleteMode(const Id& mode);
 
     bool undo();
     bool redo();
@@ -48,6 +50,8 @@ public:
     /// Increases only when the tree a layers panel shows changes: nodes added, removed or moved, or a
     /// name or visibility changed. Geometry and paint edits leave it alone.
     [[nodiscard]] std::uint64_t structureRevision() const { return structureRevision_; }
+    /// Increases only when tokens or modes change.
+    [[nodiscard]] std::uint64_t tokenRevision() const { return tokenRevision_; }
 
     /// Hands over the ops produced since the last call, in the order they were applied.
     [[nodiscard]] std::vector<Op> takeOutbox();
@@ -70,6 +74,7 @@ private:
     std::optional<OpBody> previewInverse_;
     std::uint64_t revision_ = 0;
     std::uint64_t structureRevision_ = 0;
+    std::uint64_t tokenRevision_ = 0;
 };
 
 } // namespace vc

@@ -63,16 +63,6 @@ Rect intersect(const Rect& a, const Rect& b) {
     return {x0, y0, std::max(0.0, x1 - x0), std::max(0.0, y1 - y0)};
 }
 
-Color resolveFill(const Value<Oklch>& fill) {
-    const auto* color = std::get_if<Oklch>(&fill);
-    return color ? toSrgb(*color) : kUnresolvedTokenColor;
-}
-
-double resolveLength(const Value<double>& value) {
-    const auto* length = std::get_if<double>(&value);
-    return length ? *length : 0.0;
-}
-
 wgpu::ShaderModule createShader(const wgpu::Device& device, const std::string& code) {
     wgpu::ShaderSourceWGSL wgsl{};
     wgsl.code = code.c_str();
@@ -437,14 +427,15 @@ void Renderer::State::collect(const Id& parent, Vec2 offset, const Rect& clip, d
         const double alpha = opacity * node.opacity;
 
         if (world.intersects(visibleArea)) {
-            const Color fill = resolveFill(node.fill);
+            const auto color = document.resolveColor(node.fill, editor.activeMode());
+            const Color fill = color ? toSrgb(*color) : kUnresolvedTokenColor;
             instances.push_back({
                 {float(world.x - origin.x), float(world.y - origin.y)},
                 {float(world.w), float(world.h)},
                 {fill.r, fill.g, fill.b, float(fill.a * alpha)},
                 {float(clip.x - origin.x), float(clip.y - origin.y), float(clip.x + clip.w - origin.x),
                  float(clip.y + clip.h - origin.y)},
-                float(resolveLength(node.cornerRadius)),
+                float(document.resolveLength(node.cornerRadius, editor.activeMode()).value_or(0.0)),
                 node.type == NodeType::Ellipse ? kKindEllipse : kKindBox,
                 {},
             });

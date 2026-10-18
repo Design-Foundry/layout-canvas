@@ -66,6 +66,18 @@ public:
     bool undo();
     bool redo();
 
+    /// Applies a document edit made outside the canvas, such as a token change, as one undo step.
+    bool edit(const OpBody& op);
+    /// Adds a token with a free `<family>-<n>` identifier and a starting value, last in its family.
+    std::optional<Id> addToken(TokenType type);
+    /// Adds a mode named `Mode <n>`, last in order.
+    std::optional<Id> addMode();
+    bool deleteMode(const Id& mode);
+
+    /// The mode tokens resolve in on the canvas. View state: switching it is not an edit.
+    void setActiveMode(const Id& mode);
+    [[nodiscard]] const Id& activeMode() const { return activeMode_; }
+
     /// When on (the default), drawing and moving put edges on whole world units, in absolute
     /// coordinates, so shapes render crisp at 100% zoom regardless of where their parent sits.
     void setPixelSnap(bool enabled);
@@ -111,6 +123,7 @@ private:
     ViewportController viewport_;
     Tool tool_ = Tool::Select;
     bool propsPreview_ = false;
+    Id activeMode_ = kDefaultModeId;
     bool pixelSnap_ = true;
     std::vector<Id> selection_;
     std::uint64_t revision_ = 0;

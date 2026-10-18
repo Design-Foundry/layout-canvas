@@ -9,6 +9,18 @@ using vc::OpBody;
 
 namespace {
 
+const Id kRadiusToken = *Id::parse("0192a4b1-0000-4000-8000-0000000000aa");
+
+vc::Token radiusToken() {
+    vc::Token token;
+    token.id = kRadiusToken;
+    token.type = vc::TokenType::Dimension;
+    token.identifier = "radius-md";
+    token.order = "a0";
+    token.value = vc::Magnitude{0.5, vc::Unit::Rem};
+    return token;
+}
+
 Node sampleNode() {
     Node n;
     n.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-1c2d3e4f5a6b");
@@ -20,7 +32,7 @@ Node sampleNode() {
     n.w = 320;
     n.h = 200;
     n.fill = vc::Oklch{0.98, 0.01, 250, 1};
-    n.cornerRadius = vc::TokenRef{"radius-md"};
+    n.cornerRadius = vc::TokenRef{kRadiusToken};
     n.opacity = 0.75;
     n.clipContent = true;
     return n;
@@ -38,7 +50,7 @@ TEST_CASE("every op kind survives a json round trip") {
     const Node node = sampleNode();
     vc::NodePatch patch;
     patch.x = 3;
-    patch.fill = vc::TokenRef{"surface-glass-strong"};
+    patch.fill = vc::TokenRef{kRadiusToken};
     patch.visible = false;
 
     const OpBody ops[] = {
@@ -79,23 +91,27 @@ TEST_CASE("a snapshot rebuilds the same document") {
     child.order = "V";
     child.type = vc::NodeType::Ellipse;
     child.w = child.h = 40;
-    doc.apply(CreateNode{frame});
-    doc.apply(CreateNode{child});
+    REQUIRE(doc.apply(vc::CreateToken{radiusToken()}));
+    REQUIRE(doc.apply(CreateNode{frame}));
+    REQUIRE(doc.apply(CreateNode{child}));
 
     const auto ops = vc::snapshotFromJson(vc::snapshotToJson(doc));
-    REQUIRE(ops);
+    REQUIRE(ops.has_value());
 
     vc::Document copy;
-    for (const CreateNode& op : *ops) {
+    for (const OpBody& op : *ops) {
         REQUIRE(copy.apply(op));
     }
+    REQUIRE(*copy.findToken(kRadiusToken) == radiusToken());
+    REQUIRE(*copy.resolveLength(frame.cornerRadius, vc::kDefaultModeId) == 8.0);
     REQUIRE(*copy.find(frame.id) == frame);
     REQUIRE(*copy.find(child.id) == child);
 }
 
 TEST_CASE("snapshots with an unknown version are rejected") {
-    REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":99,"nodes":[]})"));
-    REQUIRE(vc::snapshotFromJson(R"({"version":1,"nodes":[]})"));
+    REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":99,"nodes":[]})").has_value());
+    REQUIRE(vc::snapshotFromJson(R"({"version":1,"nodes":[]})").has_value());
+    REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":2,"nodes":[]})").has_value());
 }
 
 TEST_CASE("op lists carry ids and kinds and parse back") {
@@ -129,7 +145,7 @@ TEST_CASE("inspected nodes carry the fill as hex next to its oklch value") {
     const std::string json = vc::inspectNodeJson(n);
     REQUIRE(json.find("\"hex\":\"#3a86ff\"") != std::string::npos);
 
-    n.fill = vc::TokenRef{"brand"};
+    n.fill = vc::TokenRef{kRadiusToken};
     REQUIRE(vc::inspectNodeJson(n).find("hex") == std::string::npos);
 }
 

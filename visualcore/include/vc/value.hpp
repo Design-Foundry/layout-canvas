@@ -1,12 +1,12 @@
 #pragma once
-#include <string>
 #include <variant>
+#include "vc/id.hpp"
 
 namespace vc {
 
-/// Reference to a design token by its name in the pinned release.
+/// Reference to a design token by id, so renaming the token never breaks it.
 struct TokenRef {
-    std::string name;
+    Id token;
 
     friend bool operator==(const TokenRef&, const TokenRef&) = default;
 };

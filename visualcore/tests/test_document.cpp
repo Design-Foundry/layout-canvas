@@ -74,17 +74,22 @@ TEST_CASE("invalid ops change nothing") {
 TEST_CASE("set props returns the previous values of the touched fields only") {
     Document doc;
     doc.apply(CreateNode{node(1)});
+    vc::Token surface;
+    surface.id = idOf(100);
+    surface.identifier = "surface";
+    surface.value = vc::Oklch{0.9, 0.0, 0.0};
+    REQUIRE(doc.apply(vc::CreateToken{surface}));
 
     vc::NodePatch patch;
     patch.x = 50;
-    patch.fill = vc::TokenRef{"color.surface"};
+    patch.fill = vc::TokenRef{idOf(100)};
     const auto inverse = doc.apply(SetProps{idOf(1), patch});
 
     const auto& undo = std::get<SetProps>(*inverse).patch;
     REQUIRE(undo.x == 0.0);
     REQUIRE(undo.fill == vc::Value<vc::Oklch>{vc::Oklch{}});
     REQUIRE_FALSE(undo.y);
-    REQUIRE(std::get<vc::TokenRef>(doc.find(idOf(1))->fill).name == "color.surface");
+    REQUIRE(std::get<vc::TokenRef>(doc.find(idOf(1))->fill).token == idOf(100));
 }
 
 TEST_CASE("siblings paint in key order, parents before children") {

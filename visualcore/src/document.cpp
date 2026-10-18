@@ -16,6 +16,10 @@ bool isValidPatch(const NodePatch& patch) {
 
 } // namespace
 
+Document::Document() {
+    modes_.emplace(kDefaultModeId, Mode{kDefaultModeId, "Default", "a0"});
+}
+
 std::optional<OpBody> Document::apply(const OpBody& op) {
     return std::visit(
         [this](const auto& body) -> std::optional<OpBody> {
@@ -26,8 +30,20 @@ std::optional<OpBody> Document::apply(const OpBody& op) {
                 return remove(body);
             } else if constexpr (std::is_same_v<T, SetProps>) {
                 return setProps(body);
-            } else {
+            } else if constexpr (std::is_same_v<T, MoveNode>) {
                 return move(body);
+            } else if constexpr (std::is_same_v<T, CreateToken>) {
+                return createToken(body);
+            } else if constexpr (std::is_same_v<T, DeleteToken>) {
+                return deleteToken(body);
+            } else if constexpr (std::is_same_v<T, ReplaceToken>) {
+                return replaceToken(body);
+            } else if constexpr (std::is_same_v<T, CreateMode>) {
+                return createMode(body);
+            } else if constexpr (std::is_same_v<T, DeleteMode>) {
+                return deleteMode(body);
+            } else {
+                return replaceMode(body);
             }
         },
         op);
@@ -56,7 +72,7 @@ bool Document::isAncestorOrSelf(const Id& ancestor, const Id& id) const {
 std::optional<OpBody> Document::create(const CreateNode& op) {
     const Node& node = op.node;
     if (node.id.isNil() || nodes_.contains(node.id) || !isValidParent(node.parent) ||
-        !isValidGeometry(node.w, node.h, node.opacity)) {
+        !isValidGeometry(node.w, node.h, node.opacity) || !isValidNodeRefs(node)) {
         return std::nullopt;
     }
     link(nodes_.emplace(node.id, node).first->second);
@@ -77,7 +93,7 @@ std::optional<OpBody> Document::remove(const DeleteNode& op) {
 
 std::optional<OpBody> Document::setProps(const SetProps& op) {
     const auto it = nodes_.find(op.id);
-    if (it == nodes_.end() || !isValidPatch(op.patch)) {
+    if (it == nodes_.end() || !isValidPatch(op.patch) || !isValidPatchRefs(op.patch)) {
         return std::nullopt;
     }
     return SetProps{op.id, applyPatch(it->second, op.patch)};

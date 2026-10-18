@@ -21,6 +21,7 @@ add_library(vc_core STATIC
     src/color.cpp
     src/demo.cpp
     src/document.cpp
+    src/document_tokens.cpp
     src/editor.cpp
     src/fractional_index.cpp
     src/geometry.cpp
@@ -28,6 +29,7 @@ add_library(vc_core STATIC
     src/json.cpp
     src/node.cpp
     src/session.cpp
+    src/tokens.cpp
     src/viewport_controller.cpp
 )
 target_include_directories(vc_core PUBLIC include)
@@ -89,6 +91,7 @@ else()
             tests/test_editor.cpp
             tests/test_json.cpp
             tests/test_model.cpp
+            tests/test_tokens.cpp
             tests/test_viewport_controller.cpp
         )
         target_link_libraries(vc_tests PRIVATE vc_core Catch2::Catch2WithMain)

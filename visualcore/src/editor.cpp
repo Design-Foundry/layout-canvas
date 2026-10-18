@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <string>
+#include <unordered_set>
 #include <utility>
 #include "vc/fractional_index.hpp"
 #include "vc/geometry.hpp"
@@ -59,6 +61,78 @@ std::optional<Tool> toolFromName(std::string_view name) {
 }
 
 Editor::Editor(Session& session, Camera& camera) : session_(session), camera_(camera), viewport_(camera) {}
+
+bool Editor::edit(const OpBody& op) {
+    if (gesture_ != Gesture::None) {
+        return false;
+    }
+    settlePropsPreview();
+    return session_.edit(op);
+}
+
+std::optional<Id> Editor::addToken(TokenType type) {
+    const Document& document = session_.document();
+    std::string lastOrder;
+    std::unordered_set<std::string> taken;
+    for (const Token* token : document.tokens()) {
+        if (token->type == type) {
+            lastOrder = token->order;
+            taken.insert(token->identifier);
+        }
+    }
+
+    Token token;
+    token.id = session_.newId();
+    token.type = type;
+    token.order = keyBetween(lastOrder, std::nullopt);
+    for (int n = 1; token.identifier.empty() || taken.contains(token.identifier); ++n) {
+        token.identifier = std::string(tokenTypeName(type)) + "-" + std::to_string(n);
+    }
+    switch (type) {
+    case TokenType::Color:
+        token.value = Oklch{0.6, 0.0, 0.0};
+        break;
+    case TokenType::Dimension:
+        token.value = Magnitude{8.0, Unit::Px};
+        break;
+    case TokenType::Duration:
+        token.value = Magnitude{200.0, Unit::Ms};
+        break;
+    case TokenType::Ratio:
+    case TokenType::Opacity:
+        token.value = Magnitude{1.0, Unit::None};
+        break;
+    }
+    const Id id = token.id;
+    return edit(CreateToken{std::move(token)}) ? std::optional{id} : std::nullopt;
+}
+
+std::optional<Id> Editor::addMode() {
+    const auto modes = session_.document().modes();
+    Mode mode{session_.newId(), "Mode " + std::to_string(modes.size() + 1), keyBetween(modes.back()->order, std::nullopt)};
+    const Id id = mode.id;
+    return edit(CreateMode{std::move(mode)}) ? std::optional{id} : std::nullopt;
+}
+
+bool Editor::deleteMode(const Id& mode) {
+    if (gesture_ != Gesture::None) {
+        return false;
+    }
+    settlePropsPreview();
+    const bool deleted = session_.deleteMode(mode);
+    if (deleted && activeMode_ == mode) {
+        activeMode_ = kDefaultModeId;
+        touch();
+    }
+    return deleted;
+}
+
+void Editor::setActiveMode(const Id& mode) {
+    if (mode != activeMode_ && session_.document().findMode(mode)) {
+        activeMode_ = mode;
+        touch();
+    }
+}
 
 void Editor::setTool(Tool tool) {
     if (tool != tool_) {

@@ -39,7 +39,17 @@ namespace vc {
 /// Every node of `document`, parents before children, as a JSON snapshot.
 [[nodiscard]] std::string snapshotToJson(const Document& document);
 
-/// The create ops that rebuild a snapshot, in an order `Document::apply` accepts.
-[[nodiscard]] std::optional<std::vector<CreateNode>> snapshotFromJson(std::string_view data);
+/// The ops that rebuild a snapshot (modes, then tokens, then nodes), in an order `Document::apply`
+/// accepts. Reads versions 1 and 2.
+[[nodiscard]] std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data);
+
+/// Tokens for the tokens panel, in family order, each with its value `resolved` in `mode` (colors with
+/// alpha and hex) and whether anything `referenced` it.
+[[nodiscard]] std::string tokensToJson(const Document& document, const Id& mode);
+/// Modes in order, the default one flagged `isDefault`.
+[[nodiscard]] std::string modesToJson(const Document& document);
+/// Parse a token or mode definition in the same shape the ops use.
+[[nodiscard]] std::optional<Token> tokenFromJson(std::string_view data);
+[[nodiscard]] std::optional<Mode> modeFromJson(std::string_view data);
 
 } // namespace vc
