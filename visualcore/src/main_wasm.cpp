@@ -110,6 +110,10 @@ std::string layers() {
     return rt ? vc::layersToJson(rt->session.document()) : "[]";
 }
 
+std::string frameLabels() {
+    return rt ? vc::frameLabelsToJson(rt->session.document(), rt->camera, rt->editor.activeMode()) : "[]";
+}
+
 std::string selection() {
     std::string out = "[";
     if (rt) {
@@ -146,7 +150,7 @@ std::string tool() {
 std::string node(const std::string& id) {
     const auto parsed = vc::Id::parse(id);
     const vc::Node* found = rt && parsed ? rt->session.document().find(*parsed) : nullptr;
-    return found ? vc::inspectNodeJson(*found) : "null";
+    return found ? vc::inspectNodeJson(rt->session.document(), *found, rt->editor.activeMode()) : "null";
 }
 
 bool setProps(const std::string& id, const std::string& patch) {
@@ -169,6 +173,12 @@ void cancelPropsPreview() {
     if (rt) {
         rt->editor.cancelPropsPreview();
     }
+}
+
+std::string colorToHex(const std::string& color) {
+    const auto patch = vc::patchFromJson("{\"fill\":" + color + "}");
+    const auto* oklch = patch && patch->fill ? std::get_if<vc::Oklch>(&*patch->fill) : nullptr;
+    return oklch ? vc::toHex(*oklch) : "";
 }
 
 std::string hexToColor(const std::string& hex, double alpha) {
@@ -311,6 +321,7 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("structureRevision", &structureRevision);
     function("layers", &layers);
     function("selection", &selection);
+    function("frameLabels", &frameLabels);
     function("select", &select);
     function("setTool", &setTool);
     function("tool", &tool);
@@ -320,6 +331,7 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("commitPropsPreview", &commitPropsPreview);
     function("cancelPropsPreview", &cancelPropsPreview);
     function("hexToColor", &hexToColor);
+    function("colorToHex", &colorToHex);
     function("tokenRevision", &tokenRevision);
     function("tokens", &tokens);
     function("modes", &modes);

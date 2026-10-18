@@ -1,12 +1,31 @@
 #pragma once
+#include <array>
 #include <optional>
 #include <unordered_map>
 #include <vector>
+#include "vc/math.hpp"
 #include "vc/node.hpp"
 #include "vc/op.hpp"
 #include "vc/tokens.hpp"
 
 namespace vc {
+
+/// A stroke ready to draw: widths per side in pixels (top, end, bottom, start).
+struct ResolvedStroke {
+    std::array<double, 4> widths{};
+    StrokeStyle style = StrokeStyle::Solid;
+    Oklch color;
+    StrokeAlign align = StrokeAlign::Inside;
+};
+
+struct ResolvedShadow {
+    double x = 0.0;
+    double y = 0.0;
+    double blur = 0.0;
+    double spread = 0.0;
+    Oklch color;
+    bool inset = false;
+};
 
 /// The node tree and the document's design system (tokens and modes). Ops are the only way to change
 /// either.
@@ -29,6 +48,10 @@ public:
         visit(Id{}, fn);
     }
 
+    /// The node's box relative to its parent after auto layout, in `mode`. Cached until the next
+    /// edit or a different mode.
+    [[nodiscard]] Rect box(const Id& id, const Id& mode = kDefaultModeId) const;
+
     /// True if `ancestor` is `id` itself or one of its ancestors.
     [[nodiscard]] bool isAncestorOrSelf(const Id& ancestor, const Id& id) const;
 
@@ -47,6 +70,14 @@ public:
     [[nodiscard]] std::optional<Oklch> resolveColor(const Value<Oklch>& value, const Id& mode) const;
     /// A length in canvas pixels. Dimension tokens convert: rem and em as 16px, pt as 4/3px.
     [[nodiscard]] std::optional<double> resolveLength(const Value<double>& value, const Id& mode) const;
+    /// Opacity in [0, 1]; an unresolvable token counts as fully opaque.
+    [[nodiscard]] double resolveOpacity(const Value<double>& value, const Id& mode) const;
+    /// Corner radii in pixels: top-start, top-end, bottom-end, bottom-start.
+    [[nodiscard]] std::array<double, 4> resolveCorners(const Node& node, const Id& mode) const;
+    /// Nothing when the stroke draws nothing (no width, style none, or unresolvable).
+    [[nodiscard]] std::optional<ResolvedStroke> resolveStroke(const Value<Stroke>& value, const Id& mode) const;
+    [[nodiscard]] std::vector<ResolvedShadow> resolveShadows(const Value<std::vector<Shadow>>& value,
+                                                             const Id& mode) const;
 
 private:
     std::optional<OpBody> create(const CreateNode& op);
@@ -64,6 +95,8 @@ private:
     [[nodiscard]] bool isValidNodeRefs(const Node& node) const;
     [[nodiscard]] bool isValidPatchRefs(const NodePatch& patch) const;
     [[nodiscard]] bool hasCycle(const Token& candidate) const;
+    [[nodiscard]] bool isValidColorModifiers(const std::vector<Modifier>& modifiers) const;
+    bool applyColorModifiers(Oklch& color, const std::vector<Modifier>& modifiers, const Id& mode, int depth) const;
     [[nodiscard]] std::optional<TokenLiteral> resolveToken(const Id& token, const Id& mode, int depth) const;
 
     void link(const Node& node);
@@ -82,6 +115,10 @@ private:
     std::unordered_map<Id, std::vector<Id>> children_;
     std::unordered_map<Id, Token> tokens_;
     std::unordered_map<Id, Mode> modes_;
+
+    mutable std::unordered_map<Id, Rect> layout_;
+    mutable Id layoutMode_;
+    mutable bool layoutDirty_ = true;
 };
 
 } // namespace vc

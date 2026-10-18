@@ -22,10 +22,12 @@ add_library(vc_core STATIC
     src/demo.cpp
     src/document.cpp
     src/document_tokens.cpp
+    src/draw_list.cpp
     src/editor.cpp
     src/fractional_index.cpp
     src/geometry.cpp
     src/id.cpp
+    src/layout.cpp
     src/json.cpp
     src/node.cpp
     src/session.cpp
@@ -88,8 +90,10 @@ else()
         add_executable(vc_tests
             tests/test_camera.cpp
             tests/test_document.cpp
+            tests/test_draw_list.cpp
             tests/test_editor.cpp
             tests/test_json.cpp
+            tests/test_layout.cpp
             tests/test_model.cpp
             tests/test_tokens.cpp
             tests/test_viewport_controller.cpp

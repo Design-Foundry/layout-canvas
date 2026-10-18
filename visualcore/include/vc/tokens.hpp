@@ -7,11 +7,12 @@
 #include <vector>
 #include "vc/color.hpp"
 #include "vc/id.hpp"
+#include "vc/node.hpp"
 
 namespace vc {
 
 /// Token families, after Design Foundry's model 0.4. Members of a family take the same operations.
-enum class TokenType { Color, Dimension, Duration, Ratio, Opacity };
+enum class TokenType { Color, Dimension, Duration, Ratio, Opacity, Border, Shadow };
 
 enum class Unit { None, Px, Rem, Em, Pt, Ms, S };
 
@@ -22,9 +23,6 @@ struct Magnitude {
 
     friend bool operator==(const Magnitude&, const Magnitude&) = default;
 };
-
-/// A token's own value. Colors are born solid: alpha comes from modifiers.
-using TokenLiteral = std::variant<Oklch, Magnitude>;
 
 enum class ColorChannel { L, C, H, Alpha };
 enum class ColorOp { Set, Delta, Factor };
@@ -61,8 +59,40 @@ struct MagnitudeModifier {
 
 using Modifier = std::variant<ColorChannelModifier, ColorMixModifier, MagnitudeModifier>;
 
+/// A border token: a dimension token for the width, a line style, a color token.
+struct BorderValue {
+    Id width;
+    StrokeStyle style = StrokeStyle::Solid;
+    Id color;
+
+    friend bool operator==(const BorderValue&, const BorderValue&) = default;
+};
+
+/// One layer of a shadow token. Offsets are literal; the color is a token, optionally modified.
+struct ShadowLayerValue {
+    double x = 0.0;
+    double y = 0.0;
+    double blur = 0.0;
+    double spread = 0.0;
+    bool inset = false;
+    Id color;
+    std::vector<Modifier> colorModifiers;
+
+    friend bool operator==(const ShadowLayerValue&, const ShadowLayerValue&) = default;
+};
+
+struct ShadowValue {
+    std::vector<ShadowLayerValue> layers;
+
+    friend bool operator==(const ShadowValue&, const ShadowValue&) = default;
+};
+
+/// A token's own value. Colors are born solid: alpha comes from modifiers.
+using TokenLiteral = std::variant<Oklch, Magnitude, BorderValue, ShadowValue>;
+
 /// A design token. It is a primitive (`value`, the same in every mode) or an alias (`source`, one
 /// token of the same family per mode, covering the default mode). Modifiers apply after either.
+/// Border and shadow tokens are composites: primitives only, without modifiers.
 struct Token {
     Id id;
     TokenType type = TokenType::Color;
@@ -96,13 +126,27 @@ void forEachTokenReference(const Token& token, Fn&& fn) {
     for (const auto& [mode, source] : token.source) {
         fn(source);
     }
-    for (const Modifier& modifier : token.modifiers) {
-        if (const auto* channel = std::get_if<ColorChannelModifier>(&modifier); channel && channel->ref) {
-            fn(*channel->ref);
-        } else if (const auto* mixer = std::get_if<ColorMixModifier>(&modifier)) {
-            fn(mixer->token);
-        } else if (const auto* step = std::get_if<MagnitudeModifier>(&modifier); step && step->ref) {
-            fn(*step->ref);
+    const auto visitModifiers = [&](const std::vector<Modifier>& modifiers) {
+        for (const Modifier& modifier : modifiers) {
+            if (const auto* channel = std::get_if<ColorChannelModifier>(&modifier); channel && channel->ref) {
+                fn(*channel->ref);
+            } else if (const auto* mixer = std::get_if<ColorMixModifier>(&modifier)) {
+                fn(mixer->token);
+            } else if (const auto* step = std::get_if<MagnitudeModifier>(&modifier); step && step->ref) {
+                fn(*step->ref);
+            }
+        }
+    };
+    visitModifiers(token.modifiers);
+    if (token.value) {
+        if (const auto* border = std::get_if<BorderValue>(&*token.value)) {
+            fn(border->width);
+            fn(border->color);
+        } else if (const auto* shadow = std::get_if<ShadowValue>(&*token.value)) {
+            for (const ShadowLayerValue& layer : shadow->layers) {
+                fn(layer.color);
+                visitModifiers(layer.colorModifiers);
+            }
         }
     }
 }

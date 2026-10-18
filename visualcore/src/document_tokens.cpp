@@ -59,6 +59,26 @@ double lengthToPx(const Magnitude& length) {
     }
 }
 
+TokenType familyOf(TokenFamilyHint hint) {
+    switch (hint) {
+    case TokenFamilyHint::Color:
+        return TokenType::Color;
+    case TokenFamilyHint::Dimension:
+        return TokenType::Dimension;
+    case TokenFamilyHint::Opacity:
+        return TokenType::Opacity;
+    case TokenFamilyHint::Border:
+        return TokenType::Border;
+    case TokenFamilyHint::Shadow:
+        return TokenType::Shadow;
+    }
+    return TokenType::Color;
+}
+
+bool isComposite(TokenType type) {
+    return type == TokenType::Border || type == TokenType::Shadow;
+}
+
 } // namespace
 
 const Token* Document::findToken(const Id& id) const {
@@ -101,14 +121,14 @@ std::vector<const Mode*> Document::modes() const {
 }
 
 bool Document::isTokenReferenced(const Id& token) const {
-    const TokenRef ref{token};
+    bool found = false;
     for (const auto& [id, node] : nodes_) {
-        if (node.fill == Value<Oklch>{ref} || node.cornerRadius == Value<double>{ref}) {
-            return true;
-        }
+        forEachPatchTokenRef(fullPatch(node), [&](const Id& target, TokenFamilyHint) {
+            found = found || target == token;
+        });
+        if (found) return true;
     }
     for (const auto& [id, other] : tokens_) {
-        bool found = false;
         forEachTokenReference(other, [&](const Id& target) { found = found || target == token; });
         if (found) return true;
     }
@@ -119,10 +139,50 @@ std::optional<TokenLiteral> Document::resolveToken(const Id& token, const Id& mo
     return resolveToken(token, modes_.contains(mode) ? mode : kDefaultModeId, 0);
 }
 
+bool Document::applyColorModifiers(Oklch& color, const std::vector<Modifier>& modifiers, const Id& mode,
+                                   int depth) const {
+    for (const Modifier& modifier : modifiers) {
+        if (const auto* channel = std::get_if<ColorChannelModifier>(&modifier)) {
+            double operand = channel->value.value_or(0.0);
+            if (channel->ref) {
+                const auto resolved = resolveToken(*channel->ref, mode, depth + 1);
+                const auto* magnitude = resolved ? std::get_if<Magnitude>(&*resolved) : nullptr;
+                if (!magnitude) return false;
+                operand = magnitude->value;
+            }
+            switch (channel->channel) {
+            case ColorChannel::L:
+                color.l = std::clamp(applyOp(channel->op, color.l, operand), 0.0, 1.0);
+                break;
+            case ColorChannel::C:
+                color.c = std::max(0.0, applyOp(channel->op, color.c, operand));
+                break;
+            case ColorChannel::H:
+                color.h = wrapHue(applyOp(channel->op, color.h, operand));
+                break;
+            case ColorChannel::Alpha:
+                color.a = std::clamp(applyOp(channel->op, color.a, operand), 0.0, 1.0);
+                break;
+            }
+        } else if (const auto* mixer = std::get_if<ColorMixModifier>(&modifier)) {
+            const auto other = resolveToken(mixer->token, mode, depth + 1);
+            const auto* otherColor = other ? std::get_if<Oklch>(&*other) : nullptr;
+            if (!otherColor) return false;
+            color = mix(color, *otherColor, std::clamp(mixer->amount, 0.0, 1.0));
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::optional<TokenLiteral> Document::resolveToken(const Id& id, const Id& mode, int depth) const {
     const Token* token = findToken(id);
     if (!token || depth > kMaxResolveDepth) {
         return std::nullopt;
+    }
+    if (isComposite(token->type)) {
+        return token->value;
     }
 
     std::optional<TokenLiteral> value = token->value;
@@ -135,70 +195,42 @@ std::optional<TokenLiteral> Document::resolveToken(const Id& id, const Id& mode,
     if (!value) {
         return std::nullopt;
     }
-    if (auto* color = std::get_if<Oklch>(&*value); color && !token->isAlias()) {
-        color->a = 1.0;
+
+    if (auto* color = std::get_if<Oklch>(&*value)) {
+        if (!token->isAlias()) color->a = 1.0;
+        if (!applyColorModifiers(*color, token->modifiers, mode, depth)) return std::nullopt;
+        return value;
     }
 
+    auto* magnitude = std::get_if<Magnitude>(&*value);
+    if (!magnitude) return std::nullopt;
     for (const Modifier& modifier : token->modifiers) {
-        if (const auto* channel = std::get_if<ColorChannelModifier>(&modifier)) {
-            auto* color = std::get_if<Oklch>(&*value);
-            if (!color) return std::nullopt;
-            double operand = channel->value.value_or(0.0);
-            if (channel->ref) {
-                const auto resolved = resolveToken(*channel->ref, mode, depth + 1);
-                const auto* magnitude = resolved ? std::get_if<Magnitude>(&*resolved) : nullptr;
-                if (!magnitude) return std::nullopt;
-                operand = magnitude->value;
-            }
-            switch (channel->channel) {
-            case ColorChannel::L:
-                color->l = std::clamp(applyOp(channel->op, color->l, operand), 0.0, 1.0);
-                break;
-            case ColorChannel::C:
-                color->c = std::max(0.0, applyOp(channel->op, color->c, operand));
-                break;
-            case ColorChannel::H:
-                color->h = wrapHue(applyOp(channel->op, color->h, operand));
-                break;
-            case ColorChannel::Alpha:
-                color->a = std::clamp(applyOp(channel->op, color->a, operand), 0.0, 1.0);
-                break;
-            }
-        } else if (const auto* mixer = std::get_if<ColorMixModifier>(&modifier)) {
-            auto* color = std::get_if<Oklch>(&*value);
-            const auto other = resolveToken(mixer->token, mode, depth + 1);
-            const auto* otherColor = other ? std::get_if<Oklch>(&*other) : nullptr;
-            if (!color || !otherColor) return std::nullopt;
-            *color = mix(*color, *otherColor, std::clamp(mixer->amount, 0.0, 1.0));
-        } else if (const auto* step = std::get_if<MagnitudeModifier>(&modifier)) {
-            auto* magnitude = std::get_if<Magnitude>(&*value);
-            if (!magnitude) return std::nullopt;
-            double operand = step->value.value_or(0.0);
-            if (step->ref) {
-                const auto resolved = resolveToken(*step->ref, mode, depth + 1);
-                const auto* other = resolved ? std::get_if<Magnitude>(&*resolved) : nullptr;
-                if (!other) return std::nullopt;
-                operand = other->value;
-            }
-            switch (step->op) {
-            case MagnitudeOp::Factor:
-                magnitude->value *= operand;
-                break;
-            case MagnitudeOp::Delta:
-                magnitude->value += operand;
-                break;
-            case MagnitudeOp::Min:
-                magnitude->value = std::min(magnitude->value, operand);
-                break;
-            case MagnitudeOp::Max:
-                magnitude->value = std::max(magnitude->value, operand);
-                break;
-            }
+        const auto* step = std::get_if<MagnitudeModifier>(&modifier);
+        if (!step) return std::nullopt;
+        double operand = step->value.value_or(0.0);
+        if (step->ref) {
+            const auto resolved = resolveToken(*step->ref, mode, depth + 1);
+            const auto* other = resolved ? std::get_if<Magnitude>(&*resolved) : nullptr;
+            if (!other) return std::nullopt;
+            operand = other->value;
+        }
+        switch (step->op) {
+        case MagnitudeOp::Factor:
+            magnitude->value *= operand;
+            break;
+        case MagnitudeOp::Delta:
+            magnitude->value += operand;
+            break;
+        case MagnitudeOp::Min:
+            magnitude->value = std::min(magnitude->value, operand);
+            break;
+        case MagnitudeOp::Max:
+            magnitude->value = std::max(magnitude->value, operand);
+            break;
         }
     }
     if (token->type == TokenType::Opacity) {
-        auto& magnitude = std::get<Magnitude>(*value);
-        magnitude.value = std::clamp(magnitude.value, 0.0, 1.0);
+        magnitude->value = std::clamp(magnitude->value, 0.0, 1.0);
     }
     return value;
 }
@@ -226,6 +258,102 @@ std::optional<double> Document::resolveLength(const Value<double>& value, const 
     return magnitude ? std::optional{lengthToPx(*magnitude)} : std::nullopt;
 }
 
+double Document::resolveOpacity(const Value<double>& value, const Id& mode) const {
+    if (const auto* opacity = std::get_if<double>(&value)) {
+        return *opacity;
+    }
+    const auto resolved = resolveToken(std::get<TokenRef>(value).token, mode);
+    const auto* magnitude = resolved ? std::get_if<Magnitude>(&*resolved) : nullptr;
+    return magnitude ? std::clamp(magnitude->value, 0.0, 1.0) : 1.0;
+}
+
+std::array<double, 4> Document::resolveCorners(const Node& node, const Id& mode) const {
+    const double all = resolveLength(node.cornerRadius, mode).value_or(0.0);
+    std::array<double, 4> corners{all, all, all, all};
+    for (std::size_t i = 0; i < 4; ++i) {
+        if (node.cornerRadii[i]) {
+            corners[i] = resolveLength(*node.cornerRadii[i], mode).value_or(0.0);
+        }
+    }
+    return corners;
+}
+
+std::optional<ResolvedStroke> Document::resolveStroke(const Value<Stroke>& value, const Id& mode) const {
+    ResolvedStroke out;
+    if (const auto* ref = std::get_if<TokenRef>(&value)) {
+        const auto resolved = resolveToken(ref->token, mode);
+        const auto* border = resolved ? std::get_if<BorderValue>(&*resolved) : nullptr;
+        if (!border) return std::nullopt;
+        const auto width = resolveLength(TokenRef{border->width}, mode);
+        const auto color = resolveColor(TokenRef{border->color}, mode);
+        if (!width || !color) return std::nullopt;
+        out.widths = {*width, *width, *width, *width};
+        out.style = border->style;
+        out.color = *color;
+        out.align = StrokeAlign::Inside;
+    } else {
+        const Stroke& stroke = std::get<Stroke>(value);
+        const double all = resolveLength(stroke.width, mode).value_or(0.0);
+        for (std::size_t i = 0; i < 4; ++i) {
+            out.widths[i] = stroke.sides[i] ? resolveLength(*stroke.sides[i], mode).value_or(0.0) : all;
+        }
+        const auto color = resolveColor(stroke.color, mode);
+        if (!color) return std::nullopt;
+        out.style = stroke.style;
+        out.color = *color;
+        out.align = stroke.align;
+    }
+    const bool anyWidth = std::any_of(out.widths.begin(), out.widths.end(), [](double w) { return w > 0.0; });
+    if (out.style == StrokeStyle::None || !anyWidth) {
+        return std::nullopt;
+    }
+    return out;
+}
+
+std::vector<ResolvedShadow> Document::resolveShadows(const Value<std::vector<Shadow>>& value, const Id& mode) const {
+    std::vector<ResolvedShadow> out;
+    if (const auto* ref = std::get_if<TokenRef>(&value)) {
+        const auto resolved = resolveToken(ref->token, mode);
+        const auto* shadow = resolved ? std::get_if<ShadowValue>(&*resolved) : nullptr;
+        if (!shadow) return out;
+        for (const ShadowLayerValue& layer : shadow->layers) {
+            auto color = resolveColor(TokenRef{layer.color}, mode);
+            if (!color || !applyColorModifiers(*color, layer.colorModifiers, mode, 0)) continue;
+            out.push_back({layer.x, layer.y, layer.blur, layer.spread, *color, layer.inset});
+        }
+        return out;
+    }
+    for (const Shadow& layer : std::get<std::vector<Shadow>>(value)) {
+        if (!layer.visible) continue;
+        if (const auto color = resolveColor(layer.color, mode)) {
+            out.push_back({layer.x, layer.y, layer.blur, layer.spread, *color, layer.inset});
+        }
+    }
+    return out;
+}
+
+bool Document::isValidColorModifiers(const std::vector<Modifier>& modifiers) const {
+    for (const Modifier& modifier : modifiers) {
+        if (const auto* channel = std::get_if<ColorChannelModifier>(&modifier)) {
+            if (!hasOneOperand(channel->value, channel->ref)) return false;
+            if (channel->ref) {
+                const Token* target = findToken(*channel->ref);
+                if (channel->channel != ColorChannel::Alpha || !target || target->type != TokenType::Opacity) {
+                    return false;
+                }
+            }
+        } else if (const auto* mixer = std::get_if<ColorMixModifier>(&modifier)) {
+            const Token* target = findToken(mixer->token);
+            if (!target || target->type != TokenType::Color || mixer->amount < 0.0 || mixer->amount > 1.0) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool Document::isValidToken(const Token& token) const {
     if (token.id.isNil() || !isValidIdentifier(token.identifier) || token.value.has_value() == token.isAlias()) {
         return false;
@@ -234,6 +362,28 @@ bool Document::isValidToken(const Token& token) const {
         if (id != token.id && other.type == token.type && other.identifier == token.identifier) {
             return false;
         }
+    }
+    const auto refersTo = [this](const Id& id, TokenType type) {
+        const Token* target = findToken(id);
+        return target && target->type == type;
+    };
+
+    if (isComposite(token.type)) {
+        if (token.isAlias() || !token.modifiers.empty()) return false;
+        if (token.type == TokenType::Border) {
+            const auto* border = std::get_if<BorderValue>(&*token.value);
+            return border && refersTo(border->width, TokenType::Dimension) &&
+                   refersTo(border->color, TokenType::Color) && !hasCycle(token);
+        }
+        const auto* shadow = std::get_if<ShadowValue>(&*token.value);
+        if (!shadow || shadow->layers.empty()) return false;
+        for (const ShadowLayerValue& layer : shadow->layers) {
+            if (layer.blur < 0.0 || !refersTo(layer.color, TokenType::Color) ||
+                !isValidColorModifiers(layer.colorModifiers)) {
+                return false;
+            }
+        }
+        return !hasCycle(token);
     }
 
     if (token.value) {
@@ -257,35 +407,19 @@ bool Document::isValidToken(const Token& token) const {
             return false;
         }
         for (const auto& [mode, source] : token.source) {
-            const Token* target = findToken(source);
-            if (!modes_.contains(mode) || !target || target->type != token.type || source == token.id) {
+            if (!modes_.contains(mode) || source == token.id || !refersTo(source, token.type)) {
                 return false;
             }
         }
     }
 
-    for (const Modifier& modifier : token.modifiers) {
-        if (const auto* channel = std::get_if<ColorChannelModifier>(&modifier)) {
-            if (token.type != TokenType::Color || !hasOneOperand(channel->value, channel->ref)) return false;
-            if (channel->ref) {
-                const Token* target = findToken(*channel->ref);
-                if (channel->channel != ColorChannel::Alpha || !target || target->type != TokenType::Opacity) {
-                    return false;
-                }
-            }
-        } else if (const auto* mixer = std::get_if<ColorMixModifier>(&modifier)) {
-            const Token* target = findToken(mixer->token);
-            if (token.type != TokenType::Color || !target || target->type != TokenType::Color ||
-                mixer->amount < 0.0 || mixer->amount > 1.0) {
-                return false;
-            }
-        } else {
-            const auto& step = std::get<MagnitudeModifier>(modifier);
-            if (token.type == TokenType::Color || !hasOneOperand(step.value, step.ref)) return false;
-            if (step.ref) {
-                const Token* target = findToken(*step.ref);
-                if (!target || target->type != token.type) return false;
-            }
+    if (token.type == TokenType::Color) {
+        if (!isValidColorModifiers(token.modifiers)) return false;
+    } else {
+        for (const Modifier& modifier : token.modifiers) {
+            const auto* step = std::get_if<MagnitudeModifier>(&modifier);
+            if (!step || !hasOneOperand(step->value, step->ref)) return false;
+            if (step->ref && !refersTo(*step->ref, token.type)) return false;
         }
     }
     return !hasCycle(token);
@@ -311,21 +445,16 @@ bool Document::hasCycle(const Token& candidate) const {
 }
 
 bool Document::isValidNodeRefs(const Node& node) const {
-    NodePatch patch;
-    patch.fill = node.fill;
-    patch.cornerRadius = node.cornerRadius;
-    return isValidPatchRefs(patch);
+    return isValidPatchRefs(fullPatch(node));
 }
 
 bool Document::isValidPatchRefs(const NodePatch& patch) const {
-    const auto refersTo = [this](const auto& value, TokenType type) {
-        const auto* ref = std::get_if<TokenRef>(&value);
-        if (!ref) return true;
-        const Token* token = findToken(ref->token);
-        return token && token->type == type;
-    };
-    return (!patch.fill || refersTo(*patch.fill, TokenType::Color)) &&
-           (!patch.cornerRadius || refersTo(*patch.cornerRadius, TokenType::Dimension));
+    bool valid = true;
+    forEachPatchTokenRef(patch, [&](const Id& id, TokenFamilyHint hint) {
+        const Token* token = findToken(id);
+        valid = valid && token && token->type == familyOf(hint);
+    });
+    return valid;
 }
 
 std::optional<OpBody> Document::createToken(const CreateToken& op) {

@@ -109,6 +109,7 @@ private:
     void previewDraw(Vec2 from, Vec2 to);
     void startMove(Vec2 world);
     void updateMove(Vec2 world);
+    void updateReorder(Vec2 world);
     void startResize(Handle handle);
     void updateResize(Vec2 world);
     void finish();
@@ -139,6 +140,8 @@ private:
     /// Absolute position of the moved node when the gesture started.
     Vec2 targetStart_{};
     Handle handle_;
+    /// The moved node sits in an auto-layout parent, so dragging reorders it instead.
+    bool reorder_ = false;
     /// Absolute bounds of the resized node when the gesture started.
     Rect resizeStart_{};
 };

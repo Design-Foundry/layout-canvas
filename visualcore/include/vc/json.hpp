@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "vc/camera.hpp"
 #include "vc/document.hpp"
 #include "vc/op.hpp"
 
@@ -24,8 +25,10 @@ namespace vc {
 /// ignored. Returns nothing if any entry is malformed.
 [[nodiscard]] std::optional<std::vector<OpBody>> opsFromJson(std::string_view data);
 
-/// A node for the inspector: the stored fields plus `fill.hex` when the fill is a literal color.
-[[nodiscard]] std::string inspectNodeJson(const Node& node);
+/// A node for the inspector: every stored field (defaults included), `fill.hex` when the fill is a
+/// literal color, `box` (its laid-out rect relative to the parent in `mode`), and `inFlow` when an
+/// auto-layout parent places it.
+[[nodiscard]] std::string inspectNodeJson(const Document& document, const Node& node, const Id& mode);
 
 /// Parses a patch in the same shape `SetProps` uses on the wire.
 [[nodiscard]] std::optional<NodePatch> patchFromJson(std::string_view data);
@@ -35,6 +38,10 @@ namespace vc {
 
 /// Rows for a layers panel: `{ id, name, type, depth, visible }`, topmost layer first, children under their parent.
 [[nodiscard]] std::string layersToJson(const Document& document);
+
+/// Names of top-level frames for labels on the canvas: `{ id, name, x, y, w }` where x and y are the
+/// frame's top-left corner and w its width, in screen CSS pixels.
+[[nodiscard]] std::string frameLabelsToJson(const Document& document, const Camera& camera, const Id& mode);
 
 /// Every node of `document`, parents before children, as a JSON snapshot.
 [[nodiscard]] std::string snapshotToJson(const Document& document);

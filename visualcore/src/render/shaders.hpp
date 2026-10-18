@@ -43,72 +43,137 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
 )";
 
 inline constexpr const char* kShapesWgsl = R"(
-struct Shape {
-    pos: vec2f,
-    size: vec2f,
+struct Item {
+    quad: vec4f,
     color: vec4f,
     clip: vec4f,
-    radius: f32,
-    kind: u32,
+    aRect: vec4f,
+    aRadii: vec4f,
+    bRect: vec4f,
+    bRadii: vec4f,
+    params: vec4f,
+    extra: vec4f,
 }
 
-@group(0) @binding(1) var<storage, read> shapes: array<Shape>;
+@group(0) @binding(1) var<storage, read> items: array<Item>;
+
+const kFill = 0u;
+const kStroke = 1u;
+const kDropShadow = 2u;
+const kInnerShadow = 3u;
+const kOutline = 4u;
+const kOutlineWidthPx = 1.5;
 
 struct VertexOut {
     @builtin(position) pos: vec4f,
-    @location(0) color: vec4f,
-    @location(1) local: vec2f,
-    @location(2) world: vec2f,
-    @location(3) @interpolate(flat) clip: vec4f,
-    @location(4) @interpolate(flat) shape: vec4f,
+    @location(0) world: vec2f,
+    @location(1) @interpolate(flat) index: u32,
 }
 
 @vertex
 fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) i: u32) -> VertexOut {
-    let s = shapes[i];
+    let item = items[i];
     let corner = vec2f(f32(v & 1u), f32(v >> 1u));
     let aaPad = 2.0 / frame.zoom;
-    let local = corner * (s.size + 2.0 * aaPad) - aaPad;
-
     var out: VertexOut;
-    out.world = s.pos + local;
+    out.world = item.quad.xy - aaPad + corner * (item.quad.zw + 2.0 * aaPad);
     out.pos = toClip(out.world * frame.zoom);
-    out.color = s.color;
-    out.local = local;
-    out.clip = s.clip;
-    out.shape = vec4f(s.size, s.radius, f32(s.kind));
+    out.index = i;
     return out;
 }
 
-const kOutlineWidthPx = 1.5;
-
-fn boxDistance(p: vec2f, half: vec2f, radius: f32) -> f32 {
-    let r = min(radius, min(half.x, half.y));
-    let q = abs(p) - half + r;
+fn boxDistance(p: vec2f, rect: vec4f, radii: vec4f) -> f32 {
+    let q0 = p - rect.xy;
+    let top = select(radii.x, radii.y, q0.x > 0.0);
+    let bottom = select(radii.w, radii.z, q0.x > 0.0);
+    let r = min(select(top, bottom, q0.y > 0.0), min(rect.z, rect.w));
+    let q = abs(q0) - rect.zw + r;
     return length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
-fn ellipseDistance(p: vec2f, half: vec2f) -> f32 {
-    return (length(p / half) - 1.0) * min(half.x, half.y);
+fn ellipseDistance(p: vec2f, rect: vec4f) -> f32 {
+    let half = max(rect.zw, vec2f(1e-4));
+    return (length((p - rect.xy) / half) - 1.0) * min(half.x, half.y);
+}
+
+fn shapeDistance(p: vec2f, rect: vec4f, radii: vec4f, ellipse: bool) -> f32 {
+    if (ellipse) {
+        return ellipseDistance(p, rect);
+    }
+    return boxDistance(p, rect, radii);
+}
+
+fn coverage(d: f32) -> f32 {
+    return clamp(0.5 - d * frame.zoom * frame.dpr, 0.0, 1.0);
+}
+
+fn erf(x: f32) -> f32 {
+    let s = sign(x);
+    let a = abs(x);
+    var r = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+    r = r * r;
+    return s - s / (r * r);
+}
+
+fn blurred(d: f32, sigma: f32) -> f32 {
+    if (sigma * frame.zoom * frame.dpr < 0.5) {
+        return coverage(d);
+    }
+    return 0.5 - 0.5 * erf(d / (sigma * 1.41421356));
+}
+
+/// 1 on the drawn parts of a dashed, dotted or double stroke band, 0 in the gaps.
+fn strokePattern(p: vec2f, item: Item, dOuter: f32) -> f32 {
+    let style = u32(item.extra.x);
+    let width = max(item.params.w, 1e-3);
+    if (style == 4u) {
+        let depth = -dOuter / width;
+        return select(0.0, 1.0, depth < 0.34 || depth > 0.66);
+    }
+    if (style != 2u && style != 3u) {
+        return 1.0;
+    }
+    let q = p - item.aRect.xy;
+    let half = max(item.aRect.zw, vec2f(1e-4));
+    var t = q.x + half.x;
+    if (item.params.y > 0.5) {
+        t = (atan2(q.y / half.y, q.x / half.x) + 3.14159265) * (half.x + half.y) * 0.5;
+    } else if (abs(q.x) / half.x > abs(q.y) / half.y) {
+        t = q.y + half.y;
+    }
+    let dash = select(3.0 * width, width, style == 3u);
+    let gap = select(2.0 * width, width, style == 3u);
+    return select(0.0, 1.0, fract(t / (dash + gap)) * (dash + gap) < dash);
 }
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4f {
-    if (any(in.world < in.clip.xy) || any(in.world > in.clip.zw)) {
+    let item = items[in.index];
+    let p = in.world;
+    if (any(p < item.clip.xy) || any(p > item.clip.zw)) {
         discard;
     }
-    let half = in.shape.xy * 0.5;
-    let p = in.local - half;
-    var d: f32;
-    if (in.shape.w > 1.5) {
-        d = abs(boxDistance(p, half, 0.0)) - kOutlineWidthPx * 0.5 / frame.zoom;
-    } else if (in.shape.w > 0.5) {
-        d = ellipseDistance(p, half);
-    } else {
-        d = boxDistance(p, half, in.shape.z);
+    let kind = u32(item.params.x);
+    let ellipse = item.params.y > 0.5;
+    let sigma = item.params.z;
+    let dA = shapeDistance(p, item.aRect, item.aRadii, ellipse);
+
+    var alpha = 0.0;
+    if (kind == kFill) {
+        alpha = coverage(dA);
+    } else if (kind == kStroke) {
+        let dB = shapeDistance(p, item.bRect, item.bRadii, ellipse);
+        alpha = coverage(dA) * (1.0 - coverage(dB)) * strokePattern(p, item, dA);
+    } else if (kind == kDropShadow) {
+        alpha = blurred(dA, sigma);
+    } else if (kind == kInnerShadow) {
+        let dB = shapeDistance(p, item.bRect, item.bRadii, ellipse);
+        alpha = coverage(dB) * (1.0 - blurred(dA, sigma));
+    } else if (kind == kOutline) {
+        let ring = abs(boxDistance(p, item.aRect, vec4f(0.0))) - kOutlineWidthPx * 0.5 / frame.zoom;
+        alpha = coverage(ring);
     }
-    let coverage = clamp(0.5 - d * frame.zoom * frame.dpr, 0.0, 1.0);
-    return vec4f(in.color.rgb, in.color.a * coverage);
+    return vec4f(item.color.rgb, item.color.a * alpha);
 }
 )";
 

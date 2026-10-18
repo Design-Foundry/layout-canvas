@@ -102,6 +102,24 @@ std::optional<Id> Editor::addToken(TokenType type) {
     case TokenType::Opacity:
         token.value = Magnitude{1.0, Unit::None};
         break;
+    case TokenType::Border:
+    case TokenType::Shadow: {
+        const Token* firstColor = nullptr;
+        const Token* firstDimension = nullptr;
+        for (const Token* other : document.tokens()) {
+            if (!firstColor && other->type == TokenType::Color) firstColor = other;
+            if (!firstDimension && other->type == TokenType::Dimension) firstDimension = other;
+        }
+        if (!firstColor || (type == TokenType::Border && !firstDimension)) {
+            return std::nullopt;
+        }
+        if (type == TokenType::Border) {
+            token.value = BorderValue{firstDimension->id, StrokeStyle::Solid, firstColor->id};
+        } else {
+            token.value = ShadowValue{{ShadowLayerValue{0.0, 4.0, 8.0, 0.0, false, firstColor->id, {}}}};
+        }
+        break;
+    }
     }
     const Id id = token.id;
     return edit(CreateToken{std::move(token)}) ? std::optional{id} : std::nullopt;
@@ -332,14 +350,14 @@ double Editor::snap(double world) const {
 }
 
 Vec2 Editor::originOf(const Id& parent) const {
-    const auto bounds = worldBounds(session_.document(), parent);
+    const auto bounds = worldBounds(session_.document(), parent, activeMode_);
     return bounds ? Vec2{bounds->x, bounds->y} : Vec2{};
 }
 
 void Editor::startDraw(Vec2 world) {
     gesture_ = Gesture::Draw;
     target_ = session_.newId();
-    drawParent_ = hitTest(session_.document(), world, true);
+    drawParent_ = hitTest(session_.document(), world, true, activeMode_);
     parentOrigin_ = originOf(drawParent_);
 }
 
@@ -375,7 +393,7 @@ void Editor::previewDraw(Vec2 from, Vec2 to) {
 }
 
 void Editor::startMove(Vec2 world) {
-    const Id hit = hitTest(session_.document(), world);
+    const Id hit = hitTest(session_.document(), world, false, activeMode_);
     if (hit.isNil()) {
         clearSelection();
         return;
@@ -383,12 +401,52 @@ void Editor::startMove(Vec2 world) {
     select(hit);
     gesture_ = Gesture::Move;
     target_ = hit;
-    parentOrigin_ = originOf(session_.document().find(hit)->parent);
-    const Rect bounds = *worldBounds(session_.document(), hit);
+    const Node& node = *session_.document().find(hit);
+    const Node* parent = session_.document().find(node.parent);
+    reorder_ = parent && parent->layout.type != LayoutType::None && !node.absolute;
+    parentOrigin_ = originOf(node.parent);
+    const Rect bounds = *worldBounds(session_.document(), hit, activeMode_);
     targetStart_ = {bounds.x, bounds.y};
 }
 
+void Editor::updateReorder(Vec2 world) {
+    const Document& document = session_.document();
+    const Node& node = *document.find(target_);
+    const Node& parent = *document.find(node.parent);
+    const bool row = parent.layout.type == LayoutType::Row;
+
+    std::vector<const Node*> flow;
+    std::size_t current = 0;
+    for (const Id& id : document.children(parent.id)) {
+        const Node* sibling = document.find(id);
+        if (sibling->id == target_) {
+            current = flow.size();
+        } else if (sibling->visible && !sibling->absolute) {
+            flow.push_back(sibling);
+        }
+    }
+
+    std::size_t index = 0;
+    for (const Node* sibling : flow) {
+        const Rect bounds = *worldBounds(document, sibling->id, activeMode_);
+        const double center = row ? bounds.x + bounds.w / 2.0 : bounds.y + bounds.h / 2.0;
+        if ((row ? world.x : world.y) > center) ++index;
+    }
+    if (index == current) {
+        session_.cancelPreview();
+        return;
+    }
+    const std::string before = index > 0 ? flow[index - 1]->order : "";
+    const std::optional<std::string_view> after =
+        index < flow.size() ? std::optional<std::string_view>{flow[index]->order} : std::nullopt;
+    session_.preview(MoveNode{target_, parent.id, keyBetween(before, after)});
+}
+
 void Editor::updateMove(Vec2 world) {
+    if (reorder_) {
+        updateReorder(world);
+        return;
+    }
     Vec2 delta = world - downWorld_;
     if (modifiers_.shift) {
         if (std::abs(delta.x) >= std::abs(delta.y)) {
@@ -431,7 +489,11 @@ std::optional<Rect> Editor::handleBounds() const {
     if (selection_.size() != 1) {
         return std::nullopt;
     }
-    return worldBounds(session_.document(), selection_[0]);
+    const Node* node = session_.document().find(selection_[0]);
+    if (!node || node->locked) {
+        return std::nullopt;
+    }
+    return worldBounds(session_.document(), selection_[0], activeMode_);
 }
 
 Handle Editor::handleAt(Vec2 screen) const {
@@ -490,7 +552,7 @@ void Editor::startResize(Handle handle) {
     gesture_ = Gesture::Resize;
     handle_ = handle;
     target_ = selection_[0];
-    resizeStart_ = *worldBounds(session_.document(), target_);
+    resizeStart_ = *worldBounds(session_.document(), target_, activeMode_);
     parentOrigin_ = originOf(session_.document().find(target_)->parent);
 }
 
@@ -558,6 +620,11 @@ void Editor::updateResize(Vec2 world) {
     patch.y = std::min(y0, y1) - parentOrigin_.y;
     patch.w = std::max(std::abs(x1 - x0), minSize);
     patch.h = std::max(std::abs(y1 - y0), minSize);
+    const Node& node = *session_.document().find(target_);
+    const bool widthMoved = handle_.x != 0 || (modifiers_.shift && handle_.y != 0);
+    const bool heightMoved = handle_.y != 0 || (modifiers_.shift && handle_.x != 0);
+    if (widthMoved && node.widthSizing != Sizing::Fixed) patch.widthSizing = Sizing::Fixed;
+    if (heightMoved && node.heightSizing != Sizing::Fixed) patch.heightSizing = Sizing::Fixed;
     session_.preview(SetProps{target_, patch});
 }
 

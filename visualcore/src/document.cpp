@@ -1,4 +1,5 @@
 #include "vc/document.hpp"
+#include "vc/layout.hpp"
 
 #include <algorithm>
 #include <type_traits>
@@ -6,12 +7,51 @@
 namespace vc {
 namespace {
 
-bool isValidGeometry(double w, double h, double opacity) {
-    return w >= 0.0 && h >= 0.0 && opacity >= 0.0 && opacity <= 1.0;
+bool nonNegative(const Value<double>& value) {
+    const auto* literal = std::get_if<double>(&value);
+    return !literal || *literal >= 0.0;
 }
 
 bool isValidPatch(const NodePatch& patch) {
-    return isValidGeometry(patch.w.value_or(0.0), patch.h.value_or(0.0), patch.opacity.value_or(1.0));
+    if ((patch.w && *patch.w < 0.0) || (patch.h && *patch.h < 0.0)) return false;
+    if (patch.opacity) {
+        const auto* opacity = std::get_if<double>(&*patch.opacity);
+        if (opacity && (*opacity < 0.0 || *opacity > 1.0)) return false;
+    }
+    if (patch.cornerRadius && !nonNegative(*patch.cornerRadius)) return false;
+    if (patch.cornerRadii) {
+        for (const auto& corner : *patch.cornerRadii) {
+            if (corner && !nonNegative(*corner)) return false;
+        }
+    }
+    if (patch.stroke) {
+        if (const auto* stroke = std::get_if<Stroke>(&*patch.stroke)) {
+            if (!nonNegative(stroke->width)) return false;
+            for (const auto& side : stroke->sides) {
+                if (side && !nonNegative(*side)) return false;
+            }
+        }
+    }
+    if (patch.shadows) {
+        if (const auto* layers = std::get_if<std::vector<Shadow>>(&*patch.shadows)) {
+            for (const Shadow& layer : *layers) {
+                if (layer.blur < 0.0) return false;
+            }
+        }
+    }
+    if (patch.layout) {
+        if (!nonNegative(patch.layout->gap)) return false;
+        for (const auto& side : patch.layout->padding) {
+            if (!nonNegative(side)) return false;
+        }
+    }
+    if (patch.limits) {
+        for (const auto* limit : {&patch.limits->minWidth, &patch.limits->maxWidth, &patch.limits->minHeight,
+                                  &patch.limits->maxHeight}) {
+            if (*limit && !nonNegative(**limit)) return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -21,7 +61,7 @@ Document::Document() {
 }
 
 std::optional<OpBody> Document::apply(const OpBody& op) {
-    return std::visit(
+    auto inverse = std::visit(
         [this](const auto& body) -> std::optional<OpBody> {
             using T = std::decay_t<decltype(body)>;
             if constexpr (std::is_same_v<T, CreateNode>) {
@@ -47,6 +87,20 @@ std::optional<OpBody> Document::apply(const OpBody& op) {
             }
         },
         op);
+    if (inverse) {
+        layoutDirty_ = true;
+    }
+    return inverse;
+}
+
+Rect Document::box(const Id& id, const Id& mode) const {
+    if (layoutDirty_ || layoutMode_ != mode) {
+        layout_ = computeLayout(*this, mode);
+        layoutMode_ = mode;
+        layoutDirty_ = false;
+    }
+    const auto it = layout_.find(id);
+    return it == layout_.end() ? Rect{} : it->second;
 }
 
 const Node* Document::find(const Id& id) const {
@@ -72,7 +126,7 @@ bool Document::isAncestorOrSelf(const Id& ancestor, const Id& id) const {
 std::optional<OpBody> Document::create(const CreateNode& op) {
     const Node& node = op.node;
     if (node.id.isNil() || nodes_.contains(node.id) || !isValidParent(node.parent) ||
-        !isValidGeometry(node.w, node.h, node.opacity) || !isValidNodeRefs(node)) {
+        !isValidPatch(fullPatch(node)) || !isValidNodeRefs(node)) {
         return std::nullopt;
     }
     link(nodes_.emplace(node.id, node).first->second);

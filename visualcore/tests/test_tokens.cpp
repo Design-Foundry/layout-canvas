@@ -322,3 +322,86 @@ TEST_CASE("the editor adds tokens with free identifiers, last in their family") 
     REQUIRE(editor.deleteMode(*mode));
     REQUIRE(editor.activeMode() == vc::kDefaultModeId);
 }
+
+TEST_CASE("border and shadow tokens reference other tokens and resolve for strokes and shadows") {
+    Document doc;
+    const Id dark{9, 9};
+    doc.apply(vc::CreateMode{{dark, "Dark", "a1"}});
+    doc.apply(CreateToken{magnitude(1, TokenType::Dimension, "hairline", 1, Unit::Px)});
+    doc.apply(CreateToken{color(2, "gray-200", {0.9, 0, 0})});
+    doc.apply(CreateToken{color(3, "gray-800", {0.3, 0, 0})});
+    doc.apply(CreateToken{alias(4, TokenType::Color, "border", {{vc::kDefaultModeId, idOf(2)}, {dark, idOf(3)}})});
+    doc.apply(CreateToken{magnitude(5, TokenType::Opacity, "shade", 0.2, Unit::None)});
+
+    Token border;
+    border.id = idOf(10);
+    border.type = TokenType::Border;
+    border.identifier = "border-subtle";
+    border.value = vc::BorderValue{idOf(1), vc::StrokeStyle::Solid, idOf(4)};
+    REQUIRE(doc.apply(CreateToken{border}));
+
+    Token shadow;
+    shadow.id = idOf(11);
+    shadow.type = TokenType::Shadow;
+    shadow.identifier = "shadow-md";
+    shadow.value = vc::ShadowValue{{vc::ShadowLayerValue{0, 4, 12, 0, false, idOf(3),
+        {vc::ColorChannelModifier{vc::ColorChannel::Alpha, vc::ColorOp::Set, std::nullopt, idOf(5)}}}}};
+    REQUIRE(doc.apply(CreateToken{shadow}));
+
+    const auto stroke = doc.resolveStroke(vc::TokenRef{idOf(10)}, dark);
+    REQUIRE(stroke.has_value());
+    REQUIRE(stroke->widths[vc::kTop] == 1.0);
+    REQUIRE(stroke->color.l == 0.3);
+
+    const auto layers = doc.resolveShadows(vc::TokenRef{idOf(11)}, vc::kDefaultModeId);
+    REQUIRE(layers.size() == 1);
+    REQUIRE(layers[0].blur == 12);
+    REQUIRE_THAT(layers[0].color.a, WithinAbs(0.2, 1e-9));
+
+    REQUIRE(doc.isTokenReferenced(idOf(1)));
+    REQUIRE_FALSE(doc.apply(vc::DeleteToken{idOf(4)}));
+
+    Token badBorder = border;
+    badBorder.id = idOf(12);
+    badBorder.identifier = "bad";
+    badBorder.value = vc::BorderValue{idOf(2), vc::StrokeStyle::Solid, idOf(4)};
+    REQUIRE_FALSE(doc.apply(CreateToken{badBorder}));
+
+    Token aliasedBorder = border;
+    aliasedBorder.id = idOf(13);
+    aliasedBorder.identifier = "aliased";
+    aliasedBorder.value.reset();
+    aliasedBorder.source = {{vc::kDefaultModeId, idOf(10)}};
+    REQUIRE_FALSE(doc.apply(CreateToken{aliasedBorder}));
+}
+
+TEST_CASE("node strokes resolve per side and nothing when invisible") {
+    Document doc;
+    vc::Stroke stroke;
+    stroke.width = 2.0;
+    stroke.sides[vc::kBottom] = 6.0;
+    const auto resolved = doc.resolveStroke(stroke, vc::kDefaultModeId);
+    REQUIRE(resolved->widths == std::array<double, 4>{2, 2, 6, 2});
+
+    stroke.style = vc::StrokeStyle::None;
+    REQUIRE_FALSE(doc.resolveStroke(stroke, vc::kDefaultModeId).has_value());
+    REQUIRE_FALSE(doc.resolveStroke(vc::Stroke{}, vc::kDefaultModeId).has_value());
+}
+
+TEST_CASE("node token references are checked for every bindable property") {
+    Document doc;
+    doc.apply(CreateToken{color(1, "pine", {0.6, 0.1, 160})});
+    doc.apply(CreateToken{magnitude(2, TokenType::Opacity, "half", 0.5, Unit::None)});
+    vc::Node node;
+    node.id = idOf(50);
+    node.w = node.h = 10;
+    node.opacity = vc::TokenRef{idOf(1)};
+    REQUIRE_FALSE(doc.apply(vc::CreateNode{node}));
+    node.opacity = vc::TokenRef{idOf(2)};
+    node.layout.gap = vc::TokenRef{idOf(1)};
+    REQUIRE_FALSE(doc.apply(vc::CreateNode{node}));
+    node.layout.gap = 0.0;
+    REQUIRE(doc.apply(vc::CreateNode{node}));
+    REQUIRE(doc.resolveOpacity(node.opacity, vc::kDefaultModeId) == 0.5);
+    REQUIRE(doc.isTokenReferenced(idOf(2)));
+}

@@ -139,14 +139,21 @@ TEST_CASE("op lists accept server records and reject bad entries") {
     REQUIRE_FALSE(vc::opsFromJson(R"({"kind":"DeleteNode"})").has_value());
 }
 
-TEST_CASE("inspected nodes carry the fill as hex next to its oklch value") {
+TEST_CASE("inspected nodes carry hex fills, the laid-out box and every field") {
+    vc::Document doc;
+    REQUIRE(doc.apply(vc::CreateToken{radiusToken()}));
     Node n = sampleNode();
     n.fill = *vc::fromHex("#3a86ff");
-    const std::string json = vc::inspectNodeJson(n);
+    REQUIRE(doc.apply(CreateNode{n}));
+
+    const std::string json = vc::inspectNodeJson(doc, n, vc::kDefaultModeId);
     REQUIRE(json.find("\"hex\":\"#3a86ff\"") != std::string::npos);
+    REQUIRE(json.find("\"box\":{\"h\":200.0,\"w\":320.0,\"x\":12.5,\"y\":-40.0}") != std::string::npos);
+    REQUIRE(json.find("\"stroke\":") != std::string::npos);
+    REQUIRE(json.find("\"inFlow\":false") != std::string::npos);
 
     n.fill = vc::TokenRef{kRadiusToken};
-    REQUIRE(vc::inspectNodeJson(n).find("hex") == std::string::npos);
+    REQUIRE(vc::inspectNodeJson(doc, n, vc::kDefaultModeId).find("hex") == std::string::npos);
 }
 
 TEST_CASE("patches parse from the wire shape") {
@@ -155,4 +162,24 @@ TEST_CASE("patches parse from the wire shape") {
     REQUIRE(patch->x == 4.0);
     REQUIRE(patch->visible == false);
     REQUIRE_FALSE(vc::patchFromJson(R"({"x":"4"})").has_value());
+}
+
+TEST_CASE("frame labels sit at each top-level frame's screen corner") {
+    vc::Document doc;
+    Node frame;
+    frame.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000010");
+    frame.type = vc::NodeType::Frame;
+    frame.order = "a0";
+    frame.name = "Home";
+    frame.x = 100;
+    frame.y = 50;
+    frame.w = 200;
+    frame.h = 100;
+    doc.apply(CreateNode{frame});
+    vc::Camera camera;
+    camera.zoomAt({0, 0}, 2.0);
+
+    const std::string labels = vc::frameLabelsToJson(doc, camera, vc::kDefaultModeId);
+    REQUIRE(labels.find("\"name\":\"Home\"") != std::string::npos);
+    REQUIRE(labels.find("\"w\":400.0,\"x\":200.0,\"y\":100.0") != std::string::npos);
 }

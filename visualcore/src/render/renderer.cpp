@@ -14,6 +14,7 @@
 
 #include "shaders.hpp"
 #include "vc/color.hpp"
+#include "vc/draw_list.hpp"
 #include "vc/geometry.hpp"
 
 namespace vc::render {
@@ -28,22 +29,25 @@ struct FrameUniform {
     float gridMinorAlpha;
 };
 
-struct ShapeInstance {
-    float pos[2];
-    float size[2];
+/// One draw item as the shaders read it. Rects are center and half size, relative to the camera
+/// origin; radii are top-start, top-end, bottom-end, bottom-start.
+struct GpuItem {
+    float quad[4];
     float color[4];
     float clip[4];
-    float radius;
-    std::uint32_t kind;
-    float pad[2];
+    float aRect[4];
+    float aRadii[4];
+    float bRect[4];
+    float bRadii[4];
+    /// kind, ellipse flag, sigma, stroke width.
+    float params[4];
+    /// stroke style, unused.
+    float extra[4];
 };
 
-constexpr std::uint32_t kKindBox = 0;
-constexpr std::uint32_t kKindEllipse = 1;
-constexpr std::uint32_t kKindOutline = 2;
 constexpr double kUnbounded = 1e30;
-constexpr Color kUnresolvedTokenColor{1.0f, 0.0f, 1.0f, 1.0f};
 constexpr Oklch kSelectionColor{0.62, 0.19, 255.0};
+constexpr Rect kNoClip{-kUnbounded, -kUnbounded, 2 * kUnbounded, 2 * kUnbounded};
 
 constexpr double kMinGridSpacingPx = 8.0;
 constexpr double kGridFadeEndPx = 32.0;
@@ -99,7 +103,8 @@ struct Renderer::State {
     std::size_t shapesCapacity = 0;
     wgpu::BindGroup bindGroup;
 
-    std::vector<ShapeInstance> instances;
+    std::vector<DrawItem> drawItems;
+    std::vector<GpuItem> instances;
     Rect view;
     Vec2 origin;
 
@@ -120,9 +125,7 @@ struct Renderer::State {
     bool resizeIfNeeded();
     void writeFrameUniform();
     void buildInstances();
-    void collect(const Id& parent, Vec2 offset, const Rect& clip, double opacity);
     void addSelectionOutlines();
-    void addBox(const Rect& world, const Color& color);
     void applyCursor();
     bool frame(double time);
 };
@@ -216,7 +219,7 @@ void Renderer::State::createPipelines() {
     entries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
     entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
     entries[1].binding = 1;
-    entries[1].visibility = wgpu::ShaderStage::Vertex;
+    entries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
     entries[1].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
 
     wgpu::BindGroupLayoutDescriptor layoutDesc{};
@@ -274,7 +277,7 @@ void Renderer::State::ensureShapesCapacity(std::size_t count) {
 
     wgpu::BufferDescriptor desc{};
     desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
-    desc.size = shapesCapacity * sizeof(ShapeInstance);
+    desc.size = shapesCapacity * sizeof(GpuItem);
     shapesBuffer = device.CreateBuffer(&desc);
 
     wgpu::BindGroupEntry entries[2]{};
@@ -349,28 +352,50 @@ void Renderer::State::writeFrameUniform() {
 void Renderer::State::buildInstances() {
     view = camera.visibleWorld({cssWidth, cssHeight});
     origin = camera.position();
-    instances.clear();
-    collect(Id{}, {}, {-kUnbounded, -kUnbounded, 2 * kUnbounded, 2 * kUnbounded}, 1.0);
-    stats.visible = instances.size();
+    stats.visible = buildDrawList(document, view, editor.activeMode(), drawItems);
     addSelectionOutlines();
+
+    instances.clear();
+    instances.reserve(drawItems.size());
+    const auto box = [this](const Rect& r, float out[4]) {
+        out[0] = float(r.x + r.w / 2.0 - origin.x);
+        out[1] = float(r.y + r.h / 2.0 - origin.y);
+        out[2] = float(r.w / 2.0);
+        out[3] = float(r.h / 2.0);
+    };
+    const auto radii = [](const std::array<double, 4>& r, float out[4]) {
+        for (std::size_t i = 0; i < 4; ++i) out[i] = float(r[i]);
+    };
+    for (const DrawItem& item : drawItems) {
+        GpuItem gpu{};
+        gpu.quad[0] = float(item.quad.x - origin.x);
+        gpu.quad[1] = float(item.quad.y - origin.y);
+        gpu.quad[2] = float(item.quad.w);
+        gpu.quad[3] = float(item.quad.h);
+        gpu.color[0] = item.color.r;
+        gpu.color[1] = item.color.g;
+        gpu.color[2] = item.color.b;
+        gpu.color[3] = item.color.a;
+        gpu.clip[0] = float(item.clip.x - origin.x);
+        gpu.clip[1] = float(item.clip.y - origin.y);
+        gpu.clip[2] = float(item.clip.x + item.clip.w - origin.x);
+        gpu.clip[3] = float(item.clip.y + item.clip.h - origin.y);
+        box(item.a.rect, gpu.aRect);
+        radii(item.a.radii, gpu.aRadii);
+        box(item.b.rect, gpu.bRect);
+        radii(item.b.radii, gpu.bRadii);
+        gpu.params[0] = float(static_cast<int>(item.kind));
+        gpu.params[1] = item.ellipse ? 1.0f : 0.0f;
+        gpu.params[2] = float(item.sigma);
+        gpu.params[3] = float(item.strokeWidth);
+        gpu.extra[0] = float(static_cast<int>(item.style));
+        instances.push_back(gpu);
+    }
 
     ensureShapesCapacity(instances.size());
     if (!instances.empty()) {
-        device.GetQueue().WriteBuffer(shapesBuffer, 0, instances.data(),
-                                      instances.size() * sizeof(ShapeInstance));
+        device.GetQueue().WriteBuffer(shapesBuffer, 0, instances.data(), instances.size() * sizeof(GpuItem));
     }
-}
-
-void Renderer::State::addBox(const Rect& world, const Color& color) {
-    instances.push_back({
-        {float(world.x - origin.x), float(world.y - origin.y)},
-        {float(world.w), float(world.h)},
-        {color.r, color.g, color.b, color.a},
-        {float(-kUnbounded), float(-kUnbounded), float(kUnbounded), float(kUnbounded)},
-        0.0f,
-        kKindBox,
-        {},
-    });
 }
 
 void Renderer::State::applyCursor() {
@@ -385,20 +410,11 @@ void Renderer::State::applyCursor() {
 
 void Renderer::State::addSelectionOutlines() {
     const Color color = toSrgb(kSelectionColor);
+    const Id& mode = editor.activeMode();
     for (const Id& id : editor.selection()) {
-        const auto bounds = worldBounds(document, id);
-        if (!bounds) {
-            continue;
+        if (const auto bounds = worldBounds(document, id, mode)) {
+            drawItems.push_back({DrawKind::Outline, false, *bounds, {*bounds, {}}, {}, color, kNoClip});
         }
-        instances.push_back({
-            {float(bounds->x - origin.x), float(bounds->y - origin.y)},
-            {float(bounds->w), float(bounds->h)},
-            {color.r, color.g, color.b, color.a},
-            {float(-kUnbounded), float(-kUnbounded), float(kUnbounded), float(kUnbounded)},
-            0.0f,
-            kKindOutline,
-            {},
-        });
     }
 
     const auto bounds = editor.handleBounds();
@@ -410,42 +426,10 @@ void Renderer::State::addSelectionOutlines() {
     const Color white{1.0f, 1.0f, 1.0f, 1.0f};
     for (double x : {bounds->x, bounds->x + bounds->w}) {
         for (double y : {bounds->y, bounds->y + bounds->h}) {
-            addBox({x - outer / 2, y - outer / 2, outer, outer}, color);
-            addBox({x - inner / 2, y - inner / 2, inner, inner}, white);
-        }
-    }
-}
-
-void Renderer::State::collect(const Id& parent, Vec2 offset, const Rect& clip, double opacity) {
-    const Rect visibleArea = intersect(view, clip);
-    for (const Id& id : document.children(parent)) {
-        const Node& node = *document.find(id);
-        if (!node.visible) {
-            continue;
-        }
-        const Rect world{offset.x + node.x, offset.y + node.y, node.w, node.h};
-        const double alpha = opacity * node.opacity;
-
-        if (world.intersects(visibleArea)) {
-            const auto color = document.resolveColor(node.fill, editor.activeMode());
-            const Color fill = color ? toSrgb(*color) : kUnresolvedTokenColor;
-            instances.push_back({
-                {float(world.x - origin.x), float(world.y - origin.y)},
-                {float(world.w), float(world.h)},
-                {fill.r, fill.g, fill.b, float(fill.a * alpha)},
-                {float(clip.x - origin.x), float(clip.y - origin.y), float(clip.x + clip.w - origin.x),
-                 float(clip.y + clip.h - origin.y)},
-                float(document.resolveLength(node.cornerRadius, editor.activeMode()).value_or(0.0)),
-                node.type == NodeType::Ellipse ? kKindEllipse : kKindBox,
-                {},
-            });
-        }
-
-        if (canHaveChildren(node.type)) {
-            const Rect childClip = node.clipContent ? intersect(clip, world) : clip;
-            if (!node.clipContent || childClip.intersects(view)) {
-                collect(id, {world.x, world.y}, childClip, alpha);
-            }
+            const Rect border{x - outer / 2, y - outer / 2, outer, outer};
+            const Rect fill{x - inner / 2, y - inner / 2, inner, inner};
+            drawItems.push_back({DrawKind::Fill, false, border, {border, {}}, {}, color, kNoClip});
+            drawItems.push_back({DrawKind::Fill, false, fill, {fill, {}}, {}, white, kNoClip});
         }
     }
 }

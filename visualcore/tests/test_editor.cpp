@@ -416,7 +416,7 @@ TEST_CASE("setProps from outside the canvas is one undoable op") {
     patch.name = "Card";
 
     REQUIRE(f.editor.setProps(f.editor.selection().at(0), patch));
-    REQUIRE(f.selected().opacity == 0.5);
+    REQUIRE(std::get<double>(f.selected().opacity) == 0.5);
     REQUIRE(f.session.takeOutbox().size() == 1);
     f.editor.undo();
     REQUIRE(f.selected().name == "Rectangle");
@@ -456,7 +456,7 @@ TEST_CASE("cancelling a props preview restores the node") {
     f.editor.previewProps(f.editor.selection().at(0), patch);
 
     f.editor.cancelPropsPreview();
-    REQUIRE(f.selected().opacity == 1.0);
+    REQUIRE(std::get<double>(f.selected().opacity) == 1.0);
     REQUIRE_FALSE(f.editor.commitPropsPreview());
 }
 
@@ -467,12 +467,12 @@ TEST_CASE("starting a canvas gesture or undoing commits a pending props preview 
     f.editor.previewProps(f.editor.selection().at(0), patch);
 
     f.drag({150, 125}, {160, 125});
-    REQUIRE(f.selected().opacity == 0.5);
+    REQUIRE(std::get<double>(f.selected().opacity) == 0.5);
     REQUIRE(f.selected().x == 110);
 
     f.editor.undo();
     f.editor.undo();
-    REQUIRE(f.selected().opacity == 1.0);
+    REQUIRE(std::get<double>(f.selected().opacity) == 1.0);
 }
 
 TEST_CASE("the structure revision ignores paint and geometry edits") {
@@ -492,4 +492,18 @@ TEST_CASE("the structure revision ignores paint and geometry edits") {
     rename.name = "Card";
     f.editor.setProps(id, rename);
     REQUIRE(f.session.structureRevision() != structure);
+}
+
+TEST_CASE("locked nodes can't be picked on the canvas or resized") {
+    Fixture f = withRect();
+    const vc::Id id = f.editor.selection().at(0);
+    vc::NodePatch lock;
+    lock.locked = true;
+    f.editor.setProps(id, lock);
+
+    REQUIRE_FALSE(f.editor.handleBounds().has_value());
+    f.editor.clearSelection();
+    f.editor.pointerDown({150, 125}, PointerButton::Primary);
+    f.editor.pointerUp();
+    REQUIRE(f.editor.selection().empty());
 }
