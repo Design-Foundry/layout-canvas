@@ -1,0 +1,26 @@
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dimension--primitive--spacing-2);
+  width: 240px;
+  padding: var(--dimension--primitive--spacing-2) 0;
+  border: var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color--semantic--surface-overlay);
+  box-shadow: var(--shadow-md);
+
+  lucent-text-input {
+    margin: 0 var(--dimension--primitive--spacing-2);
+  }
+}
+
+.list {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.empty {
+  display: block;
+  padding: var(--dimension--primitive--spacing-2) var(--dimension--primitive--spacing-3);
+  color: var(--color--semantic--text-subtle);
+}

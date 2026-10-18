@@ -60,10 +60,12 @@
   <app-inspector-panel
     class="inspector"
     [node]="selectedNode()"
+    [tokens]="tokens()"
     [colorFromHex]="colorFromHex"
     (edit)="setSelectedProps($event)"
     (previewEdit)="previewSelectedProps($event)"
     (commitPreview)="commitPreview()"
+    (cancelPreview)="core()?.cancelPreview()"
   />
 }
 

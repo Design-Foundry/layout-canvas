@@ -98,7 +98,7 @@ export interface ModeRename {
       }
     </div>
   `,
-  styleUrl: './tokens-panel.scss',
+  styleUrls: ['./tokens-panel.scss', './token-row.scss'],
 })
 export class TokensPanel {
   readonly tokens = input.required<readonly TokenRow[]>();
