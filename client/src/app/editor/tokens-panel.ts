@@ -11,7 +11,7 @@ import {
   LucentMenuTrigger,
   LucentSelect,
 } from '@design-foundry/lucent';
-import { TOKEN_FAMILIES, formatMagnitude } from './token-model';
+import { TOKEN_FAMILIES, tokenSummary } from './token-model';
 
 export interface ModeRename {
   readonly id: string;
@@ -133,7 +133,7 @@ export class TokensPanel {
   }
 
   protected magnitude(token: TokenRow): string {
-    return token.resolved && 'value' in token.resolved ? formatMagnitude(token.resolved) : '';
+    return tokenSummary(token);
   }
 
   protected startModeRename(): void {

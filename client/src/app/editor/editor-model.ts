@@ -24,6 +24,7 @@ export interface LayerRow {
   /** Nesting level, 0 for top-level layers. */
   readonly depth: number;
   readonly visible: boolean;
+  readonly locked: boolean;
 }
 
 export const LAYER_ICONS: Readonly<Record<LayerKind, string>> = {

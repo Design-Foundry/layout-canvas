@@ -3,7 +3,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { TokenRow } from '@canvas/bridge';
 import { LucentIcon, LucentPrefix, LucentTextInput } from '@design-foundry/lucent';
-import { formatMagnitude } from './token-model';
+import { tokenSummary } from './token-model';
 
 /** A searchable list of tokens. Hovering one previews it; clicking picks it. */
 @Component({
@@ -69,6 +69,6 @@ export class TokenPicker {
   }
 
   protected magnitude(token: TokenRow): string {
-    return token.resolved && 'value' in token.resolved ? formatMagnitude(token.resolved) : '';
+    return tokenSummary(token);
   }
 }

@@ -1,10 +1,23 @@
 import { Component, computed, effect, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
-import { ModeRow, OklchColor, TokenColor, TokenDef, TokenMagnitude, TokenRow, TokenUnit } from '@canvas/bridge';
+import {
+  ModeRow,
+  OklchColor,
+  StrokeStyle,
+  TokenBorder,
+  TokenColor,
+  TokenDef,
+  TokenMagnitude,
+  TokenRow,
+  TokenShadowLayer,
+  TokenType,
+  TokenUnit,
+} from '@canvas/bridge';
 import {
   LucentButton,
   LucentCheckbox,
+  LucentIconButton,
   LucentLabel,
   LucentPrefix,
   LucentSegmentedControl,
@@ -16,6 +29,19 @@ import { NumberField } from './number-field';
 import { TOKEN_FAMILIES, formatMagnitude } from './token-model';
 
 type TokenKind = 'primitive' | 'alias';
+
+const BORDER_STYLE_OPTIONS: { label: string; value: StrokeStyle }[] = [
+  { label: 'Solid', value: 'solid' },
+  { label: 'Dashed', value: 'dashed' },
+  { label: 'Dotted', value: 'dotted' },
+  { label: 'Double', value: 'double' },
+  { label: 'None', value: 'none' },
+];
+
+const SHADOW_KIND_OPTIONS = [
+  { label: 'Drop', value: 'drop' },
+  { label: 'Inner', value: 'inner' },
+];
 
 const KIND_OPTIONS = [
   { label: 'Primitive', value: 'primitive' as TokenKind },
@@ -34,6 +60,7 @@ const KIND_OPTIONS = [
     LucentSegmentedControl,
     LucentSelect,
     LucentButton,
+    LucentIconButton,
     NumberField,
   ],
   template: `
@@ -67,6 +94,51 @@ const KIND_OPTIONS = [
         <lucent-checkbox size="sm" label="Deprecated" [formControl]="deprecatedControl" />
       </section>
 
+      @if (border(); as border) {
+        <section class="section">
+          <lucent-select size="sm" [options]="familyOptions('dimension')" [formControl]="borderWidthControl">
+            <span lucentLabel>Width</span>
+          </lucent-select>
+          <lucent-select size="sm" [options]="borderStyleOptions" [formControl]="borderStyleControl">
+            <span lucentLabel>Style</span>
+          </lucent-select>
+          <lucent-select size="sm" [options]="familyOptions('color')" [formControl]="borderColorControl">
+            <span lucentLabel>Color</span>
+          </lucent-select>
+        </section>
+      } @else if (shadow(); as shadow) {
+        <section class="section">
+          <header class="section-header">
+            <h3 class="heading typography-caption">Layers</h3>
+            <lucent-icon-button icon="add" size="sm" variant="ghost" ariaLabel="Add layer" (clicked)="addLayer()" />
+          </header>
+          @for (layer of shadow.layers; track $index; let i = $index) {
+            <div class="layer">
+              <div class="layer-header">
+                <lucent-segmented-control
+                  size="sm"
+                  label="Shadow type"
+                  [options]="shadowKindOptions"
+                  [value]="layer.inset ? 'inner' : 'drop'"
+                  (valueChange)="setLayer(i, { inset: $event === 'inner' })"
+                />
+                @if (shadow.layers.length > 1) {
+                  <lucent-icon-button icon="remove" size="sm" variant="ghost" ariaLabel="Remove layer" (clicked)="removeLayer(i)" />
+                }
+              </div>
+              <div class="pair">
+                <app-number-field label="X" [value]="layer.offsetX" (commit)="setLayerNumber(i, 'offsetX', $event)" />
+                <app-number-field label="Y" [value]="layer.offsetY" (commit)="setLayerNumber(i, 'offsetY', $event)" />
+                <app-number-field label="Blur" [value]="layer.blur" [min]="0" (commit)="setLayerNumber(i, 'blur', $event)" />
+                <app-number-field label="Spread" [value]="layer.spread" (commit)="setLayerNumber(i, 'spread', $event)" />
+              </div>
+              <lucent-select size="sm" [options]="familyOptions('color')" [formControl]="layerColorControl(i)">
+                <span lucentLabel>Color</span>
+              </lucent-select>
+            </div>
+          }
+        </section>
+      } @else {
       <section class="section">
         <lucent-segmented-control
           size="sm"
@@ -108,7 +180,7 @@ const KIND_OPTIONS = [
               [value]="magnitude.value"
               [min]="bounds().min"
               [max]="bounds().max"
-              (commit)="setMagnitude({ value: $event, unit: magnitude.unit })"
+              (commit)="$event !== null && setMagnitude({ value: $event, unit: magnitude.unit })"
             />
             @if (family().units.length > 1) {
               <lucent-select size="sm" [options]="unitOptions()" [formControl]="unitControl" />
@@ -125,6 +197,8 @@ const KIND_OPTIONS = [
           </div>
         }
       </section>
+
+      }
 
       @if (modifierLines().length) {
         <section class="section">
@@ -176,10 +250,21 @@ export class TokenInspector {
   protected readonly resolved = computed(() => {
     const resolved = this.token().resolved;
     if (!resolved) return null;
-    return 'hex' in resolved
-      ? { hex: resolved.hex, text: resolved.a < 1 ? `${resolved.hex} ${Math.round(resolved.a * 100)}%` : resolved.hex }
-      : { hex: '', text: formatMagnitude(resolved) };
+    if ('hex' in resolved) {
+      return { hex: resolved.hex, text: resolved.a < 1 ? `${resolved.hex} ${Math.round(resolved.a * 100)}%` : resolved.hex };
+    }
+    return 'value' in resolved ? { hex: '', text: formatMagnitude(resolved) } : null;
   });
+  protected readonly border = computed(() => {
+    const value = this.token().value;
+    return value && 'style' in value ? value : null;
+  });
+  protected readonly shadow = computed(() => {
+    const value = this.token().value;
+    return value && 'layers' in value ? value : null;
+  });
+  protected readonly borderStyleOptions = BORDER_STYLE_OPTIONS;
+  protected readonly shadowKindOptions = SHADOW_KIND_OPTIONS;
   protected readonly modifierLines = computed(() => (this.token().modifiers ?? []).map((m) => this.describeModifier(m)));
 
   protected readonly identifierControl = new FormControl('', { nonNullable: true });
@@ -187,6 +272,10 @@ export class TokenInspector {
   protected readonly descriptionControl = new FormControl('', { nonNullable: true });
   protected readonly deprecatedControl = new FormControl(false, { nonNullable: true });
   protected readonly hexControl = new FormControl('', { nonNullable: true });
+  protected readonly borderWidthControl = new FormControl<string | null>(null);
+  protected readonly borderStyleControl = new FormControl<StrokeStyle | null>(null);
+  protected readonly borderColorControl = new FormControl<string | null>(null);
+  private readonly layerColorControls: FormControl<string | null>[] = [];
   protected readonly unitControl = new FormControl<TokenUnit | null>(null);
   private readonly sourceControls = new Map<string, FormControl<string | null>>();
   private readonly syncing = signal(false);
@@ -205,6 +294,15 @@ export class TokenInspector {
       const color = this.color();
       if (color) sync(this.hexControl, color.hex.slice(1), switched);
       this.unitControl.setValue(this.magnitude()?.unit ?? null, { emitEvent: false });
+      const border = this.border();
+      if (border) {
+        this.borderWidthControl.setValue(border.width, { emitEvent: false });
+        this.borderStyleControl.setValue(border.style, { emitEvent: false });
+        this.borderColorControl.setValue(border.color, { emitEvent: false });
+      }
+      this.shadow()?.layers.forEach((layer, i) =>
+        this.layerColorControl(i).setValue(layer.color, { emitEvent: false }),
+      );
       for (const mode of this.modes()) {
         this.sourceControl(mode.id).setValue(token.source?.[mode.id] ?? null, { emitEvent: false });
       }
@@ -213,10 +311,60 @@ export class TokenInspector {
     this.deprecatedControl.valueChanges
       .pipe(takeUntilDestroyed())
       .subscribe((deprecated) => this.emit({ deprecated }));
+    this.borderWidthControl.valueChanges
+      .pipe(takeUntilDestroyed())
+      .subscribe((width) => width && this.setBorder({ width }));
+    this.borderStyleControl.valueChanges
+      .pipe(takeUntilDestroyed())
+      .subscribe((style) => style && this.setBorder({ style }));
+    this.borderColorControl.valueChanges
+      .pipe(takeUntilDestroyed())
+      .subscribe((color) => color && this.setBorder({ color }));
     this.unitControl.valueChanges.pipe(takeUntilDestroyed()).subscribe((unit) => {
       const magnitude = this.magnitude();
       if (magnitude && unit) this.setMagnitude({ value: magnitude.value, unit });
     });
+  }
+
+  protected familyOptions(type: TokenType): { label: string; value: string }[] {
+    return this.tokens()
+      .filter((t) => t.type === type)
+      .map((t) => ({ label: t.identifier, value: t.id }));
+  }
+
+  protected layerColorControl(index: number): FormControl<string | null> {
+    while (this.layerColorControls.length <= index) {
+      const at = this.layerColorControls.length;
+      const control = new FormControl<string | null>(null);
+      control.valueChanges.subscribe((color) => color && !this.syncing() && this.setLayer(at, { color }));
+      this.layerColorControls.push(control);
+    }
+    return this.layerColorControls[index];
+  }
+
+  private setBorder(changes: Partial<TokenBorder>): void {
+    const border = this.border();
+    if (border && !this.syncing()) this.emit({ value: { ...border, ...changes } });
+  }
+
+  protected setLayer(index: number, changes: Partial<TokenShadowLayer>): void {
+    const shadow = this.shadow();
+    if (!shadow) return;
+    this.emit({ value: { layers: shadow.layers.map((layer, i) => (i === index ? { ...layer, ...changes } : layer)) } });
+  }
+
+  protected setLayerNumber(index: number, field: 'offsetX' | 'offsetY' | 'blur' | 'spread', value: number | null): void {
+    if (value !== null) this.setLayer(index, { [field]: value });
+  }
+
+  protected addLayer(): void {
+    const shadow = this.shadow();
+    if (shadow) this.emit({ value: { layers: [...shadow.layers, { ...shadow.layers[shadow.layers.length - 1] }] } });
+  }
+
+  protected removeLayer(index: number): void {
+    const shadow = this.shadow();
+    if (shadow) this.emit({ value: { layers: shadow.layers.filter((_, i) => i !== index) } });
   }
 
   protected sourceOptions(mode: ModeRow): { label: string; value: string | null }[] {
@@ -271,7 +419,7 @@ export class TokenInspector {
       this.emit({ value: undefined, source: { [defaultMode.id]: first.id } });
     } else if (kind === 'primitive' && token.source && token.resolved) {
       const resolved = token.resolved;
-      const value = 'hex' in resolved ? { l: resolved.l, c: resolved.c, h: resolved.h } : resolved;
+      const value = 'hex' in resolved ? { l: resolved.l, c: resolved.c, h: resolved.h } : (resolved as TokenMagnitude);
       this.emit({ value, source: undefined });
     }
   }

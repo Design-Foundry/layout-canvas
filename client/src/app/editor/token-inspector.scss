@@ -29,3 +29,34 @@
   margin: 0;
   color: var(--color--semantic--text-subtle);
 }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.layer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dimension--primitive--spacing-2);
+
+  & + .layer {
+    padding-top: var(--dimension--primitive--spacing-2);
+    border-top: 1px dashed var(--color--semantic--border-subtle);
+  }
+}
+
+.layer-header {
+  display: flex;
+  align-items: center;
+  gap: var(--dimension--primitive--spacing-1);
+
+  > :first-child {
+    flex: 1;
+  }
+}
+
+:host {
+  overflow-y: auto;
+}

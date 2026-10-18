@@ -1,0 +1,73 @@
+:host {
+  display: flex;
+  align-items: center;
+  gap: var(--dimension--primitive--spacing-1);
+  min-width: 0;
+
+  > :first-child {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.bound {
+  display: flex;
+  align-items: center;
+  gap: var(--dimension--primitive--spacing-2);
+  height: 32px;
+  padding: 0 var(--dimension--primitive--spacing-2);
+  border: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--color--semantic--surface-base);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color--semantic--border-focus);
+    outline-offset: -2px;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  lucent-reference-tag {
+    min-width: 0;
+    overflow: hidden;
+  }
+}
+
+.bound-value {
+  margin-inline-start: auto;
+  color: var(--color--semantic--text-subtle);
+  white-space: nowrap;
+}
+
+.color {
+  display: grid;
+  grid-template-columns: auto 1fr 76px;
+  gap: var(--dimension--primitive--spacing-1);
+  align-items: center;
+}
+
+.swatch {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  border: var(--border-subtle);
+  cursor: pointer;
+}
+
+.picker {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}

@@ -18,6 +18,7 @@
       (activate)="select($event)"
       (rename)="setProps($event.id, { name: $event.name })"
       (visibility)="setProps($event.id, { visible: $event.visible })"
+      (lock)="setProps($event.id, { locked: $event.locked })"
     />
   } @else {
     <app-tokens-panel
@@ -38,6 +39,23 @@
 
 <main class="stage">
   <canvas id="canvas"></canvas>
+  <div class="labels">
+    @for (label of frameLabels(); track label.id) {
+      @if (label.w > 24) {
+        <button
+          type="button"
+          class="frame-label typography-caption"
+          [class.selected]="selectedIds().has(label.id)"
+          [style.left.px]="label.x"
+          [style.top.px]="label.y"
+          [style.max-width.px]="label.w"
+          (click)="select(label.id)"
+        >
+          {{ label.name }}
+        </button>
+      }
+    }
+  </div>
   @if (document.error()) {
     <div class="missing">
       <span class="typography-body-md">This document doesn't exist.</span>
@@ -62,6 +80,7 @@
     [node]="selectedNode()"
     [tokens]="tokens()"
     [colorFromHex]="colorFromHex"
+    [colorToHex]="colorToHex"
     (edit)="setSelectedProps($event)"
     (previewEdit)="previewSelectedProps($event)"
     (commitPreview)="commitPreview()"

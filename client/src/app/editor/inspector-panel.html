@@ -1,0 +1,373 @@
+<h2 class="title typography-label-md">Design</h2>
+@if (node(); as n) {
+  <section class="section">
+    <h3 class="heading typography-caption">Position</h3>
+    <div class="pair">
+      <app-number-field label="X" [value]="n.box.x" [disabled]="n.inFlow" (commit)="setX($event)" />
+      <app-number-field label="Y" [value]="n.box.y" [disabled]="n.inFlow" (commit)="setY($event)" />
+    </div>
+    @if (n.parentLayout !== 'none') {
+      <lucent-checkbox size="sm" label="Absolute position" [formControl]="absoluteControl" />
+    }
+  </section>
+
+  <section class="section">
+    <header class="section-header">
+      <h3 class="heading typography-caption">Size</h3>
+      <lucent-icon-button
+        icon="unfold_more"
+        size="sm"
+        variant="ghost"
+        [ariaLabel]="hasLimits() ? 'Remove min and max' : 'Min and max'"
+        (clicked)="toggleLimits()"
+      />
+    </header>
+    <div class="pair">
+      <app-number-field label="W" [value]="n.box.w" [min]="0" (commit)="setWidth($event)" />
+      <app-number-field label="H" [value]="n.box.h" [min]="0" (commit)="setHeight($event)" />
+    </div>
+    <div class="stack">
+      <lucent-segmented-control
+        size="sm"
+        label="Width"
+        [options]="sizingOptions(n)"
+        [value]="n.widthSizing"
+        (valueChange)="setSizing('widthSizing', $event)"
+      />
+      <lucent-segmented-control
+        size="sm"
+        label="Height"
+        [options]="sizingOptions(n)"
+        [value]="n.heightSizing"
+        (valueChange)="setSizing('heightSizing', $event)"
+      />
+    </div>
+    @if (hasLimits() || showLimits()) {
+      <div class="pair">
+        @for (limit of ['minWidth', 'maxWidth', 'minHeight', 'maxHeight']; track limit) {
+          <app-value-field
+            [label]="limit === 'minWidth' ? 'Min W' : limit === 'maxWidth' ? 'Max W' : limit === 'minHeight' ? 'Min H' : 'Max H'"
+            [value]="$any(n.limits)[limit]"
+            [min]="0"
+            [optional]="true"
+            [tokens]="tokens()"
+            (commit)="set(limit, $event)"
+            (pick)="openPicker(limit, $event)"
+          />
+        }
+      </div>
+    }
+  </section>
+
+  @if (n.type === 'frame') {
+    <section class="section">
+      <header class="section-header">
+        <h3 class="heading typography-caption">Auto layout</h3>
+        @if (n.layout.type === 'none') {
+          <lucent-icon-button icon="add" size="sm" variant="ghost" ariaLabel="Add auto layout" (clicked)="addLayout()" />
+        } @else {
+          <lucent-icon-button
+            icon="remove"
+            size="sm"
+            variant="ghost"
+            ariaLabel="Remove auto layout"
+            (clicked)="removeLayout()"
+          />
+        }
+      </header>
+      @if (n.layout.type !== 'none') {
+        <lucent-segmented-control
+          size="sm"
+          label="Direction"
+          [options]="directionOptions"
+          [value]="n.layout.type"
+          (valueChange)="setLayout({ type: $any($event) })"
+        />
+        <app-value-field
+          label="Gap"
+          icon="space_bar"
+          [value]="n.layout.gap"
+          [min]="0"
+          [tokens]="tokens()"
+          (commit)="set('gap', $event)"
+          (pick)="openPicker('gap', $event)"
+        />
+        <div class="pair">
+          @for (side of sideLabels; track side; let i = $index) {
+            <app-value-field
+              [label]="side"
+              [value]="n.layout.padding[i]"
+              [min]="0"
+              [tokens]="tokens()"
+              (commit)="set('pad' + i, $event)"
+              (pick)="openPicker('pad' + i, $event)"
+            />
+          }
+        </div>
+        <lucent-select size="sm" [options]="justifyOptions" [formControl]="justifyControl" />
+        <lucent-segmented-control
+          size="sm"
+          label="Align"
+          [options]="alignOptions"
+          [value]="n.layout.align"
+          (valueChange)="setLayout({ align: $any($event) })"
+        />
+      }
+    </section>
+  }
+
+  <section class="section">
+    <header class="section-header">
+      <h3 class="heading typography-caption">Appearance</h3>
+      @if (n.type !== 'ellipse') {
+        <lucent-icon-button
+          icon="crop_free"
+          size="sm"
+          variant="ghost"
+          [ariaLabel]="hasCorners() ? 'Same radius on every corner' : 'Radius per corner'"
+          (clicked)="toggleCorners()"
+        />
+      }
+    </header>
+    <app-value-field
+      label="Opacity"
+      icon="opacity"
+      suffix="%"
+      family="opacity"
+      [scale]="100"
+      [min]="0"
+      [max]="100"
+      [value]="n.opacity"
+      [tokens]="tokens()"
+      (commit)="set('opacity', $event)"
+      (pick)="openPicker('opacity', $event)"
+    />
+    @if (n.type !== 'ellipse') {
+      <app-value-field
+        label="Corner radius"
+        icon="rounded_corner"
+        [value]="n.cornerRadius"
+        [min]="0"
+        [tokens]="tokens()"
+        (commit)="set('cornerRadius', $event)"
+        (pick)="openPicker('cornerRadius', $event)"
+      />
+      @if (hasCorners() || showCorners()) {
+        <div class="pair">
+          @for (corner of cornerLabels; track corner; let i = $index) {
+            <app-value-field
+              [label]="corner"
+              [value]="n.cornerRadii[i]"
+              [min]="0"
+              [optional]="true"
+              [placeholder]="'-'"
+              [tokens]="tokens()"
+              (commit)="set('corner' + i, $event)"
+              (pick)="openPicker('corner' + i, $event)"
+            />
+          }
+        </div>
+      }
+    }
+  </section>
+
+  <section class="section">
+    <header class="section-header">
+      <h3 class="heading typography-caption">Fill</h3>
+      <lucent-icon-button
+        [icon]="n.fillVisible ? 'visibility' : 'visibility_off'"
+        size="sm"
+        variant="ghost"
+        [ariaLabel]="n.fillVisible ? 'Hide fill' : 'Show fill'"
+        (clicked)="toggleFill()"
+      />
+    </header>
+    <app-color-field
+      label="Fill"
+      [class.muted]="!n.fillVisible"
+      [value]="n.fill"
+      [tokens]="tokens()"
+      [toHex]="colorToHex()"
+      [fromHex]="colorFromHex()"
+      (commit)="set('fill', $event)"
+      (preview)="preview('fill', $event)"
+      (commitPreview)="commitPreview.emit()"
+      (pick)="openPicker('fill', $event)"
+    />
+  </section>
+
+  <section class="section">
+    <header class="section-header">
+      <h3 class="heading typography-caption">Stroke</h3>
+      <div class="actions" #borderApply>
+        @if (!borderToken()) {
+          <lucent-icon-button
+            icon="link"
+            size="sm"
+            variant="ghost"
+            ariaLabel="Apply border token"
+            (clicked)="openPicker('stroke', $any({ nativeElement: borderApply }))"
+          />
+        }
+        @if (stroke()) {
+          <lucent-icon-button
+            icon="border_outer"
+            size="sm"
+            variant="ghost"
+            [ariaLabel]="hasSides() ? 'Same width on every side' : 'Width per side'"
+            (clicked)="toggleSides()"
+          />
+        }
+        @if (stroke() || borderToken()) {
+          <lucent-icon-button icon="remove" size="sm" variant="ghost" ariaLabel="Remove stroke" (clicked)="removeStroke()" />
+        } @else {
+          <lucent-icon-button icon="add" size="sm" variant="ghost" ariaLabel="Add stroke" (clicked)="addStroke()" />
+        }
+      </div>
+    </header>
+    @if (borderToken(); as token) {
+      <div class="composite" #borderOrigin>
+        <button type="button" class="bound" (click)="openPicker('stroke', $any({ nativeElement: borderOrigin }))">
+          <lucent-reference-tag kind="token" icon="border_style" [label]="token.identifier" [swatch]="token.swatch" />
+          <span class="bound-value typography-caption">{{ token.text }}</span>
+        </button>
+        <lucent-icon-button icon="link_off" size="sm" variant="ghost" ariaLabel="Detach token" (clicked)="detachBorder()" />
+      </div>
+    } @else if (stroke(); as s) {
+      <app-color-field
+        label="Stroke"
+        [value]="s.color"
+        [tokens]="tokens()"
+        [toHex]="colorToHex()"
+        [fromHex]="colorFromHex()"
+        (commit)="set('strokeColor', $event)"
+        (preview)="preview('strokeColor', $event)"
+        (commitPreview)="commitPreview.emit()"
+        (pick)="openPicker('strokeColor', $event)"
+      />
+      <div class="pair">
+        <app-value-field
+          label="Width"
+          icon="line_weight"
+          [value]="s.width"
+          [min]="0"
+          [tokens]="tokens()"
+          (commit)="set('strokeWidth', $event)"
+          (pick)="openPicker('strokeWidth', $event)"
+        />
+        <lucent-select size="sm" [options]="styleOptions" [formControl]="styleControl" />
+      </div>
+      @if (hasSides() || showSides()) {
+        <div class="pair">
+          @for (side of sideLabels; track side; let i = $index) {
+            <app-value-field
+              [label]="side"
+              [value]="s.sides?.[i]"
+              [min]="0"
+              [optional]="true"
+              [placeholder]="'-'"
+              [tokens]="tokens()"
+              (commit)="set('strokeSide' + i, $event)"
+              (pick)="openPicker('strokeSide' + i, $event)"
+            />
+          }
+        </div>
+      }
+      <lucent-segmented-control
+        size="sm"
+        label="Position"
+        [options]="strokeAlignOptions"
+        [value]="s.align"
+        (valueChange)="setStroke({ align: $any($event) })"
+      />
+    }
+  </section>
+
+  <section class="section">
+    <header class="section-header">
+      <h3 class="heading typography-caption">Effects</h3>
+      <div class="actions" #shadowApply>
+        @if (!shadowToken()) {
+          <lucent-icon-button
+            icon="link"
+            size="sm"
+            variant="ghost"
+            ariaLabel="Apply shadow token"
+            (clicked)="openPicker('shadows', $any({ nativeElement: shadowApply }))"
+          />
+          <lucent-icon-button icon="add" size="sm" variant="ghost" ariaLabel="Add shadow" (clicked)="addShadow()" />
+        }
+      </div>
+    </header>
+    @if (shadowToken(); as token) {
+      <div class="composite" #shadowOrigin>
+        <button type="button" class="bound" (click)="openPicker('shadows', $any({ nativeElement: shadowOrigin }))">
+          <lucent-reference-tag kind="token" icon="layers" [label]="token.identifier" />
+          <span class="bound-value typography-caption">{{ token.text }}</span>
+        </button>
+        <lucent-icon-button icon="link_off" size="sm" variant="ghost" ariaLabel="Detach token" (clicked)="detachShadows()" />
+      </div>
+    }
+    @for (shadow of shadows(); track $index; let i = $index) {
+      <div class="shadow">
+        <div class="shadow-header">
+          <lucent-segmented-control
+            size="sm"
+            label="Shadow type"
+            [options]="shadowKindOptions"
+            [value]="shadow.inset ? 'inner' : 'drop'"
+            (valueChange)="setShadow(i, { inset: $event === 'inner' })"
+          />
+          <lucent-icon-button
+            [icon]="shadow.visible ? 'visibility' : 'visibility_off'"
+            size="sm"
+            variant="ghost"
+            [ariaLabel]="shadow.visible ? 'Hide shadow' : 'Show shadow'"
+            (clicked)="setShadow(i, { visible: !shadow.visible })"
+          />
+          <lucent-icon-button icon="remove" size="sm" variant="ghost" ariaLabel="Remove shadow" (clicked)="removeShadow(i)" />
+        </div>
+        <div class="pair">
+          <app-number-field label="X" [value]="shadow.x" (commit)="setShadowNumber(i, 'x', $event)" />
+          <app-number-field label="Y" [value]="shadow.y" (commit)="setShadowNumber(i, 'y', $event)" />
+          <app-number-field label="Blur" [value]="shadow.blur" [min]="0" (commit)="setShadowNumber(i, 'blur', $event)" />
+          <app-number-field label="Spread" [value]="shadow.spread" (commit)="setShadowNumber(i, 'spread', $event)" />
+        </div>
+        <app-color-field
+          label="Shadow"
+          [value]="shadow.color"
+          [tokens]="tokens()"
+          [toHex]="colorToHex()"
+          [fromHex]="colorFromHex()"
+          (commit)="set('shadowColor' + i, $event)"
+          (preview)="preview('shadowColor' + i, $event)"
+          (commitPreview)="commitPreview.emit()"
+          (pick)="openPicker('shadowColor' + i, $event)"
+        />
+      </div>
+    }
+  </section>
+
+  @if (n.type === 'frame') {
+    <section class="section">
+      <lucent-checkbox size="sm" label="Clip content" [formControl]="clipControl" />
+    </section>
+  }
+}
+
+<ng-template
+  cdkConnectedOverlay
+  [cdkConnectedOverlayOrigin]="picker()?.origin!"
+  [cdkConnectedOverlayOpen]="!!picker()"
+  [cdkConnectedOverlayPositions]="positions"
+  (overlayOutsideClick)="closePicker()"
+  (detach)="closePicker()"
+>
+  <app-token-picker
+    [tokens]="pickerTokens()"
+    [selectedId]="boundId()"
+    (hover)="previewToken($event)"
+    (pick)="pickToken($event)"
+    (dismiss)="closePicker()"
+  />
+</ng-template>

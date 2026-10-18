@@ -12,6 +12,8 @@ const BIG_STEP = 10;
   template: `
     <lucent-text-input
       size="sm"
+      [placeholder]="placeholder()"
+      [readonly]="disabled()"
       [formControl]="control"
       (focusin)="focused.set(true)"
       (focusout)="onBlur()"
@@ -42,11 +44,16 @@ export class NumberField {
   readonly label = input.required<string>();
   /** Shown instead of the label text; the label becomes its accessible name. */
   readonly icon = input('');
-  readonly value = input.required<number>();
+  /** Null shows an empty field, for optional values. */
+  readonly value = input.required<number | null>();
+  readonly placeholder = input('');
+  readonly disabled = input(false);
+  /** Lets the user clear the field; clearing emits null. */
+  readonly optional = input(false);
   readonly suffix = input('');
   readonly min = input(-Infinity);
   readonly max = input(Infinity);
-  readonly commit = output<number>();
+  readonly commit = output<number | null>();
 
   protected readonly control = new FormControl('', { nonNullable: true });
   protected readonly focused = signal(false);
@@ -61,7 +68,12 @@ export class NumberField {
   protected onBlur(): void {
     this.focused.set(false);
     const text = this.control.value.trim();
-    if (text !== format(this.value())) this.apply(Number(text));
+    if (text === format(this.value())) return;
+    if (!text && this.optional()) {
+      this.commit.emit(null);
+      return;
+    }
+    this.apply(Number(text));
   }
 
   protected onKeydown(event: KeyboardEvent): void {
@@ -71,11 +83,12 @@ export class NumberField {
     } else if (event.key === 'Escape') {
       this.control.setValue(format(this.value()));
       target.blur();
-    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    } else if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !this.disabled()) {
       event.preventDefault();
-      const current = Number(this.control.value.trim());
+      const text = this.control.value.trim();
+      const current = text ? Number(text) : (this.value() ?? 0);
       const step = (event.shiftKey ? BIG_STEP : STEP) * (event.key === 'ArrowUp' ? 1 : -1);
-      this.apply((Number.isFinite(current) ? current : this.value()) + step);
+      this.apply((Number.isFinite(current) ? current : (this.value() ?? 0)) + step);
     }
   }
 
@@ -90,6 +103,6 @@ export class NumberField {
   }
 }
 
-function format(value: number): string {
-  return String(Math.round(value * 100) / 100);
+function format(value: number | null): string {
+  return value === null ? '' : String(Math.round(value * 100) / 100);
 }

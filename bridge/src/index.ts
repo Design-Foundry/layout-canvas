@@ -15,6 +15,16 @@ export interface Layer {
   /** Nesting level, 0 for top-level nodes. */
   readonly depth: number;
   readonly visible: boolean;
+  readonly locked: boolean;
+}
+
+/** A top-level frame's name on the canvas: its top-left corner and width in screen CSS pixels. */
+export interface FrameLabel {
+  readonly id: string;
+  readonly name: string;
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
 }
 
 /** A color in OKLCH: lightness 0 to 1, chroma, hue in degrees, alpha 0 to 1. */
@@ -25,44 +35,102 @@ export interface OklchColor {
   readonly a: number;
 }
 
-/** A reference to a design token by name. */
+/** A reference to a design token by id. */
 export interface TokenValue {
   readonly token: string;
 }
 
-/** A node as the inspector sees it. A literal fill also carries its sRGB hex. */
-export interface NodeProps {
-  readonly id: string;
-  readonly type: NodeType;
-  readonly parent?: string;
+/** A number of canvas pixels, or a dimension (or opacity) token. */
+export type Length = number | TokenValue;
+
+export type ColorValue = OklchColor | TokenValue;
+
+export type StrokeStyle = 'none' | 'solid' | 'dashed' | 'dotted' | 'double';
+export type StrokeAlign = 'inside' | 'center' | 'outside';
+export type LayoutType = 'none' | 'row' | 'column';
+export type Justify = 'start' | 'center' | 'end' | 'spaceBetween' | 'spaceAround' | 'spaceEvenly';
+export type AlignItems = 'start' | 'center' | 'end' | 'stretch';
+export type Sizing = 'fixed' | 'hug' | 'fill';
+
+/** Sides and corners go top, end, bottom, start; corners top-start, top-end, bottom-end, bottom-start. */
+export type Four<T> = readonly [T, T, T, T];
+
+export interface StrokeProps {
+  readonly width: Length;
+  /** Per-side overrides of `width`; null keeps `width`. */
+  readonly sides?: Four<Length | null>;
+  readonly style: StrokeStyle;
+  readonly color: ColorValue;
+  readonly align: StrokeAlign;
+}
+
+export interface ShadowProps {
+  readonly x: number;
+  readonly y: number;
+  readonly blur: number;
+  readonly spread: number;
+  readonly color: ColorValue;
+  readonly inset: boolean;
+  readonly visible: boolean;
+}
+
+export interface LayoutProps {
+  readonly type: LayoutType;
+  readonly gap: Length;
+  readonly padding: Four<Length>;
+  readonly justify: Justify;
+  readonly align: AlignItems;
+}
+
+export interface SizeLimits {
+  readonly minWidth?: Length;
+  readonly maxWidth?: Length;
+  readonly minHeight?: Length;
+  readonly maxHeight?: Length;
+}
+
+/** The properties a node stores. */
+export interface NodeFields {
   readonly name: string;
-  /** Position relative to the parent frame. */
   readonly x: number;
   readonly y: number;
   readonly w: number;
   readonly h: number;
-  readonly fill: (OklchColor & { readonly hex: string }) | TokenValue;
-  readonly cornerRadius: number | TokenValue;
-  readonly opacity: number;
+  readonly fill: ColorValue;
+  readonly fillVisible: boolean;
+  readonly cornerRadius: Length;
+  readonly cornerRadii: Four<Length | null>;
+  readonly stroke: StrokeProps | TokenValue;
+  readonly shadows: readonly ShadowProps[] | TokenValue;
+  readonly opacity: Length;
   readonly visible: boolean;
+  readonly locked: boolean;
   readonly clipContent: boolean;
+  readonly layout: LayoutProps;
+  readonly widthSizing: Sizing;
+  readonly heightSizing: Sizing;
+  readonly limits: SizeLimits;
+  readonly absolute: boolean;
 }
 
-/** The properties a `setProps` call may change. Absent fields stay as they are. */
-export interface NodePatch {
-  readonly name?: string;
-  readonly x?: number;
-  readonly y?: number;
-  readonly w?: number;
-  readonly h?: number;
-  readonly fill?: OklchColor | TokenValue;
-  readonly cornerRadius?: number | TokenValue;
-  readonly opacity?: number;
-  readonly visible?: boolean;
-  readonly clipContent?: boolean;
+/** A node as the inspector sees it: every field, plus its laid-out box and how its parent places it. */
+export interface NodeProps extends Omit<NodeFields, 'fill'> {
+  readonly id: string;
+  readonly type: NodeType;
+  readonly parent?: string;
+  /** A literal fill also carries its sRGB hex. */
+  readonly fill: (OklchColor & { readonly hex: string }) | TokenValue;
+  /** The box after auto layout, relative to the parent. */
+  readonly box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  /** True when an auto-layout parent positions it. */
+  readonly inFlow: boolean;
+  readonly parentLayout: LayoutType;
 }
 
-export type TokenType = 'color' | 'dimension' | 'duration' | 'ratio' | 'opacity';
+/** The properties a `setProps` call may change. Grouped properties are replaced whole. */
+export type NodePatch = Partial<NodeFields>;
+
+export type TokenType = 'color' | 'dimension' | 'duration' | 'ratio' | 'opacity' | 'border' | 'shadow';
 
 export type TokenUnit = 'px' | 'rem' | 'em' | 'pt' | 'ms' | 's';
 
@@ -88,6 +156,28 @@ export type ColorModifier =
     }
   | { readonly mix: string; readonly amount: number };
 
+/** A border token: ids of a dimension token and a color token, plus a line style. */
+export interface TokenBorder {
+  readonly width: string;
+  readonly style: StrokeStyle;
+  readonly color: string;
+}
+
+export interface TokenShadowLayer {
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly blur: number;
+  readonly spread: number;
+  readonly inset: boolean;
+  /** Id of a color token. */
+  readonly color: string;
+  readonly colorModifiers?: readonly ColorModifier[];
+}
+
+export interface TokenShadow {
+  readonly layers: readonly TokenShadowLayer[];
+}
+
 export interface MagnitudeModifier {
   readonly kind: 'factor' | 'delta' | 'min' | 'max';
   readonly value?: number;
@@ -106,14 +196,38 @@ export interface TokenDef {
   readonly displayName?: string;
   readonly description?: string;
   readonly deprecated?: boolean;
-  readonly value?: TokenColor | TokenMagnitude;
+  readonly value?: TokenColor | TokenMagnitude | TokenBorder | TokenShadow;
   readonly source?: Readonly<Record<string, string>>;
   readonly modifiers?: readonly (ColorModifier | MagnitudeModifier)[];
 }
 
+export interface ResolvedColor extends TokenColor {
+  readonly a: number;
+  readonly hex: string;
+}
+
+/** A border token resolved in the active mode: width in pixels and the final color. */
+export interface ResolvedBorder {
+  readonly width: number;
+  readonly style: StrokeStyle;
+  readonly color: ResolvedColor;
+}
+
+/** A shadow token resolved in the active mode, colors after their modifiers. */
+export interface ResolvedShadow {
+  readonly layers: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly blur: number;
+    readonly spread: number;
+    readonly inset: boolean;
+    readonly color: ResolvedColor;
+  }[];
+}
+
 /** A token as the tokens panel shows it: its definition, its value in the active mode, and whether it is in use. */
 export interface TokenRow extends TokenDef {
-  readonly resolved?: (TokenColor & { readonly a: number; readonly hex: string }) | TokenMagnitude;
+  readonly resolved?: ResolvedColor | TokenMagnitude | ResolvedBorder | ResolvedShadow;
   readonly referenced: boolean;
 }
 
@@ -146,6 +260,8 @@ export interface LoadOptions {
 }
 
 export class VisualCore {
+  private lastLabels = '';
+
   private constructor(private readonly module: MainModule) {}
 
   static async load({ baseUrl }: LoadOptions): Promise<VisualCore> {
@@ -200,6 +316,14 @@ export class VisualCore {
   /** Changes only when the layer tree changes: nodes added, removed or moved, renamed or hidden. */
   structureRevision(): number {
     return this.module.structureRevision();
+  }
+
+  /** Frame labels, or null when nothing moved since the last call. Cheap to poll every frame. */
+  frameLabels(): FrameLabel[] | null {
+    const json = this.module.frameLabels();
+    if (json === this.lastLabels) return null;
+    this.lastLabels = json;
+    return JSON.parse(json);
   }
 
   layers(): Layer[] {
@@ -296,6 +420,11 @@ export class VisualCore {
   /** Deletes a mode, removing it from every alias first. The default mode can't be deleted. */
   deleteMode(id: string): boolean {
     return this.module.deleteMode(id);
+  }
+
+  /** The sRGB hex of an OKLCH color, ignoring alpha. */
+  colorToHex(color: OklchColor): string {
+    return this.module.colorToHex(JSON.stringify(color));
   }
 
   /** Converts `#rgb` or `#rrggbb` to OKLCH, or returns null if it isn't a hex color. */

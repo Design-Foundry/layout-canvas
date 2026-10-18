@@ -52,6 +52,31 @@
   }
 }
 
+.labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.frame-label {
+  position: absolute;
+  transform: translateY(calc(-100% - 4px));
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color--semantic--text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+  cursor: default;
+
+  &.selected {
+    color: var(--color--semantic--accent-default);
+  }
+}
+
 .missing {
   position: absolute;
   inset: 0;

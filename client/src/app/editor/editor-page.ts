@@ -12,6 +12,7 @@ import {
 import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
 import {
+  FrameLabel,
   FrameStats,
   Layer,
   ModeRow,
@@ -96,6 +97,7 @@ export class EditorPage {
   protected readonly layers = signal<readonly LayerRow[]>([]);
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   protected readonly selectedNode = signal<NodeProps | null>(null);
+  protected readonly frameLabels = signal<readonly FrameLabel[]>([]);
   protected readonly sideTab = signal<'layers' | 'tokens'>('layers');
   protected readonly tokens = signal<readonly TokenRow[]>([]);
   protected readonly modes = signal<readonly ModeRow[]>([]);
@@ -180,6 +182,8 @@ export class EditorPage {
     if (core) core.activeMode = id;
   }
 
+  protected readonly colorToHex = (color: OklchColor): string => this.core()?.colorToHex(color) ?? '#000000';
+
   protected readonly colorFromHex = (hex: string, alpha: number): OklchColor | null =>
     this.core()?.hexToColor(hex, alpha) ?? null;
 
@@ -229,6 +233,8 @@ export class EditorPage {
       let mode = '';
       let frame = 0;
       const tick = () => {
+        const labels = core.frameLabels();
+        if (labels) this.frameLabels.set(labels);
         const nextTokens = core.tokenRevision();
         const nextMode = core.activeMode;
         if (nextTokens !== tokenRevision || nextMode !== mode) {
@@ -270,7 +276,14 @@ export class EditorPage {
 }
 
 function toRow(layer: Layer): LayerRow {
-  return { id: layer.id, name: layer.name, kind: LAYER_KINDS[layer.type], depth: layer.depth, visible: layer.visible };
+  return {
+    id: layer.id,
+    name: layer.name,
+    kind: LAYER_KINDS[layer.type],
+    depth: layer.depth,
+    visible: layer.visible,
+    locked: layer.locked,
+  };
 }
 
 function isTyping(target: EventTarget | null): boolean {

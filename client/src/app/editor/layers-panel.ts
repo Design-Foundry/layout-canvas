@@ -17,6 +17,11 @@ export interface LayerVisibility {
   readonly visible: boolean;
 }
 
+export interface LayerLock {
+  readonly id: string;
+  readonly locked: boolean;
+}
+
 @Component({
   selector: 'app-layers-panel',
   imports: [
@@ -56,7 +61,19 @@ export interface LayerVisibility {
         }
         <lucent-icon-button
           lucentTrailing
-          class="visibility"
+          class="toggle lock"
+          [class.on]="layer.locked"
+          size="sm"
+          variant="ghost"
+          [icon]="layer.locked ? 'lock' : 'lock_open'"
+          [ariaLabel]="layer.locked ? 'Unlock' : 'Lock'"
+          (clicked)="lock.emit({ id: layer.id, locked: !layer.locked })"
+          (click)="$event.stopPropagation()"
+        />
+        <lucent-icon-button
+          lucentTrailing
+          class="toggle visibility"
+          [class.on]="!layer.visible"
           size="sm"
           variant="ghost"
           [icon]="layer.visible ? 'visibility' : 'visibility_off'"
@@ -69,12 +86,12 @@ export interface LayerVisibility {
   `,
   styleUrl: './panel.scss',
   styles: `
-    .row .visibility {
+    .row .toggle {
       opacity: 0;
     }
-    .row:hover .visibility,
-    .row:focus-within .visibility,
-    .row.hidden .visibility {
+    .row:hover .toggle,
+    .row:focus-within .toggle,
+    .row .toggle.on {
       opacity: 1;
     }
     .row.hidden {
@@ -88,6 +105,7 @@ export class LayersPanel {
   readonly activate = output<string>();
   readonly rename = output<LayerRename>();
   readonly visibility = output<LayerVisibility>();
+  readonly lock = output<LayerLock>();
 
   protected readonly icons = LAYER_ICONS;
   protected readonly rowHeight = ROW_HEIGHT;
