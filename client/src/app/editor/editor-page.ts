@@ -11,8 +11,19 @@ import {
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
-import { FrameStats, Layer, NodePatch, NodeProps, OklchColor, VisualCore } from '@canvas/bridge';
-import { LucentButton } from '@design-foundry/lucent';
+import {
+  FrameStats,
+  Layer,
+  ModeRow,
+  NodePatch,
+  NodeProps,
+  OklchColor,
+  TokenDef,
+  TokenRow,
+  TokenType,
+  VisualCore,
+} from '@canvas/bridge';
+import { LucentButton, LucentTab, LucentTabList } from '@design-foundry/lucent';
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';
@@ -20,6 +31,8 @@ import { EditorTool, LayerKind, LayerRow } from './editor-model';
 import { EditorToolbar } from './editor-toolbar';
 import { InspectorPanel } from './inspector-panel';
 import { LayersPanel } from './layers-panel';
+import { TokenInspector } from './token-inspector';
+import { ModeRename, TokensPanel } from './tokens-panel';
 
 const STATS_INTERVAL_MS = 500;
 
@@ -50,7 +63,17 @@ const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
 
 @Component({
   selector: 'app-editor-page',
-  imports: [RouterLink, LucentButton, EditorToolbar, LayersPanel, InspectorPanel],
+  imports: [
+    RouterLink,
+    LucentButton,
+    LucentTabList,
+    LucentTab,
+    EditorToolbar,
+    LayersPanel,
+    TokensPanel,
+    InspectorPanel,
+    TokenInspector,
+  ],
   templateUrl: './editor-page.html',
   styleUrl: './editor-page.scss',
   host: { '(document:keydown)': 'onKeydown($event)' },
@@ -73,13 +96,21 @@ export class EditorPage {
   protected readonly layers = signal<readonly LayerRow[]>([]);
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   protected readonly selectedNode = signal<NodeProps | null>(null);
+  protected readonly sideTab = signal<'layers' | 'tokens'>('layers');
+  protected readonly tokens = signal<readonly TokenRow[]>([]);
+  protected readonly modes = signal<readonly ModeRow[]>([]);
+  protected readonly activeMode = signal('');
+  protected readonly selectedTokenId = signal<string | null>(null);
+  protected readonly selectedToken = computed(() =>
+    this.sideTab() === 'tokens' ? (this.tokens().find((t) => t.id === this.selectedTokenId()) ?? null) : null,
+  );
   protected readonly stats = signal('Loading visualcore');
   protected readonly syncFailing = signal(false);
   protected readonly status = computed(() =>
     this.syncFailing() ? `Changes not saved, retrying. ${this.stats()}` : this.stats(),
   );
 
-  private readonly core = signal<VisualCore | undefined>(undefined);
+  protected readonly core = signal<VisualCore | undefined>(undefined);
   private destroyed = false;
 
   constructor() {
@@ -120,6 +151,33 @@ export class EditorPage {
 
   protected commitPreview(): void {
     this.core()?.commitPreview();
+  }
+
+  protected addToken(type: TokenType): void {
+    const id = this.core()?.addToken(type);
+    if (id) this.selectedTokenId.set(id);
+  }
+
+  protected readonly replaceToken = (token: TokenDef): boolean => this.core()?.replaceToken(token) ?? false;
+
+  protected deleteToken(id: string): void {
+    if (this.core()?.deleteToken(id)) this.selectedTokenId.set(null);
+  }
+
+  protected addMode(): void {
+    const core = this.core();
+    const id = core?.addMode();
+    if (core && id) core.activeMode = id;
+  }
+
+  protected renameMode({ id, name }: ModeRename): void {
+    const mode = this.modes().find((m) => m.id === id);
+    if (mode) this.core()?.replaceMode({ id, name, order: mode.order });
+  }
+
+  protected setActiveMode(id: string): void {
+    const core = this.core();
+    if (core) core.activeMode = id;
   }
 
   protected readonly colorFromHex = (hex: string, alpha: number): OklchColor | null =>
@@ -167,8 +225,19 @@ export class EditorPage {
 
       let revision = -1;
       let structure = -1;
+      let tokenRevision = -1;
+      let mode = '';
       let frame = 0;
       const tick = () => {
+        const nextTokens = core.tokenRevision();
+        const nextMode = core.activeMode;
+        if (nextTokens !== tokenRevision || nextMode !== mode) {
+          tokenRevision = nextTokens;
+          mode = nextMode;
+          this.tokens.set(core.tokens());
+          this.modes.set(core.modes());
+          this.activeMode.set(nextMode);
+        }
         const nextStructure = core.structureRevision();
         if (nextStructure !== structure) {
           structure = nextStructure;

@@ -62,6 +62,68 @@ export interface NodePatch {
   readonly clipContent?: boolean;
 }
 
+export type TokenType = 'color' | 'dimension' | 'duration' | 'ratio' | 'opacity';
+
+export type TokenUnit = 'px' | 'rem' | 'em' | 'pt' | 'ms' | 's';
+
+/** A token's own color. Colors are born solid; alpha comes from modifiers. */
+export interface TokenColor {
+  readonly l: number;
+  readonly c: number;
+  readonly h: number;
+}
+
+/** A number with its unit. Ratio and opacity tokens have no unit. */
+export interface TokenMagnitude {
+  readonly value: number;
+  readonly unit?: TokenUnit;
+}
+
+export type ColorModifier =
+  | {
+      readonly channel: 'l' | 'c' | 'h' | 'alpha';
+      readonly kind: 'set' | 'delta' | 'factor';
+      readonly value?: number;
+      readonly ref?: string;
+    }
+  | { readonly mix: string; readonly amount: number };
+
+export interface MagnitudeModifier {
+  readonly kind: 'factor' | 'delta' | 'min' | 'max';
+  readonly value?: number;
+  readonly ref?: string;
+}
+
+/**
+ * A design token as Design Foundry defines it: a primitive `value`, or an alias `source` mapping each
+ * mode id to a token id of the same family (the default mode is required). Modifiers apply after.
+ */
+export interface TokenDef {
+  readonly id: string;
+  readonly type: TokenType;
+  readonly identifier: string;
+  readonly order: string;
+  readonly displayName?: string;
+  readonly description?: string;
+  readonly deprecated?: boolean;
+  readonly value?: TokenColor | TokenMagnitude;
+  readonly source?: Readonly<Record<string, string>>;
+  readonly modifiers?: readonly (ColorModifier | MagnitudeModifier)[];
+}
+
+/** A token as the tokens panel shows it: its definition, its value in the active mode, and whether it is in use. */
+export interface TokenRow extends TokenDef {
+  readonly resolved?: (TokenColor & { readonly a: number; readonly hex: string }) | TokenMagnitude;
+  readonly referenced: boolean;
+}
+
+export interface ModeRow {
+  readonly id: string;
+  readonly name: string;
+  readonly order: string;
+  readonly isDefault: boolean;
+}
+
 /** A local edit waiting to be sent to the server. */
 export interface OutgoingOp {
   readonly id: string;
@@ -183,6 +245,57 @@ export class VisualCore {
 
   cancelPreview(): void {
     this.module.cancelPropsPreview();
+  }
+
+  /** Changes only when tokens or modes change. */
+  tokenRevision(): number {
+    return this.module.tokenRevision();
+  }
+
+  /** Tokens grouped by family, each resolved in the active mode. */
+  tokens(): TokenRow[] {
+    return JSON.parse(this.module.tokens());
+  }
+
+  modes(): ModeRow[] {
+    return JSON.parse(this.module.modes());
+  }
+
+  /** The mode the canvas and the tokens panel resolve in. Switching it is not an edit. */
+  get activeMode(): string {
+    return this.module.activeMode();
+  }
+
+  set activeMode(id: string) {
+    this.module.setActiveMode(id);
+  }
+
+  /** Adds a token with a starting value and a free identifier. Returns its id. */
+  addToken(type: TokenType): string | null {
+    return this.module.addToken(type) || null;
+  }
+
+  /** Replaces a token's definition as one undo step. Returns false if it was invalid. */
+  replaceToken(token: TokenDef): boolean {
+    return this.module.replaceToken(JSON.stringify(token));
+  }
+
+  /** Deletes a token nothing references. */
+  deleteToken(id: string): boolean {
+    return this.module.deleteToken(id);
+  }
+
+  addMode(): string | null {
+    return this.module.addMode() || null;
+  }
+
+  replaceMode(mode: Omit<ModeRow, 'isDefault'>): boolean {
+    return this.module.replaceMode(JSON.stringify(mode));
+  }
+
+  /** Deletes a mode, removing it from every alias first. The default mode can't be deleted. */
+  deleteMode(id: string): boolean {
+    return this.module.deleteMode(id);
   }
 
   /** Converts `#rgb` or `#rrggbb` to OKLCH, or returns null if it isn't a hex color. */

@@ -5,14 +5,36 @@
   (rename)="rename($event)"
 />
 
-<app-layers-panel
-  class="layers"
-  [layers]="layers()"
-  [selectedIds]="selectedIds()"
-  (activate)="select($event)"
-  (rename)="setProps($event.id, { name: $event.name })"
-  (visibility)="setProps($event.id, { visible: $event.visible })"
-/>
+<aside class="layers side">
+  <lucent-tab-list class="side-tabs" [activeTab]="sideTab()" (tabChange)="sideTab.set($any($event))">
+    <lucent-tab label="Layers" value="layers" />
+    <lucent-tab label="Tokens" value="tokens" />
+  </lucent-tab-list>
+  @if (sideTab() === 'layers') {
+    <app-layers-panel
+      class="side-body"
+      [layers]="layers()"
+      [selectedIds]="selectedIds()"
+      (activate)="select($event)"
+      (rename)="setProps($event.id, { name: $event.name })"
+      (visibility)="setProps($event.id, { visible: $event.visible })"
+    />
+  } @else {
+    <app-tokens-panel
+      class="side-body"
+      [tokens]="tokens()"
+      [modes]="modes()"
+      [activeMode]="activeMode()"
+      [selectedId]="selectedTokenId()"
+      (activate)="selectedTokenId.set($event)"
+      (addToken)="addToken($event)"
+      (modeChange)="setActiveMode($event)"
+      (addMode)="addMode()"
+      (renameMode)="renameMode($event)"
+      (deleteMode)="core()?.deleteMode($event)"
+    />
+  }
+</aside>
 
 <main class="stage">
   <canvas id="canvas"></canvas>
@@ -24,13 +46,25 @@
   }
 </main>
 
-<app-inspector-panel
-  class="inspector"
-  [node]="selectedNode()"
-  [colorFromHex]="colorFromHex"
-  (edit)="setSelectedProps($event)"
-  (previewEdit)="previewSelectedProps($event)"
-  (commitPreview)="commitPreview()"
-/>
+@if (selectedToken(); as token) {
+  <app-token-inspector
+    class="inspector"
+    [token]="token"
+    [tokens]="tokens()"
+    [modes]="modes()"
+    [colorFromHex]="colorFromHex"
+    [replace]="replaceToken"
+    (remove)="deleteToken($event)"
+  />
+} @else {
+  <app-inspector-panel
+    class="inspector"
+    [node]="selectedNode()"
+    [colorFromHex]="colorFromHex"
+    (edit)="setSelectedProps($event)"
+    (previewEdit)="previewSelectedProps($event)"
+    (commitPreview)="commitPreview()"
+  />
+}
 
 <footer class="status typography-caption">{{ status() }}</footer>

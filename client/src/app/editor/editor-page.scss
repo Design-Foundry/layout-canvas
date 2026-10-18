@@ -18,6 +18,22 @@
   border-right: 1px solid var(--color--semantic--border-subtle);
 }
 
+.side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color--semantic--surface-default);
+}
+
+.side-tabs {
+  padding: var(--dimension--primitive--spacing-2) var(--dimension--primitive--spacing-3) 0;
+}
+
+.side-body {
+  flex: 1;
+  min-height: 0;
+}
+
 .inspector {
   grid-area: inspector;
   border-left: 1px solid var(--color--semantic--border-subtle);

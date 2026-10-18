@@ -30,7 +30,6 @@ export interface LayerVisibility {
     LucentTrailing,
   ],
   template: `
-    <h2 class="title typography-label-md">Layers</h2>
     <cdk-virtual-scroll-viewport class="viewport" [itemSize]="rowHeight">
       <lucent-list-item
         *cdkVirtualFor="let layer of layers(); trackBy: trackById"

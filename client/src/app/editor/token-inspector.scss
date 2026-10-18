@@ -1,0 +1,31 @@
+.color {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--dimension--primitive--spacing-2);
+  align-items: center;
+}
+
+.magnitude {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  gap: var(--dimension--primitive--spacing-2);
+}
+
+.resolved {
+  display: flex;
+  align-items: center;
+  gap: var(--dimension--primitive--spacing-2);
+  color: var(--color--semantic--text-subtle);
+}
+
+.chip {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--dimension--primitive--radius-xs);
+  border: 1px solid var(--color--semantic--border-subtle);
+}
+
+.modifier {
+  margin: 0;
+  color: var(--color--semantic--text-subtle);
+}
