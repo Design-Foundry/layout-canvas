@@ -85,11 +85,7 @@ int applyRemoteOps(const std::string& ops) {
     if (!parsed) {
         return -1;
     }
-    int applied = 0;
-    for (const vc::OpBody& op : *parsed) {
-        applied += rt->session.applyRemote(op) ? 1 : 0;
-    }
-    return applied;
+    return rt->session.receive(*parsed);
 }
 
 std::string takeOutbox() {

@@ -1241,11 +1241,11 @@ std::string opsToJson(const std::vector<Op>& ops) {
     return out.dump();
 }
 
-std::optional<std::vector<OpBody>> opsFromJson(std::string_view data) {
+std::optional<std::vector<Op>> opsFromJson(std::string_view data) {
     const json j = json::parse(data, nullptr, false);
     if (!j.is_array()) return refused(j.is_discarded() ? "ops is not valid JSON" : "ops must be an array of {kind, data} objects");
     DiagnosticScope list{"ops"};
-    std::vector<OpBody> ops;
+    std::vector<Op> ops;
     ops.reserve(j.size());
     for (std::size_t i = 0; i < j.size(); ++i) {
         const json& item = j[i];
@@ -1253,9 +1253,11 @@ std::optional<std::vector<OpBody>> opsFromJson(std::string_view data) {
         if (!item.is_object() || !item.contains("kind") || !item["kind"].is_string() || !item.contains("data")) {
             return refused("must be an object with a kind string and data");
         }
+        std::optional<Id> id = Id{};
+        if (item.contains("id")) id = requireId(item, "id");
         auto op = readOp(item["kind"].get_ref<const std::string&>(), item["data"]);
-        if (!op) return std::nullopt;
-        ops.push_back(std::move(*op));
+        if (!id || !op) return std::nullopt;
+        ops.push_back({*id, std::move(*op)});
     }
     return ops;
 }

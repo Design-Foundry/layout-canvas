@@ -72,7 +72,7 @@ bool Session::edit(const OpBody& op) {
     if (!inverse) {
         return false;
     }
-    outbox_.push_back({newId(), op});
+    record(op, *inverse);
     open_.push_back(std::move(*inverse));
     redo_.clear();
     if (depth_ == 0) {
@@ -127,6 +127,50 @@ bool Session::redo() {
 
 bool Session::applyRemote(const OpBody& op) {
     return apply(op).has_value();
+}
+
+void Session::record(const OpBody& op, const OpBody& inverse) {
+    const Id id = newId();
+    outbox_.push_back({id, op});
+    unconfirmed_.push_back({id, op, inverse});
+}
+
+int Session::receive(const std::vector<Op>& ops) {
+    // Our own edits coming back in the order we made them change nothing locally.
+    std::size_t next = 0;
+    while (next < ops.size() && !unconfirmed_.empty() && ops[next].id == unconfirmed_.front().id) {
+        unconfirmed_.erase(unconfirmed_.begin());
+        ++next;
+    }
+    int applied = static_cast<int>(next);
+    if (next == ops.size()) {
+        return applied;
+    }
+
+    const std::vector<OpBody> shown = preview_;
+    cancelPreview();
+    for (auto it = unconfirmed_.rbegin(); it != unconfirmed_.rend(); ++it) {
+        apply(it->inverse);
+    }
+    for (; next < ops.size(); ++next) {
+        const Op& op = ops[next];
+        std::erase_if(unconfirmed_, [&](const Unconfirmed& u) { return u.id == op.id; });
+        applied += apply(op.body) ? 1 : 0;
+    }
+    std::vector<Unconfirmed> kept;
+    for (Unconfirmed& u : unconfirmed_) {
+        if (auto inverse = apply(u.op)) {
+            u.inverse = std::move(*inverse);
+            kept.push_back(std::move(u));
+        } else {
+            std::erase_if(outbox_, [&](const Op& o) { return o.id == u.id; });
+        }
+    }
+    unconfirmed_ = std::move(kept);
+    if (!shown.empty()) {
+        preview(shown);
+    }
+    return applied;
 }
 
 bool Session::preview(const OpBody& op) {
@@ -184,7 +228,7 @@ bool Session::replay(std::vector<Step>& from, std::vector<Step>& to) {
     Step reverse;
     for (auto it = step.rbegin(); it != step.rend(); ++it) {
         if (auto inverse = apply(*it)) {
-            outbox_.push_back({newId(), *it});
+            record(*it, *inverse);
             reverse.push_back(std::move(*inverse));
         }
     }

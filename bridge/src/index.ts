@@ -387,6 +387,8 @@ export interface OutgoingOp {
 
 /** An op read from the server log. Extra fields are ignored. */
 export interface IncomingOp {
+  /** The id the op was posted with, so visualcore recognizes its own edits coming back. */
+  readonly id: string;
   readonly kind: string;
   readonly data: unknown;
 }
@@ -435,7 +437,10 @@ export class VisualCore {
     return this.module.loadDocument(snapshot == null ? '' : JSON.stringify(snapshot));
   }
 
-  /** Applies ops from the server log. Returns how many applied, or -1 if the batch was malformed. */
+  /**
+   * Applies a page of the server log, in log order, beneath the local edits it doesn't confirm yet.
+   * Returns how many applied, or -1 if the batch was malformed.
+   */
   applyRemoteOps(ops: readonly IncomingOp[]): number {
     return this.module.applyRemoteOps(JSON.stringify(ops));
   }

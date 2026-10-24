@@ -36,6 +36,15 @@ public:
 
     /// Applies an op read from the server log. It is not undoable and is not sent back.
     bool applyRemote(const OpBody& op);
+    /// Applies a page of the server log, in log order, beneath the local edits the server hasn't
+    /// confirmed yet: those are taken back, the page applied, and the rest put back on top, so the
+    /// document ends up as the server will have it once they land. A log op carrying the id of a
+    /// local edit confirms it. Local edits that no longer apply are dropped, and unsent ones never go
+    /// out. Returns how many log ops applied.
+    int receive(const std::vector<Op>& ops);
+    /// True when the document holds only what the server has confirmed: no local edit is waiting
+    /// for the log and no preview is showing.
+    [[nodiscard]] bool isSettled() const { return unconfirmed_.empty() && preview_.empty(); }
 
     /// Shows `op` in the document without recording it, replacing the previous preview. Used while a
     /// gesture is in progress so that only its final state becomes an op.
@@ -61,6 +70,15 @@ public:
 private:
     using Step = std::vector<OpBody>;
 
+    /// A local edit not yet seen in the server log, with the op that takes it back.
+    struct Unconfirmed {
+        Id id;
+        OpBody op;
+        OpBody inverse;
+    };
+
+    void record(const OpBody& op, const OpBody& inverse);
+
     std::optional<OpBody> apply(const OpBody& op);
     bool replay(std::vector<Step>& from, std::vector<Step>& to);
     void collectPostOrder(const Id& id, std::vector<Id>& out) const;
@@ -72,6 +90,7 @@ private:
     Step open_;
     int depth_ = 0;
     std::vector<Op> outbox_;
+    std::vector<Unconfirmed> unconfirmed_;
     std::vector<OpBody> preview_;
     std::vector<OpBody> previewInverse_;
     std::uint64_t revision_ = 0;

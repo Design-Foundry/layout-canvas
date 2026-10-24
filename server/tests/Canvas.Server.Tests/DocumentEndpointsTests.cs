@@ -133,14 +133,22 @@ public sealed class DocumentEndpointsTests(CanvasFactory factory) : IClassFixtur
         await AppendAsync(document.Id, Rename(node));
 
         var detail = await client.GetFromJsonAsync<DocumentDetail>($"/api/documents/{document.Id}", Ct);
-        var stale = await client.GetAsync($"/api/documents/{document.Id}/ops?after=0", Ct);
+        var behind = await client.GetFromJsonAsync<OpsPage>($"/api/documents/{document.Id}/ops?after=0", Ct);
         var retry = await AppendAsync(document.Id, early);
 
         Assert.Equal(CanvasFactory.OpsPerSnapshot, detail!.Snapshot!.Seq);
         Assert.Contains(node.ToString(), detail.Snapshot.Data.GetRawText());
-        Assert.Equal(HttpStatusCode.Gone, stale.StatusCode);
+        Assert.Equal(5, behind!.Ops.Count);
         Assert.Equal(1, retry.Acks.Single().Seq);
         Assert.Equal(5, retry.HeadSeq);
+
+        // The next snapshot drops the payloads the first one folded in.
+        await AppendAsync(document.Id, Rename(node), Rename(node), Rename(node), Rename(node), Rename(node));
+        var stale = await client.GetAsync($"/api/documents/{document.Id}/ops?after=0", Ct);
+        var recent = await client.GetFromJsonAsync<OpsPage>($"/api/documents/{document.Id}/ops?after=5", Ct);
+
+        Assert.Equal(HttpStatusCode.Gone, stale.StatusCode);
+        Assert.Equal(5, recent!.Ops.Count);
     }
 
     [Fact]

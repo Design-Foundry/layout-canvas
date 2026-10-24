@@ -149,8 +149,8 @@ TEST_CASE("op lists carry ids and kinds and parse back") {
     const auto parsed = vc::opsFromJson(vc::opsToJson(ops));
     REQUIRE(parsed.has_value());
     REQUIRE(parsed->size() == 2);
-    REQUIRE((*parsed)[0] == ops[0].body);
-    REQUIRE((*parsed)[1] == ops[1].body);
+    REQUIRE((*parsed)[0] == ops[0]);
+    REQUIRE((*parsed)[1] == ops[1]);
 }
 
 TEST_CASE("op lists accept server records and reject bad entries") {
@@ -159,8 +159,13 @@ TEST_CASE("op lists accept server records and reject bad entries") {
         R"("data":{"id":"0192a4b1-7c3d-4e5f-8a6b-1c2d3e4f5a6b"},"createdAt":"2026-10-17T00:00:00Z"}])");
     REQUIRE(page.has_value());
     REQUIRE(page->size() == 1);
+    REQUIRE((*page)[0].id == *vc::Id::parse("0192a4b1-0000-4000-8000-000000000009"));
 
     REQUIRE_FALSE(vc::opsFromJson(R"([{"kind":"DeleteNode"}])").has_value());
+    const auto anonymous = vc::opsFromJson(R"([{"kind":"DeleteNode","data":{"id":"0192a4b1-7c3d-4e5f-8a6b-1c2d3e4f5a6b"}}])");
+    REQUIRE(anonymous.has_value());
+    REQUIRE((*anonymous)[0].id.isNil());
+    REQUIRE_FALSE(vc::opsFromJson(R"([{"id":"nope","kind":"DeleteNode","data":{}}])").has_value());
     REQUIRE_FALSE(vc::opsFromJson(R"({"kind":"DeleteNode"})").has_value());
 }
 

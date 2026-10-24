@@ -218,11 +218,6 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
             snapshotSeq = reader.GetInt64(1);
         }
 
-        if (after < snapshotSeq)
-        {
-            return new OpsQueryResult(OpsQueryStatus.Compacted, SnapshotSeq: snapshotSeq);
-        }
-
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT seq, op_id, kind, data, created_at
@@ -240,6 +235,11 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
         {
             while (await reader.ReadAsync(ct))
             {
+                // Compacted ops form a prefix of the log, so only the first row can lack its payload.
+                if (reader.IsDBNull(3))
+                {
+                    return new OpsQueryResult(OpsQueryStatus.Compacted, SnapshotSeq: snapshotSeq);
+                }
                 ops.Add(new OpRecord(
                     reader.GetInt64(0),
                     Guid.Parse(reader.GetString(1)),
@@ -253,8 +253,10 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
     }
 
     /// <summary>
-    /// Stores the snapshot and drops the payloads of the ops it folds in. Op ids are kept so a
-    /// client retrying an already-compacted op still gets its original sequence number.
+    /// Stores the snapshot and drops the payloads of the ops the previous snapshot folded in. The ops
+    /// between the two stay readable, so a reader slightly behind keeps following the log instead of
+    /// reloading. Op ids are kept so a client retrying an already-compacted op still gets its original
+    /// sequence number.
     /// </summary>
     public async Task<SnapshotSaveStatus> SaveSnapshotAsync(Guid documentId, long seq, string data, CancellationToken ct)
     {
@@ -287,7 +289,7 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
         await ExecuteAsync(connection, "UPDATE documents SET snapshot_seq = $seq, snapshot = $data WHERE id = $id",
             ("$seq", seq), ("$data", data), ("$id", Key(documentId)));
         await ExecuteAsync(connection, "UPDATE ops SET data = NULL WHERE document_id = $document AND seq <= $seq",
-            ("$document", Key(documentId)), ("$seq", seq));
+            ("$document", Key(documentId)), ("$seq", snapshotSeq));
 
         await transaction.CommitAsync(ct);
         return SnapshotSaveStatus.Saved;

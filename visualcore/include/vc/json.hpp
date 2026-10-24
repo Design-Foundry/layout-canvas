@@ -21,9 +21,9 @@ namespace vc {
 /// Ops ready to post to the server: an array of `{ id, kind, data }`.
 [[nodiscard]] std::string opsToJson(const std::vector<Op>& ops);
 
-/// Parses an array of `{ kind, data }` objects, such as a page of the server's op log. Extra fields are
-/// ignored. Returns nothing if any entry is malformed.
-[[nodiscard]] std::optional<std::vector<OpBody>> opsFromJson(std::string_view data);
+/// Parses an array of `{ id, kind, data }` objects, such as a page of the server's op log. `id` is
+/// optional and nil when missing. Extra fields are ignored. Returns nothing if any entry is malformed.
+[[nodiscard]] std::optional<std::vector<Op>> opsFromJson(std::string_view data);
 
 /// A node for the inspector: every stored field (defaults included), `fill.hex` when the fill is a
 /// literal color, `box` (its laid-out rect relative to the parent in `mode`), and `inFlow` when an

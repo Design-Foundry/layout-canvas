@@ -39,26 +39,10 @@ public static class DocumentEndpoints
     private static async Task<Results<Created<DocumentSummary>, ValidationProblem>> ImportDocument(
         ImportDocumentRequest request, DocumentStore store, CancellationToken ct)
     {
-        if (request.Snapshot.ValueKind != JsonValueKind.Object ||
-            System.Text.Encoding.UTF8.GetByteCount(request.Snapshot.GetRawText()) > 2 * 1024 * 1024)
-        {
-            return ImportProblem("Provide a Canvas snapshot of at most 2 MB.");
-        }
-        try
-        {
-            using var core = VisualCoreDocument.Open(request.Snapshot.GetRawText());
-            if (core.RejectedOnLoad != 0)
-            {
-                return ImportProblem(
-                    "The snapshot has invalid layers, tokens or dependencies. Nothing was imported.", core.FirstRejection);
-            }
-            var document = await store.CreateAsync(request.Name, ct, core.Snapshot().GetRawText());
-            return TypedResults.Created($"/api/documents/{document.Id}", document);
-        }
-        catch (SnapshotRejectedException rejected)
-        {
-            return ImportProblem("visualcore could not read this snapshot. Nothing was imported.", rejected.Reason);
-        }
+        var result = await DocumentImport.ImportAsync(store, request.Name, request.Snapshot, ct);
+        return result.Document is { } document
+            ? TypedResults.Created($"/api/documents/{document.Id}", document)
+            : ImportProblem(result.Problem!, result.Reason);
     }
 
     private static ValidationProblem ImportProblem(string message, OpRefusal? reason = null)
