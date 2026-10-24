@@ -1,0 +1,46 @@
+:host {
+  display: block;
+  overflow-y: auto;
+}
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dimension--primitive--spacing-3);
+  padding: var(--dimension--primitive--spacing-3);
+}
+h2,
+h3,
+p {
+  margin: 0;
+}
+article {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dimension--primitive--spacing-2);
+  padding-block: var(--dimension--primitive--spacing-3);
+  border-bottom: 1px solid var(--color--semantic--border-subtle);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dimension--primitive--spacing-2);
+}
+.component-name {
+  text-align: start;
+  overflow-wrap: anywhere;
+  border: 0;
+  background: none;
+  color: var(--color--semantic--text-default);
+  cursor: pointer;
+}
+.hint {
+  color: var(--color--semantic--text-subtle);
+}
+.error {
+  color: var(--color--semantic--error);
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dimension--primitive--spacing-2);
+}

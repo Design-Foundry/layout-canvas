@@ -32,6 +32,7 @@ namespace vc {
 
 /// Parses a patch in the same shape `SetProps` uses on the wire.
 [[nodiscard]] std::optional<NodePatch> patchFromJson(std::string_view data);
+[[nodiscard]] std::optional<ComponentDefinition> componentDefinitionFromJson(std::string_view data);
 
 /// A color as `{ l, c, h, a }`, the shape fills use.
 [[nodiscard]] std::string colorToJson(const Oklch& color);
@@ -47,7 +48,7 @@ namespace vc {
 [[nodiscard]] std::string snapshotToJson(const Document& document);
 
 /// The ops that rebuild a snapshot (modes, then tokens, then nodes), in an order `Document::apply`
-/// accepts. Reads versions 1 and 2.
+/// accepts. Reads supported versions 1 through 15, rejecting semantic downgrades.
 [[nodiscard]] std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data);
 
 /// Tokens for the tokens panel, in family order, each with its value `resolved` in `mode` (colors with

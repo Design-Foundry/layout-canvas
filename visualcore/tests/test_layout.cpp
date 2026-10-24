@@ -184,6 +184,20 @@ TEST_CASE("layout follows edits and nested hug frames") {
     REQUIRE(doc.box(idOf(1)).w == 90);
 }
 
+TEST_CASE("deeply nested fixed-width hug-height rows measure each child once") {
+    Document doc;
+    constexpr std::uint64_t depth = 40;
+    for (std::uint64_t i = 1; i <= depth; ++i) {
+        Node row = frame(i, LayoutType::Row, 200);
+        row.heightSizing = Sizing::Hug;
+        if (i > 1) row.parent = idOf(i - 1);
+        doc.apply(CreateNode{row});
+    }
+    doc.apply(CreateNode{child(depth + 1, depth, "a0", 20, 10)});
+
+    REQUIRE(doc.box(idOf(1)).h == 10);
+}
+
 TEST_CASE("gaps and paddings resolve through tokens in the active mode") {
     Document doc;
     const Id dark{9, 9};

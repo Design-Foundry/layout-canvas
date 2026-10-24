@@ -13,6 +13,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+# The exact trusted font bytes are shared by native metrics and the WASM glyph atlas.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter.ttf")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter.ttf" VC_FONT_HEX HEX)
+string(REGEX REPLACE "(..)" "0x\\1," VC_FONT_ARRAY "${VC_FONT_HEX}")
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/vc_inter_font.inc" "${VC_FONT_ARRAY}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/CanvasInter-Bold.ttf")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/CanvasInter-Bold.ttf" VC_BOLD_FONT_HEX HEX)
+string(REGEX REPLACE "(..)" "0x\\1," VC_BOLD_FONT_ARRAY "${VC_BOLD_FONT_HEX}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/vc_inter_bold_font.inc" "${VC_BOLD_FONT_ARRAY}")
+foreach(FACE IN ITEMS Oblique BoldOblique)
+    string(TOLOWER "${FACE}" FACE_LOWER)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/CanvasInter-${FACE}.ttf")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/CanvasInter-${FACE}.ttf" FACE_HEX HEX)
+    string(REGEX REPLACE "(..)" "0x\\1," FACE_ARRAY "${FACE_HEX}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/vc_inter_${FACE_LOWER}_font.inc" "${FACE_ARRAY}")
+endforeach()
+
 # ---------------------------------------------------------------------------
 # vc_core: plain C++. No browser, no GPU. Compiles and tests natively.
 # ---------------------------------------------------------------------------
@@ -32,9 +50,12 @@ add_library(vc_core STATIC
     src/node.cpp
     src/session.cpp
     src/tokens.cpp
+    src/text.cpp
+    src/raster.cpp
     src/viewport_controller.cpp
 )
 target_include_directories(vc_core PUBLIC include)
+target_include_directories(vc_core PRIVATE third_party "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(vc_core PRIVATE nlohmann_json::nlohmann_json)
 
 if(MSVC)  # true for clang-cl too
@@ -82,6 +103,10 @@ else()
     target_link_libraries(vc_native PRIVATE vc_core)
     target_compile_definitions(vc_native PRIVATE VC_NATIVE_BUILD)
     set_target_properties(vc_native PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden)
+    if(WIN32)
+        # Match the server's vc_native.dll contract with both MSVC and MinGW.
+        set_target_properties(vc_native PROPERTIES PREFIX "")
+    endif()
 
     option(VC_BUILD_TESTS "Build unit tests" ON)
     if(VC_BUILD_TESTS)
@@ -104,6 +129,12 @@ else()
             tests/test_model.cpp
             tests/test_native.cpp
             tests/test_tokens.cpp
+            tests/test_text.cpp
+            tests/test_line.cpp
+            tests/test_path.cpp
+            tests/test_image.cpp
+            tests/test_image_editor.cpp
+            tests/test_path_editor.cpp
             tests/test_viewport_controller.cpp
         )
         target_link_libraries(vc_tests PRIVATE vc_core vc_native Catch2::Catch2WithMain)

@@ -8,9 +8,14 @@
 />
 
 <aside class="layers side">
-  <lucent-tab-list class="side-tabs" [activeTab]="sideTab()" (tabChange)="sideTab.set($any($event))">
+  <lucent-tab-list
+    class="side-tabs"
+    [activeTab]="sideTab()"
+    (tabChange)="sideTab.set($any($event))"
+  >
     <lucent-tab label="Layers" value="layers" />
     <lucent-tab label="Tokens" value="tokens" />
+    <lucent-tab label="Assets" value="components" />
   </lucent-tab-list>
   @if (sideTab() === 'layers') {
     <app-layers-panel
@@ -22,6 +27,15 @@
       (rename)="setProps($event.id, { name: $event.name })"
       (visibility)="setProps($event.id, { visible: $event.visible })"
       (lock)="setProps($event.id, { locked: $event.locked })"
+    />
+  } @else if (sideTab() === 'components') {
+    <app-image-import [add]="importImage" />
+    <app-components-panel
+      class="side-body"
+      [layers]="layers()"
+      [snapshot]="componentSnapshot"
+      (instantiate)="core()?.createInstance($event)"
+      (reveal)="reveal($event)"
     />
   } @else {
     <app-tokens-panel
@@ -41,7 +55,36 @@
 </aside>
 
 <main class="stage">
-  <canvas id="canvas"></canvas>
+  <canvas id="canvas" (dblclick)="beginInlineText()"></canvas>
+  @if (tool() === 'pen') {
+    <p
+      role="status"
+      style="
+        position: absolute;
+        bottom: 12px;
+        left: 16px;
+        max-width: calc(100% - 32px);
+        pointer-events: none;
+        background: #202020;
+        color: #eee;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+      "
+    >
+      Pen · Straight segments · Click vertices · Enter / double-click: finish · Escape: cancel ·
+      Backspace: remove last vertex
+    </p>
+  }
+  @if (inlineText(); as textNode) {
+    <app-inline-text-editor
+      [node]="textNode"
+      [save]="saveInlineText"
+      (closed)="inlineText.set(null)"
+      [style.left]="'clamp(0px, ' + (inlineBounds()?.x ?? 0) + 'px, max(0px, calc(100% - 320px)))'"
+      [style.top]="'clamp(0px, ' + (inlineBounds()?.y ?? 0) + 'px, max(0px, calc(100% - 220px)))'"
+    />
+  }
   <div class="labels">
     @for (label of frameLabels(); track label.id) {
       @if (label.w > 24) {
@@ -81,6 +124,14 @@
   <app-inspector-panel
     class="inspector"
     [node]="selectedNode()"
+    [components]="componentOptions()"
+    [snapshot]="componentSnapshot"
+    [saveDefinition]="saveComponentDefinition"
+    [saveValues]="saveComponentValues"
+    [saveText]="saveText"
+    [saveLine]="saveStyleBinding"
+    [saveWrap]="saveWrap"
+    [saveStyleBinding]="saveStyleBinding"
     [tokens]="tokens()"
     [colorFromHex]="colorFromHex"
     [colorToHex]="colorToHex"
@@ -92,4 +143,6 @@
   />
 }
 
-<footer class="status typography-caption">{{ status() }}</footer>
+<footer class="status typography-caption">
+  <span>{{ status() }}</span>
+</footer>

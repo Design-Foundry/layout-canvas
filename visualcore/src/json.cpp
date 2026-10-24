@@ -11,14 +11,18 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 2;
+constexpr int kSnapshotVersion = 15;
 
-constexpr std::array<std::pair<NodeType, std::string_view>, 5> kNodeTypes{{
+constexpr std::array<std::pair<NodeType, std::string_view>, 9> kNodeTypes{{
     {NodeType::Frame, "frame"},
     {NodeType::Rect, "rect"},
     {NodeType::Ellipse, "ellipse"},
     {NodeType::Component, "component"},
     {NodeType::Instance, "instance"},
+    {NodeType::Text, "text"},
+    {NodeType::Line, "line"},
+    {NodeType::Path, "path"},
+    {NodeType::Image, "image"},
 }};
 
 std::string_view typeName(NodeType type) {
@@ -137,7 +141,46 @@ json write(const SizeLimits& limits) {
     return out;
 }
 
+json writeValues(const ComponentValues& values) {
+    json out = json::object();
+    for (const auto& [name, value] : values) std::visit([&](const auto& v) { out[name] = v; }, value);
+    return out;
+}
+
 void writePatch(json& out, const NodePatch& p) {
+    if(p.image) out["image"]={{"width",p.image->width},{"height",p.image->height},{"pixels",p.image->pixels},{"id",p.image->id}};
+    if(p.imageFit) out["imageFit"]=*p.imageFit;
+    if(p.imageCrop) out["imageCrop"]={{"x",p.imageCrop->x},{"y",p.imageCrop->y},{"w",p.imageCrop->w},{"h",p.imageCrop->h}};
+    if (p.path) {
+        json points=json::array(); for(const auto point:p.path->points) points.push_back({{"x",point.x},{"y",point.y}});
+        out["path"]={{"points",points},{"closed",p.path->closed}};
+        if(!p.path->inHandles.empty()) {
+            json incoming=json::array(),outgoing=json::array();
+            for(const auto v:p.path->inHandles) incoming.push_back({{"x",v.x},{"y",v.y}});
+            for(const auto v:p.path->outHandles) outgoing.push_back({{"x",v.x},{"y",v.y}});
+            out["path"]["inHandles"]=incoming;out["path"]["outHandles"]=outgoing;
+        }
+        if(p.path->filled) out["path"]["filled"]=true;
+    }
+    if (p.lineWidth) out["lineWidth"] = *p.lineWidth;
+    if (p.lineReverse) out["lineReverse"] = *p.lineReverse;
+    if (p.typography) out["typography"] = p.typography->toString();
+    if (p.textWrap) out["textWrap"] = *p.textWrap;
+    if (p.textStyle) {
+        const auto& t = *p.textStyle;
+        out["textStyle"] = json::object();
+        if (t.font) out["textStyle"]["font"] = *t.font;
+        if (t.fontSize) out["textStyle"]["fontSize"] = *t.fontSize;
+        if (t.lineHeight) out["textStyle"]["lineHeight"] = *t.lineHeight;
+        if (t.letterSpacing) out["textStyle"]["letterSpacing"] = *t.letterSpacing;
+        if (t.align) out["textStyle"]["align"] = *t.align == TextAlign::Center ? "center" : *t.align == TextAlign::Right ? "right" : "left";
+    }
+    if (p.text) {
+        const auto& t = *p.text;
+        out["text"] = {{"content", t.content}, {"font", t.font}, {"fontSize", t.fontSize},
+            {"lineHeight", t.lineHeight}, {"letterSpacing", t.letterSpacing},
+            {"align", t.align == TextAlign::Center ? "center" : t.align == TextAlign::Right ? "right" : "left"}};
+    }
     if (p.name) out["name"] = *p.name;
     if (p.x) out["x"] = *p.x;
     if (p.y) out["y"] = *p.y;
@@ -160,6 +203,29 @@ void writePatch(json& out, const NodePatch& p) {
     if (p.absolute) out["absolute"] = *p.absolute;
     if (p.type) out["type"] = typeName(*p.type);
     if (p.component && !p.component->isNil()) out["component"] = p.component->toString();
+    if (p.componentValues) out["componentValues"] = writeValues(*p.componentValues);
+}
+
+json writeDefinition(const ComponentDefinition& definition) {
+    json out{{"properties", json::array()}, {"axes", json::array()}, {"rules", json::array()}};
+    if (!definition.texts.empty()) {
+        out["texts"] = json::array();
+        for (const auto& t : definition.texts) out["texts"].push_back({{"name", t.name}, {"target", t.target.toString()}, {"default", t.defaultValue}});
+    }
+    for (const auto& p : definition.properties) out["properties"].push_back({{"name", p.name}, {"target", p.target.toString()}, {"default", p.defaultValue}});
+    for (const auto& a : definition.axes) out["axes"].push_back({{"name", a.name}, {"values", a.values}, {"default", a.defaultValue}});
+    for (const auto& r : definition.rules) {
+        json patch = json::object(); writePatch(patch, r.patch);
+        out["rules"].push_back({{"when", r.when}, {"target", r.target.toString()}, {"patch", patch}});
+    }
+    if (!definition.swaps.empty()) {
+        out["swaps"] = json::array();
+        for (const auto& s : definition.swaps) {
+            json choices = json::array(); for (const Id& id : s.choices) choices.push_back(id.toString());
+            out["swaps"].push_back({{"name", s.name}, {"target", s.target.toString()}, {"default", s.defaultComponent.toString()}, {"choices", choices}});
+        }
+    }
+    return out;
 }
 
 json writeOverrides(const std::vector<Override>& overrides) {
@@ -178,6 +244,7 @@ json write(const Node& n) {
     if (!n.parent.isNil()) out["parent"] = n.parent.toString();
     NodePatch p = fullPatch(n);
     const Node defaults;
+    if (!n.textWrap) p.textWrap.reset();
     if (n.fillVisible == defaults.fillVisible) p.fillVisible.reset();
     if (n.cornerRadii == defaults.cornerRadii) p.cornerRadii.reset();
     if (n.stroke == defaults.stroke) p.stroke.reset();
@@ -189,8 +256,10 @@ json write(const Node& n) {
     if (n.limits == defaults.limits) p.limits.reset();
     if (n.absolute == defaults.absolute) p.absolute.reset();
     if (n.component.isNil()) p.component.reset();
+    if (n.componentValues.empty()) p.componentValues.reset();
     writePatch(out, p);
     if (!n.overrides.empty()) out["overrides"] = writeOverrides(n.overrides);
+    if (!n.definition.empty()) out["definition"] = writeDefinition(n.definition);
     return out;
 }
 
@@ -360,8 +429,96 @@ std::optional<Sizing> readSizing(const json& j) {
     return valueOf(kSizings, j);
 }
 
+std::optional<ComponentValues> readValues(const json& j) {
+    if (!j.is_object() || j.size() > 200) return std::nullopt;
+    ComponentValues values;
+    for (auto it = j.begin(); it != j.end(); ++it) {
+        if (it.key().size() > 64) return std::nullopt;
+        if (it->is_boolean()) values[it.key()] = it->get<bool>();
+        else if (it->is_string() && it->get_ref<const std::string&>().size() <= 4096) values[it.key()] = it->get<std::string>();
+        else return std::nullopt;
+    }
+    return values;
+}
+
 std::optional<NodePatch> readPatch(const json& j) {
     NodePatch p;
+    if(j.contains("image")) {
+        const auto& v=j["image"];
+        if(!v.is_object()||v.size()!=4||!v.contains("width")||!v.contains("height")||!v.contains("pixels")||!v.contains("id")||!v["width"].is_number_integer()||!v["height"].is_number_integer()||!v["pixels"].is_string()||!v["id"].is_string()) return std::nullopt;
+        const auto w=readNumber(v["width"]),h=readNumber(v["height"]);if(!w||!h||*w<1||*w>512||*h<1||*h>512) return std::nullopt;
+        Raster image{int(*w),int(*h),v["pixels"].get<std::string>(),v["id"].get<std::string>()};
+        if(!validRaster(image)) return std::nullopt;p.image=std::move(image);
+    }
+    if(!readField(j,"imageFit",p.imageFit,readString)) return std::nullopt;
+    if(p.imageFit && *p.imageFit!="cover" && *p.imageFit!="contain" && *p.imageFit!="stretch") return std::nullopt;
+    if(j.contains("imageCrop")) {
+        const auto& c=j["imageCrop"];if(!c.is_object()||c.size()!=4||!c.contains("x")||!c.contains("y")||!c.contains("w")||!c.contains("h")) return std::nullopt;
+        const auto x=readNumber(c["x"]),y=readNumber(c["y"]),w=readNumber(c["w"]),h=readNumber(c["h"]);
+        if(!x||!y||!w||!h||*x<0||*y<0||*w<=0||*h<=0||*x+*w>1||*y+*h>1) return std::nullopt;
+        p.imageCrop=ImageCrop{*x,*y,*w,*h};
+    }
+    if(j.contains("path")) {
+        const auto& v=j["path"];
+        if(!v.is_object() || !v.contains("closed") || !v["closed"].is_boolean() || !v.contains("points")) return std::nullopt;
+        for(const auto& [key,value]:v.items()) if(key!="points" && key!="closed" && key!="inHandles" && key!="outHandles" && key!="filled") return std::nullopt;
+        Path path;path.closed=v["closed"].get<bool>();
+        if(v.contains("filled")) {if(!v["filled"].is_boolean()) return std::nullopt;path.filled=v["filled"].get<bool>();}
+        const auto readPoints=[&](const json& values,std::vector<Vec2>& target) {
+            if(!values.is_array() || values.size()>64) return false;
+            for(const auto& point:values) {
+                if(!point.is_object() || point.size()!=2 || !point.contains("x") || !point.contains("y")) return false;
+                const auto x=readNumber(point["x"]),y=readNumber(point["y"]);if(!x||!y) return false;
+                target.push_back({*x,*y});
+            }
+            return true;
+        };
+        if(!readPoints(v["points"],path.points)) return std::nullopt;
+        if(v.contains("inHandles")!=v.contains("outHandles")) return std::nullopt;
+        if(v.contains("inHandles") && (!readPoints(v["inHandles"],path.inHandles) || !readPoints(v["outHandles"],path.outHandles))) return std::nullopt;
+        if(!validPath(path)) return std::nullopt;
+        p.path=std::move(path);
+    }
+    if (!readField(j,"lineWidth",p.lineWidth,readNumber) || !readField(j,"lineReverse",p.lineReverse,readBool)) return std::nullopt;
+    if (!readField(j, "typography", p.typography, readId)) return std::nullopt;
+    if (!readField(j, "textWrap", p.textWrap, readBool)) return std::nullopt;
+    if (j.contains("textStyle")) {
+        const auto& v = j["textStyle"];
+        if (!v.is_object() || v.empty() || v.size() > 5) return std::nullopt;
+        TextStyle style; TextRun test;
+        for (const auto& [key, value] : v.items()) {
+            if (key == "font") {
+                if (!value.is_string()) return std::nullopt;
+                style.font = test.font = value.get<std::string>();
+            } else if (key == "align") {
+                if (!value.is_string()) return std::nullopt;
+                const std::string align = value;
+                if (align != "left" && align != "center" && align != "right") return std::nullopt;
+                style.align = test.align = align == "center" ? TextAlign::Center : align == "right" ? TextAlign::Right : TextAlign::Left;
+            } else {
+                if (!value.is_number()) return std::nullopt;
+                if (key == "fontSize") style.fontSize = test.fontSize = value;
+                else if (key == "lineHeight") style.lineHeight = test.lineHeight = value;
+                else if (key == "letterSpacing") style.letterSpacing = test.letterSpacing = value;
+                else return std::nullopt;
+            }
+        }
+        if (!validText(test)) return std::nullopt;
+        p.textStyle = style;
+    }
+    if (j.contains("text")) {
+        const auto& value = j["text"];
+        if (!value.is_object() || value.size() != 6 || !value.contains("content") || !value["content"].is_string() ||
+            !value.contains("font") || !value["font"].is_string() || !value.contains("fontSize") || !value["fontSize"].is_number() ||
+            !value.contains("lineHeight") || !value["lineHeight"].is_number() || !value.contains("letterSpacing") || !value["letterSpacing"].is_number() ||
+            !value.contains("align") || !value["align"].is_string()) return std::nullopt;
+        const auto align = value["align"].get<std::string>();
+        if (align != "left" && align != "center" && align != "right") return std::nullopt;
+        TextRun text{value["content"], value["font"], value["fontSize"], value["lineHeight"], value["letterSpacing"],
+            align == "center" ? TextAlign::Center : align == "right" ? TextAlign::Right : TextAlign::Left};
+        if (!validText(text)) return std::nullopt;
+        p.text = std::move(text);
+    }
     const bool ok = readField(j, "name", p.name, readString) && readField(j, "x", p.x, readNumber) &&
                     readField(j, "y", p.y, readNumber) && readField(j, "w", p.w, readNumber) &&
                     readField(j, "h", p.h, readNumber) && readField(j, "fill", p.fill, readColor) &&
@@ -382,8 +539,62 @@ std::optional<NodePatch> readPatch(const json& j) {
                     readField(j, "type", p.type, [](const json& v) {
                         return v.is_string() ? typeFromName(v.get_ref<const std::string&>()) : std::nullopt;
                     }) &&
-                    readField(j, "component", p.component, readId);
+                    readField(j, "component", p.component, readId) &&
+                    readField(j, "componentValues", p.componentValues, readValues);
     return ok ? std::optional{p} : std::nullopt;
+}
+
+std::optional<ComponentDefinition> readDefinition(const json& j) {
+    if (!j.is_object() || j.size() != 3 + j.contains("swaps") + j.contains("texts") || !j.contains("properties") || !j["properties"].is_array() || j["properties"].size() > 64 ||
+        !j.contains("axes") || !j["axes"].is_array() || j["axes"].size() > 8 ||
+        !j.contains("rules") || !j["rules"].is_array() || j["rules"].size() > 256) return std::nullopt;
+    ComponentDefinition d;
+    if (j.contains("texts")) {
+        if (!j["texts"].is_array() || j["texts"].size() > 64) return std::nullopt;
+        for (const auto& t : j["texts"]) {
+            if (!t.is_object() || t.size() != 3 || !t.contains("name") || !t["name"].is_string() || !t.contains("target") || !t.contains("default") || !t["default"].is_string()) return std::nullopt;
+            const auto target = readId(t["target"]); if (!target) return std::nullopt;
+            TextRun run; run.content = t["default"].get<std::string>(); if (!validText(run)) return std::nullopt;
+            d.texts.push_back({t["name"].get<std::string>(), *target, run.content});
+        }
+    }
+    if (j.contains("swaps")) {
+        if (!j["swaps"].is_array() || j["swaps"].size() > 64) return std::nullopt;
+        for (const auto& s : j["swaps"]) {
+            if (!s.is_object() || s.size() != 4 || !s.contains("name") || !s["name"].is_string() ||
+                !s.contains("target") || !s.contains("default") || !s.contains("choices") || !s["choices"].is_array() || s["choices"].size() > 32) return std::nullopt;
+            const auto target = readId(s["target"]), selected = readId(s["default"]);
+            if (!target || !selected) return std::nullopt;
+            std::vector<Id> choices;
+            for (const auto& item : s["choices"]) { const auto choice = readId(item); if (!choice) return std::nullopt; choices.push_back(*choice); }
+            d.swaps.push_back({s["name"].get<std::string>(), *target, *selected, choices});
+        }
+    }
+    for (const auto& p : j["properties"]) {
+        if (!p.is_object() || p.size() != 3 || !p.contains("name") || !p["name"].is_string() || !p.contains("target") ||
+            !p.contains("default") || !p["default"].is_boolean()) return std::nullopt;
+        const auto target = readId(p["target"]); if (!target) return std::nullopt;
+        d.properties.push_back({p["name"].get<std::string>(), *target, p["default"].get<bool>()});
+    }
+    for (const auto& a : j["axes"]) {
+        if (!a.is_object() || a.size() != 3 || !a.contains("name") || !a["name"].is_string() || !a.contains("values") ||
+            !a["values"].is_array() || a["values"].size() > 32 || !a.contains("default") || !a["default"].is_string()) return std::nullopt;
+        std::vector<std::string> values;
+        for (const auto& v : a["values"]) { if (!v.is_string()) return std::nullopt; values.push_back(v.get<std::string>()); }
+        d.axes.push_back({a["name"].get<std::string>(), values, a["default"].get<std::string>()});
+    }
+    for (const auto& r : j["rules"]) {
+        if (!r.is_object() || r.size() != 3 || !r.contains("when") || !r["when"].is_object() || r["when"].size() > 8 ||
+            !r.contains("target") || !r.contains("patch") || !r["patch"].is_object()) return std::nullopt;
+        const auto target = readId(r["target"]); const auto patch = readPatch(r["patch"]);
+        if (!target || !patch) return std::nullopt;
+        json canonical = json::object(); writePatch(canonical, *patch);
+        if (canonical.size() != r["patch"].size()) return std::nullopt;
+        std::map<std::string, std::string> when;
+        for (auto it = r["when"].begin(); it != r["when"].end(); ++it) { if (!it->is_string()) return std::nullopt; when[it.key()] = it->get<std::string>(); }
+        d.rules.push_back({when, *target, *patch});
+    }
+    return d;
 }
 
 std::optional<Node> readNode(const json& j) {
@@ -408,7 +619,18 @@ std::optional<Node> readNode(const json& j) {
 
     const auto patch = readPatch(j);
     if (!patch) return std::nullopt;
+    if (*type != NodeType::Line && patch->lineReverse) return std::nullopt;
+    if (*type != NodeType::Line && *type != NodeType::Path && patch->lineWidth) return std::nullopt;
+    if ((*type == NodeType::Path) != patch->path.has_value()) return std::nullopt;
+    if((*type==NodeType::Image)!=patch->image.has_value()) return std::nullopt;
+    if(*type!=NodeType::Image && (patch->imageFit || patch->imageCrop)) return std::nullopt;
+    if (patch->textStyle) return std::nullopt;
+    if ((*type == NodeType::Text) != patch->text.has_value()) return std::nullopt;
     applyPatch(n, *patch);
+    if (j.contains("definition")) {
+        auto definition = readDefinition(j["definition"]); if (!definition) return std::nullopt;
+        n.definition = *definition;
+    }
     n.type = *type;
     if (const auto it = j.find("overrides"); it != j.end()) {
         if (!it->is_array()) return std::nullopt;
@@ -429,6 +651,9 @@ std::optional<Id> readIdField(const json& j, const char* key) {
 json writeModifier(const Modifier& modifier);
 
 json writeLiteral(const TokenLiteral& literal) {
+    if (const auto* style = std::get_if<TextStyle>(&literal)) {
+        NodePatch patch; patch.textStyle=*style; json out=json::object(); writePatch(out,patch); return out["textStyle"];
+    }
     if (const auto* color = std::get_if<Oklch>(&literal)) {
         return {{"l", color->l}, {"c", color->c}, {"h", color->h}};
     }
@@ -504,6 +729,12 @@ std::optional<Modifier> readModifier(const json& j);
 
 std::optional<TokenLiteral> readLiteral(TokenType type, const json& j) {
     if (!j.is_object()) return std::nullopt;
+    if (type == TokenType::Typography) {
+        if (j.size()!=5) return std::nullopt;
+        const auto patch=readPatch(json{{"textStyle",j}});
+        if (!patch || !patch->textStyle || !patch->textStyle->complete() || !patch->textStyle->font) return std::nullopt;
+        return *patch->textStyle;
+    }
     if (type == TokenType::Border) {
         const auto width = j.contains("width") ? readId(j["width"]) : std::nullopt;
         const auto color = j.contains("color") ? readId(j["color"]) : std::nullopt;
@@ -694,6 +925,11 @@ std::optional<OpBody> readOp(std::string_view kind, const json& j) {
         if (!node || !patch) return std::nullopt;
         return SetOverride{*id, *node, std::move(*patch)};
     }
+    if (kind == "SetComponentDefinition") {
+        const auto definition = j.contains("definition") ? readDefinition(j["definition"]) : std::nullopt;
+        if (!definition) return std::nullopt;
+        return SetComponentDefinition{*id, *definition};
+    }
     if (kind == "DeleteMode") {
         return DeleteMode{*id};
     }
@@ -740,6 +976,8 @@ json writeOp(const OpBody& op) {
                 json patch = json::object();
                 writePatch(patch, body.patch);
                 return {{"id", body.instance.toString()}, {"node", body.node.toString()}, {"patch", patch}};
+            } else if constexpr (std::is_same_v<T, SetComponentDefinition>) {
+                return {{"id", body.component.toString()}, {"definition", writeDefinition(body.definition)}};
             } else {
                 return {{"id", body.id.toString()}};
             }
@@ -766,10 +1004,10 @@ std::optional<OpBody> opFromJson(std::string_view kind, std::string_view data) {
 }
 
 std::string_view opKind(const OpBody& op) {
-    constexpr std::array<std::string_view, 11> kKinds{"CreateNode",  "DeleteNode",  "SetProps",
+    constexpr std::array<std::string_view, 12> kKinds{"CreateNode",  "DeleteNode",  "SetProps",
                                                       "MoveNode",    "CreateToken", "DeleteToken",
                                                       "ReplaceToken", "CreateMode", "DeleteMode",
-                                                      "ReplaceMode", "SetOverride"};
+                                                      "ReplaceMode", "SetOverride", "SetComponentDefinition"};
     return kKinds[op.index()];
 }
 
@@ -802,17 +1040,32 @@ std::optional<std::vector<OpBody>> opsFromJson(std::string_view data) {
 }
 
 std::string inspectNodeJson(const Document& document, const Node& source, const Id& mode) {
-    const Node* viewed = source.type == NodeType::Instance ? document.view(source.id) : nullptr;
+    // Resolve stored nodes through their component defaults; preserve caller-supplied previews.
+    const Node* viewed = source.type == NodeType::Instance || document.find(source.id) == &source ? document.view(source.id) : nullptr;
     const Node& node = viewed ? *viewed : source;
     json out{{"id", node.id.toString()}, {"type", typeName(node.type)}, {"order", node.order}};
+    if (node.type == NodeType::Text) out["textBound"] = document.isTextTarget(document.sourceOf(source.id));
     if (source.type == NodeType::Instance) {
         out["overrides"] = source.overrides.size();
-        if (const Node* component = document.find(source.component)) out["componentName"] = component->name;
+        if (const Node* component = document.find(node.component)) out["componentName"] = component->name;
+        out["swapBound"] = document.isSwapTarget(document.sourceOf(source.id));
     }
     if (source.type == NodeType::Component) out["inUse"] = document.isComponentUsed(source.id);
-    if (document.ownerOf(source.id) != source.id) out["inInstance"] = true;
+    if (const Id owner = document.ownerOf(source.id); owner != source.id) {
+        out["inInstance"] = true;
+        if (document.isSwapTarget(owner)) out["swapBound"] = true;
+        const Id key = document.overrideKeyOf(source.id);
+        const Node* instance = document.find(owner);
+        out["overrides"] = instance && std::any_of(instance->overrides.begin(), instance->overrides.end(),
+                                                  [&](const Override& o) { return o.node == key; }) ? 1 : 0;
+    }
     if (!node.parent.isNil()) out["parent"] = node.parent.toString();
     writePatch(out, fullPatch(node));
+    out["componentValues"] = writeValues(source.componentValues);
+    if (source.type == NodeType::Component) out["definition"] = writeDefinition(source.definition);
+    else if (source.type == NodeType::Instance) {
+        if (const Node* main = document.find(node.component)) out["definition"] = writeDefinition(main->definition);
+    }
     if (const auto* color = std::get_if<Oklch>(&node.fill)) {
         out["fill"]["hex"] = toHex(*color);
     }
@@ -828,6 +1081,11 @@ std::string inspectNodeJson(const Document& document, const Node& source, const 
 std::optional<NodePatch> patchFromJson(std::string_view data) {
     const json j = json::parse(data, nullptr, false);
     return j.is_object() ? readPatch(j) : std::nullopt;
+}
+
+std::optional<ComponentDefinition> componentDefinitionFromJson(std::string_view data) {
+    const json j = json::parse(data, nullptr, false);
+    return readDefinition(j);
 }
 
 std::string colorToJson(const Oklch& color) {
@@ -870,8 +1128,49 @@ std::string snapshotToJson(const Document& document) {
     for (const Token* token : document.tokens()) writeWithDependencies(*token, writeWithDependencies);
 
     json nodes = json::array();
-    document.forEachInPaintOrder([&](const Node& node) { nodes.push_back(write(node)); });
-    return json{{"version", kSnapshotVersion}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
+    bool declared = false;
+    bool swaps = false;
+    bool text = false;
+    bool textProperties = false;
+    bool partialTextStyles = false;
+    bool wrapping = false;
+    bool fontSelection = false;
+    bool oblique = false;
+    bool typography = false;
+    bool line = false;
+    bool path = false;
+    bool curved = false;
+    bool image = false;
+    for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
+    const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
+    document.forEachInPaintOrder([&](const Node& node) {
+        nodes.push_back(write(node)); declared = declared || !node.definition.empty() || !node.componentValues.empty();
+        typography = typography || !node.typography.isNil();
+        line = line || node.type == NodeType::Line;
+        path = path || node.type == NodeType::Path;
+        curved = curved || node.path.filled || !node.path.inHandles.empty();
+        image = image || node.type==NodeType::Image;
+        swaps = swaps || !node.definition.swaps.empty();
+        text = text || node.type == NodeType::Text;
+        wrapping = wrapping || node.textWrap;
+        fontSelection = fontSelection || node.text.font != "inter-regular-v1";
+        oblique = oblique || slanted(node.text.font);
+        textProperties = textProperties || !node.definition.texts.empty();
+        const auto styleVersion = [&](const NodePatch& patch) {
+            path = path || patch.path.has_value();
+            image = image || patch.image || patch.imageFit || patch.imageCrop;
+            curved = curved || (patch.path && (patch.path->filled || !patch.path->inHandles.empty()));
+            oblique = oblique || (patch.text && slanted(patch.text->font)) || (patch.textStyle && patch.textStyle->font && slanted(*patch.textStyle->font));
+            wrapping = wrapping || patch.textWrap.has_value();
+            fontSelection = fontSelection || (patch.text && patch.text->font != "inter-regular-v1") ||
+                (patch.textStyle && patch.textStyle->font.has_value());
+            text = text || patch.text.has_value(); textProperties = textProperties || patch.textStyle.has_value();
+            partialTextStyles = partialTextStyles || (patch.textStyle && !patch.textStyle->complete());
+        };
+        for (const auto& o : node.overrides) styleVersion(o.patch);
+        for (const auto& r : node.definition.rules) styleVersion(r.patch);
+    });
+    return json{{"version", image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
 }
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
@@ -899,14 +1198,72 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         for (const json& item : j["tokens"]) {
             auto token = readTokenDef(item);
             if (!token) return std::nullopt;
+            if (version < 11 && token->type == TokenType::Typography) return std::nullopt;
             ops.push_back(CreateToken{std::move(*token)});
         }
     }
     std::vector<Node> nodes;
+    std::vector<SetComponentDefinition> definitions;
+    std::vector<SetProps> values;
+    std::vector<SetOverride> overrides;
     std::unordered_map<Id, std::size_t> indexOf;
     for (const json& item : j["nodes"]) {
         auto node = readNode(item);
         if (!node) return std::nullopt;
+        const auto imagePatch=[](const NodePatch& p){return p.image || p.imageFit || p.imageCrop;};
+        if(version<15 && (node->type==NodeType::Image || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return imagePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return imagePatch(r.patch);}))) return std::nullopt;
+        const auto curvedPath=[](const Path& path){return path.filled || !path.inHandles.empty();};
+        if(version<14 && (curvedPath(node->path) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return o.patch.path && curvedPath(*o.patch.path);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return r.patch.path && curvedPath(*r.patch.path);}))) return std::nullopt;
+        if (version < 13 && (node->type == NodeType::Path || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.path.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.path.has_value();}))) return std::nullopt;
+        if (version < 12 && node->type == NodeType::Line) return std::nullopt;
+        if (version < 11 && !node->typography.isNil()) return std::nullopt;
+        if (version < 10) {
+            const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
+            const auto selected = [&](const NodePatch& patch) {
+                return (patch.text && slanted(patch.text->font)) || (patch.textStyle && patch.textStyle->font && slanted(*patch.textStyle->font));
+            };
+            if (slanted(node->text.font)) return std::nullopt;
+            for (const auto& o : node->overrides) if (selected(o.patch)) return std::nullopt;
+            for (const auto& r : node->definition.rules) if (selected(r.patch)) return std::nullopt;
+        }
+        if (version < 9) {
+            const auto selectedFont = [](const NodePatch& patch) {
+                return (patch.text && patch.text->font != "inter-regular-v1") || (patch.textStyle && patch.textStyle->font.has_value());
+            };
+            if (node->text.font != "inter-regular-v1") return std::nullopt;
+            for (const auto& o : node->overrides) if (selectedFont(o.patch)) return std::nullopt;
+            for (const auto& r : node->definition.rules) if (selectedFont(r.patch)) return std::nullopt;
+        }
+        if (version < 8) {
+            if (node->textWrap) return std::nullopt;
+            for (const auto& o : node->overrides) if (o.patch.textWrap.has_value()) return std::nullopt;
+            for (const auto& r : node->definition.rules) if (r.patch.textWrap.has_value()) return std::nullopt;
+        }
+        if (version < 6 && !node->definition.texts.empty()) return std::nullopt;
+        if (version < 7) {
+            for (const auto& o : node->overrides) if (o.patch.textStyle && !o.patch.textStyle->complete()) return std::nullopt;
+            for (const auto& r : node->definition.rules) if (r.patch.textStyle && !r.patch.textStyle->complete()) return std::nullopt;
+        }
+        if (version < 6) {
+            for (const auto& o : node->overrides) if (o.patch.textStyle) return std::nullopt;
+            for (const auto& r : node->definition.rules) if (r.patch.textStyle) return std::nullopt;
+        }
+        if (version < 5) {
+            if (node->type == NodeType::Text) return std::nullopt;
+            for (const auto& o : node->overrides) if (o.patch.text) return std::nullopt;
+            for (const auto& r : node->definition.rules) if (r.patch.text) return std::nullopt;
+        }
+        if (version >= 4) {
+            for (const auto& o : node->overrides) overrides.push_back({node->id, o.node, o.patch});
+            node->overrides.clear();
+        }
+        if (!node->definition.empty() || !node->componentValues.empty()) {
+            if (version < 3) return std::nullopt;
+            if (version < 4 && !node->definition.swaps.empty()) return std::nullopt;
+            if (!node->definition.empty()) definitions.push_back({node->id, node->definition});
+            if (!node->componentValues.empty()) { NodePatch p; p.componentValues = node->componentValues; values.push_back({node->id, p}); }
+            node->definition = {}; node->componentValues = {};
+        }
         indexOf.emplace(node->id, nodes.size());
         nodes.push_back(std::move(*node));
     }
@@ -921,6 +1278,9 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         ops.push_back(CreateNode{std::move(nodes[i])});
     };
     for (std::size_t i = 0; i < nodes.size(); ++i) emit(i, emit);
+    for (const auto& definition : definitions) ops.push_back(definition);
+    for (const auto& value : values) ops.push_back(value);
+    for (const auto& o : overrides) ops.push_back(o);
     return ops;
 }
 

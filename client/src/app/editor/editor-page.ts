@@ -14,6 +14,8 @@ import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
 import {
   FrameLabel,
+  ComponentDefinition,
+  ComponentValues,
   FrameStats,
   Layer,
   ModeRow,
@@ -24,6 +26,9 @@ import {
   TokenRow,
   TokenType,
   VisualCore,
+  Rect,
+  TextRun,
+  RasterImage,
 } from '@canvas/bridge';
 import { LucentButton, LucentTab, LucentTabList } from '@design-foundry/lucent';
 import { Api } from '../api/api';
@@ -35,6 +40,11 @@ import { InspectorPanel } from './inspector-panel';
 import { LayersPanel } from './layers-panel';
 import { TokenInspector } from './token-inspector';
 import { ModeRename, TokensPanel } from './tokens-panel';
+import { ComponentsPanel } from './components-panel';
+import { componentOptions } from './component-options';
+import { InlineTextEditor } from './inline-text-editor';
+import { ImageImport } from './image-import';
+import type { ComponentSnapshot } from './component-package';
 
 const STATS_INTERVAL_MS = 500;
 
@@ -43,6 +53,10 @@ const TOOL_SHORTCUTS: Readonly<Record<string, EditorTool>> = {
   f: 'frame',
   r: 'rectangle',
   o: 'ellipse',
+  l: 'line',
+  p: 'pen',
+  y: 'polygon',
+  t: 'text',
   h: 'hand',
 };
 
@@ -57,11 +71,15 @@ const NUDGE_DIRECTIONS: Readonly<Record<string, readonly [number, number]>> = {
 };
 
 const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
+  line: 'line',
+  path: 'path',
+  image: 'image',
   frame: 'frame',
   rect: 'rectangle',
   ellipse: 'ellipse',
   component: 'component',
   instance: 'instance',
+  text: 'text',
 };
 
 @Component({
@@ -76,6 +94,9 @@ const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
     TokensPanel,
     InspectorPanel,
     TokenInspector,
+    ComponentsPanel,
+    InlineTextEditor,
+    ImageImport,
   ],
   templateUrl: './editor-page.html',
   styleUrl: './editor-page.scss',
@@ -93,20 +114,81 @@ export class EditorPage {
     loader: ({ params }) => this.api.invoke(getDocument, params),
   });
 
-  protected readonly name = computed(() => (this.document.hasValue() ? this.document.value().name : ''));
+  protected readonly name = computed(() =>
+    this.document.hasValue() ? this.document.value().name : '',
+  );
 
   protected readonly tool = signal<EditorTool>('select');
   protected readonly layers = signal<readonly LayerRow[]>([]);
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   protected readonly selectedNode = signal<NodeProps | null>(null);
+  protected readonly inlineText = signal<NodeProps | null>(null);
+  protected readonly inlineBounds = signal<Rect | null>(null);
+  protected beginInlineText(): void {
+    if (this.inlineText() || this.core()?.drawingPath() || this.tool() === 'pen') return;
+    const core = this.core(),
+      selected = core?.selection();
+    const node = selected?.length === 1 ? core?.node(selected[0]) : null;
+    if (!core || !node || node.type !== 'text' || node.locked || !node.visible) return;
+    const bounds = core.screenBounds(node.id);
+    if (!bounds) return;
+    core.tool = 'select';
+    this.inlineBounds.set(bounds);
+    this.inlineText.set(node);
+  }
+  protected readonly saveInlineText = (id: string, text: TextRun): boolean => {
+    const current = this.core()?.node(id),
+      original = this.inlineText();
+    if (
+      !current?.text ||
+      !original?.text ||
+      current.textBound ||
+      current.locked ||
+      current.text.content !== original.text.content
+    )
+      return false;
+    return this.core()?.setProps(id, { text: { ...current.text, content: text.content } }) ?? false;
+  };
+  protected readonly componentOptions = computed(() => {
+    this.layers();
+    const node = this.selectedNode();
+    const snapshot = this.core()?.snapshot();
+    return node?.type === 'instance' && snapshot
+      ? componentOptions(snapshot as ComponentSnapshot, node.id)
+      : [];
+  });
   protected readonly frameLabels = signal<readonly FrameLabel[]>([]);
-  protected readonly sideTab = signal<'layers' | 'tokens'>('layers');
+  protected readonly sideTab = signal<'layers' | 'tokens' | 'components'>('layers');
+  protected readonly componentSnapshot = (): unknown => this.core()?.snapshot();
+  protected readonly importImage = (image: RasterImage, name: string): boolean => {
+    const id = this.core()?.importImage(image, name);
+    if (!id) return false;
+    this.tool.set('select');
+    this.sideTab.set('layers');
+    return true;
+  };
+  protected readonly saveText = (id: string, text: import('@canvas/bridge').TextRun): boolean =>
+    this.core()?.setProps(id, { text }) ?? false;
+  protected readonly saveWrap = (id: string, wrap: boolean): boolean =>
+    this.core()?.setProps(id, { textWrap: wrap }) ?? false;
+  protected readonly saveStyleBinding = (
+    id: string,
+    patch: import('@canvas/bridge').NodePatch,
+  ): boolean => this.core()?.setProps(id, patch) ?? false;
+  protected readonly saveComponentDefinition = (
+    id: string,
+    definition: ComponentDefinition,
+  ): boolean => this.core()?.setComponentDefinition(id, definition) ?? false;
+  protected readonly saveComponentValues = (id: string, values: ComponentValues): boolean =>
+    this.core()?.setProps(id, { componentValues: values }) ?? false;
   protected readonly tokens = signal<readonly TokenRow[]>([]);
   protected readonly modes = signal<readonly ModeRow[]>([]);
   protected readonly activeMode = signal('');
   protected readonly selectedTokenId = signal<string | null>(null);
   protected readonly selectedToken = computed(() =>
-    this.sideTab() === 'tokens' ? (this.tokens().find((t) => t.id === this.selectedTokenId()) ?? null) : null,
+    this.sideTab() === 'tokens'
+      ? (this.tokens().find((t) => t.id === this.selectedTokenId()) ?? null)
+      : null,
   );
   protected readonly stats = signal('Loading visualcore');
   protected readonly syncFailing = signal(false);
@@ -148,11 +230,18 @@ export class EditorPage {
 
   protected async rename(name: string): Promise<void> {
     const renamed = await this.api.invoke(renameDocument, { id: this.id(), body: { name } });
-    this.document.update((document) => document && { ...document, name: renamed.name, updatedAt: renamed.updatedAt });
+    this.document.update(
+      (document) => document && { ...document, name: renamed.name, updatedAt: renamed.updatedAt },
+    );
   }
 
   protected select(id: string): void {
     this.core()?.select(id);
+  }
+
+  protected reveal(id: string): void {
+    const canvas = document.querySelector<HTMLCanvasElement>('#canvas');
+    if (canvas) this.core()?.reveal(id, canvas.clientWidth, canvas.clientHeight);
   }
 
   protected setProps(id: string, patch: NodePatch): void {
@@ -183,7 +272,8 @@ export class EditorPage {
         break;
       case 'goToMain': {
         const canvas = document.querySelector<HTMLCanvasElement>('#canvas');
-        if (node.component && canvas) core.reveal(node.component, canvas.clientWidth, canvas.clientHeight);
+        if (node.component && canvas)
+          core.reveal(node.component, canvas.clientWidth, canvas.clientHeight);
         break;
       }
       case 'detach':
@@ -200,7 +290,8 @@ export class EditorPage {
     if (id) this.selectedTokenId.set(id);
   }
 
-  protected readonly replaceToken = (token: TokenDef): boolean => this.core()?.replaceToken(token) ?? false;
+  protected readonly replaceToken = (token: TokenDef): boolean =>
+    this.core()?.replaceToken(token) ?? false;
 
   protected deleteToken(id: string): void {
     if (this.core()?.deleteToken(id)) this.selectedTokenId.set(null);
@@ -222,7 +313,8 @@ export class EditorPage {
     if (core) core.activeMode = id;
   }
 
-  protected readonly colorToHex = (color: OklchColor): string => this.core()?.colorToHex(color) ?? '#000000';
+  protected readonly colorToHex = (color: OklchColor): string =>
+    this.core()?.colorToHex(color) ?? '#000000';
 
   protected readonly colorFromHex = (hex: string, alpha: number): OklchColor | null =>
     this.core()?.hexToColor(hex, alpha) ?? null;
@@ -234,7 +326,24 @@ export class EditorPage {
     const key = event.key.toLowerCase();
     const command = event.ctrlKey || event.metaKey;
     let handled = true;
-    if (command && key === 'z') {
+    if (
+      !command &&
+      core.drawingPath() &&
+      ['enter', 'escape', 'backspace', 'delete'].includes(key)
+    ) {
+      if (key === 'enter') core.finishPath();
+      else if (key === 'escape') core.cancelPath();
+      else core.popPathPoint();
+    } else if (!command && key === 'escape') {
+      core.cancelGesture();
+    } else if (
+      !command &&
+      !event.altKey &&
+      (key === 'enter' || key === 'f2') &&
+      this.selectedNode()?.type === 'text'
+    ) {
+      this.beginInlineText();
+    } else if (command && key === 'z') {
       if (event.shiftKey) core.redo();
       else core.undo();
     } else if (command && key === 'y') {
@@ -251,7 +360,7 @@ export class EditorPage {
       const step = event.shiftKey ? BIG_NUDGE : NUDGE;
       core.nudge(dx * step, dy * step);
     } else if (!command && !event.altKey && TOOL_SHORTCUTS[key]) {
-      this.tool.set(TOOL_SHORTCUTS[key]);
+      this.tool.set(key === 'p' && event.shiftKey ? 'pencil' : TOOL_SHORTCUTS[key]);
     } else {
       handled = false;
     }
@@ -264,20 +373,29 @@ export class EditorPage {
       if (this.destroyed) return;
 
       core.attach('#canvas');
-      const sync = new DocumentSync(this.api, core, this.id(), (failing) => this.syncFailing.set(failing));
+      const sync = new DocumentSync(this.api, core, this.id(), (failing) =>
+        this.syncFailing.set(failing),
+      );
       await sync.open();
       if (this.destroyed) {
         core.detach();
         return;
       }
       this.core.set(core);
-
       let revision = -1;
       let structure = -1;
       let tokenRevision = -1;
       let mode = '';
       let frame = 0;
       const tick = () => {
+        const editing = this.inlineText();
+        if (editing) {
+          const bounds = core.screenBounds(editing.id);
+          const previous = this.inlineBounds();
+          if (!bounds) this.inlineText.set(null);
+          else if (JSON.stringify(bounds) !== JSON.stringify(previous))
+            this.inlineBounds.set(bounds);
+        }
         const labels = core.frameLabels();
         if (labels) this.frameLabels.set(labels);
         const nextTokens = core.tokenRevision();
@@ -305,7 +423,10 @@ export class EditorPage {
         frame = requestAnimationFrame(tick);
       };
       frame = requestAnimationFrame(tick);
-      const timer = setInterval(() => this.stats.set(formatStats(core.frameStats())), STATS_INTERVAL_MS);
+      const timer = setInterval(
+        () => this.stats.set(formatStats(core.frameStats())),
+        STATS_INTERVAL_MS,
+      );
 
       this.destroyRef.onDestroy(() => {
         cancelAnimationFrame(frame);
@@ -328,13 +449,17 @@ function toRow(layer: Layer): LayerRow {
     depth: layer.depth,
     visible: layer.visible,
     locked: layer.locked,
+    inInstance: layer.inInstance,
   };
 }
 
 function isTyping(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
-    (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
+    (target.isContentEditable ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLSelectElement ||
+      target instanceof HTMLTextAreaElement)
   );
 }
 

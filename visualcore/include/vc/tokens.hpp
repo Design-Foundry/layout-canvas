@@ -12,7 +12,8 @@
 namespace vc {
 
 /// Token families, after Design Foundry's model 0.4. Members of a family take the same operations.
-enum class TokenType { Color, Dimension, Duration, Ratio, Opacity, Border, Shadow };
+/// Typography is a literal composite of the editor's supported text styles.
+enum class TokenType { Color, Dimension, Duration, Ratio, Opacity, Border, Shadow, Typography };
 
 enum class Unit { None, Px, Rem, Em, Pt, Ms, S };
 
@@ -88,11 +89,11 @@ struct ShadowValue {
 };
 
 /// A token's own value. Colors are born solid: alpha comes from modifiers.
-using TokenLiteral = std::variant<Oklch, Magnitude, BorderValue, ShadowValue>;
+using TokenLiteral = std::variant<Oklch, Magnitude, BorderValue, ShadowValue, TextStyle>;
 
 /// A design token. It is a primitive (`value`, the same in every mode) or an alias (`source`, one
 /// token of the same family per mode, covering the default mode). Modifiers apply after either.
-/// Border and shadow tokens are composites: primitives only, without modifiers.
+/// Border, shadow and typography tokens are composites: primitives only, without modifiers.
 struct Token {
     Id id;
     TokenType type = TokenType::Color;

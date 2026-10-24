@@ -15,15 +15,18 @@ export const TOKEN_FAMILIES: readonly TokenFamily[] = [
   { type: 'opacity', label: 'Opacity', units: [] },
   { type: 'border', label: 'Border', units: [] },
   { type: 'shadow', label: 'Shadow', units: [] },
+  { type: 'typography', label: 'Typography', units: [] },
 ];
 
 /** What a token row shows next to a non-color token: its value, or a short description of a composite. */
 export function tokenSummary(token: TokenRow): string {
   const resolved = token.resolved;
   if (!resolved) return '';
+  if ('fontSize' in resolved) return `${resolved.fontSize}px / ${resolved.lineHeight}`;
   if ('value' in resolved) return formatMagnitude(resolved);
   if ('style' in resolved) return `${Math.round(resolved.width * 100) / 100}px ${resolved.style}`;
-  if ('layers' in resolved) return `${resolved.layers.length} ${resolved.layers.length === 1 ? 'layer' : 'layers'}`;
+  if ('layers' in resolved)
+    return `${resolved.layers.length} ${resolved.layers.length === 1 ? 'layer' : 'layers'}`;
   return '';
 }
 

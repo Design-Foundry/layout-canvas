@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Canvas.Server.VisualCore;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace Canvas.Server.Documents;
@@ -11,6 +12,8 @@ public static class DocumentEndpoints
 
         documents.MapGet("/", ListDocuments).WithName(nameof(ListDocuments));
         documents.MapPost("/", CreateDocument).WithName(nameof(CreateDocument)).ProducesValidationProblem();
+        documents.MapPost("/import", ImportDocument).WithName(nameof(ImportDocument)).ProducesValidationProblem()
+            .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(3 * 1024 * 1024));
         documents.MapGet("/{id:guid}", GetDocument).WithName(nameof(GetDocument));
         documents.MapPatch("/{id:guid}", RenameDocument).WithName(nameof(RenameDocument)).ProducesValidationProblem();
         documents.MapDelete("/{id:guid}", DeleteDocument).WithName(nameof(DeleteDocument));
@@ -31,6 +34,34 @@ public static class DocumentEndpoints
 
     private static async Task<Results<Ok<DocumentDetail>, NotFound>> GetDocument(Guid id, DocumentStore store, CancellationToken ct) =>
         await store.GetAsync(id, ct) is { } document ? TypedResults.Ok(document) : TypedResults.NotFound();
+
+    /// <summary>Validates an imported snapshot with visualcore, then creates a separate document atomically.</summary>
+    private static async Task<Results<Created<DocumentSummary>, ValidationProblem>> ImportDocument(
+        ImportDocumentRequest request, DocumentStore store, CancellationToken ct)
+    {
+        if (request.Snapshot.ValueKind != JsonValueKind.Object ||
+            System.Text.Encoding.UTF8.GetByteCount(request.Snapshot.GetRawText()) > 2 * 1024 * 1024)
+        {
+            return ImportProblem("Provide a Canvas snapshot of at most 2 MB.");
+        }
+        try
+        {
+            using var core = VisualCoreDocument.Open(request.Snapshot.GetRawText());
+            if (core.RejectedOnLoad != 0)
+            {
+                return ImportProblem("The snapshot has invalid layers, tokens or dependencies. Nothing was imported.");
+            }
+            var document = await store.CreateAsync(request.Name, ct, core.Snapshot().GetRawText());
+            return TypedResults.Created($"/api/documents/{document.Id}", document);
+        }
+        catch (InvalidDataException)
+        {
+            return ImportProblem("visualcore could not read this snapshot. Nothing was imported.");
+        }
+    }
+
+    private static ValidationProblem ImportProblem(string message) =>
+        TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["snapshot"] = [message] });
 
     private static async Task<Results<Ok<DocumentSummary>, NotFound>> RenameDocument(
         Guid id, RenameDocumentRequest request, DocumentStore store, CancellationToken ct) =>

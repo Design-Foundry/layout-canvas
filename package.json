@@ -7,6 +7,10 @@
     "wasm:release": "pnpm --filter @canvas/bridge wasm:release",
     "native": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"cd visualcore; . ./tools/devshell.ps1; cmake --preset native-debug; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cmake --build --preset native-debug --target vc_native; exit $LASTEXITCODE\"",
     "build": "pnpm -r build",
-    "start": "pnpm --filter @canvas/client start"
+    "start": "pnpm --filter @canvas/client start",
+    "contributors": "node scripts/update-contributors.mjs",
+    "contributors:check": "node scripts/update-contributors.mjs --check",
+    "test:integration": "node --experimental-strip-types --test tests/*.test.mjs",
+    "test:server-integration": "node --experimental-strip-types --test tests/live/*.test.mjs"
   }
 }

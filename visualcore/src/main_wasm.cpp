@@ -10,6 +10,7 @@
 #include "vc/camera.hpp"
 #include "vc/demo.hpp"
 #include "vc/editor.hpp"
+#include "vc/geometry.hpp"
 #include "vc/json.hpp"
 #include "vc/session.hpp"
 #include "web/input.hpp"
@@ -175,7 +176,7 @@ bool setTool(const std::string& name) {
 }
 
 std::string tool() {
-    static const char* const kNames[] = {"select", "frame", "rectangle", "ellipse", "hand"};
+    static const char* const kNames[] = {"select", "frame", "rectangle", "ellipse", "hand", "text", "line", "pen", "pencil", "polygon", "star"};
     return rt ? kNames[static_cast<int>(rt->editor.tool())] : "select";
 }
 
@@ -186,10 +187,28 @@ std::string node(const std::string& id) {
     return found ? vc::inspectNodeJson(rt->session.document(), *found, rt->editor.activeMode()) : "null";
 }
 
+std::string screenBounds(const std::string& id) {
+    const auto parsed = vc::Id::parse(id);
+    const auto bounds = rt && parsed ? vc::worldBounds(rt->session.document(), *parsed, rt->editor.activeMode()) : std::nullopt;
+    if (!bounds) return "null";
+    const auto point = rt->camera.toScreen({bounds->x, bounds->y});
+    return "{\"x\":" + std::to_string(point.x) + ",\"y\":" + std::to_string(point.y) +
+        ",\"w\":" + std::to_string(bounds->w * rt->camera.zoom()) + ",\"h\":" +
+        std::to_string(bounds->h * rt->camera.zoom()) + "}";
+}
+
 bool setProps(const std::string& id, const std::string& patch) {
     const auto parsedId = vc::Id::parse(id);
     const auto parsedPatch = vc::patchFromJson(patch);
     return rt && parsedId && parsedPatch && rt->editor.setProps(*parsedId, *parsedPatch);
+}
+
+std::string importImage(const std::string& image, const std::string& name) {
+    if(!rt) return "";
+    const auto parsed=vc::patchFromJson("{\"image\":"+image+"}");
+    if(!parsed || !parsed->image) return "";
+    const auto id=rt->editor.importImage(*parsed->image,name);
+    return id?id->toString():"";
 }
 
 bool previewProps(const std::string& id, const std::string& patch) {
@@ -297,6 +316,12 @@ bool resetOverrides(const std::string& instance) {
     return rt && parsed && rt->editor.resetOverrides(*parsed);
 }
 
+bool setComponentDefinition(const std::string& component, const std::string& data) {
+    const auto id = vc::Id::parse(component);
+    const auto definition = vc::componentDefinitionFromJson(data);
+    return rt && id && definition && rt->editor.setComponentDefinition(*id, *definition);
+}
+
 bool reveal(const std::string& id, double width, double height) {
     const auto parsed = vc::Id::parse(id);
     if (!rt || !parsed) {
@@ -321,6 +346,12 @@ bool undo() {
 bool redo() {
     return rt && rt->editor.redo();
 }
+
+bool finishPath() { return rt && rt->editor.finishPath(); }
+void cancelPath() { if (rt) rt->editor.cancelPath(); }
+void cancelGesture() { if (rt) rt->editor.pointerCancel(); }
+bool popPathPoint() { return rt && rt->editor.popPathPoint(); }
+bool drawingPath() { return rt && rt->editor.drawingPath(); }
 
 struct FrameStatsJs {
     double frameMs = 0.0;
@@ -392,7 +423,9 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("setFrameLabelSizes", &setFrameLabelSizes);
     function("tool", &tool);
     function("node", &node);
+    function("screenBounds", &screenBounds);
     function("setProps", &setProps);
+    function("importImage", &importImage);
     function("previewProps", &previewProps);
     function("commitPropsPreview", &commitPropsPreview);
     function("cancelPropsPreview", &cancelPropsPreview);
@@ -413,9 +446,15 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("createInstance", &createInstance);
     function("detachInstance", &detachInstance);
     function("resetOverrides", &resetOverrides);
+    function("setComponentDefinition", &setComponentDefinition);
     function("reveal", &reveal);
     function("deleteSelection", &deleteSelection);
     function("nudge", &nudge);
     function("undo", &undo);
     function("redo", &redo);
+    function("finishPath", &finishPath);
+    function("cancelPath", &cancelPath);
+    function("cancelGesture", &cancelGesture);
+    function("popPathPoint", &popPathPoint);
+    function("drawingPath", &drawingPath);
 }

@@ -5,3 +5,7 @@
 *.png binary
 *.ico binary
 *.wasm binary
+
+# Preserve the bundled third-party license text verbatim.
+client/public/fonts/OFL.txt -whitespace
+visualcore/assets/fonts/OFL.txt -whitespace

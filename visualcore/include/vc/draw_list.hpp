@@ -8,7 +8,7 @@
 
 namespace vc {
 
-enum class DrawKind { Fill, Stroke, DropShadow, InnerShadow, Outline };
+enum class DrawKind { Fill, Stroke, DropShadow, InnerShadow, Outline, Glyph, Segment, Path, Image };
 
 /// A rectangle with a radius per corner: top-start, top-end, bottom-end, bottom-start.
 struct RoundBox {
@@ -22,6 +22,9 @@ struct RoundBox {
 ///  - DropShadow: `a` blurred by `sigma`.
 ///  - InnerShadow: inside `b`, outside `a` blurred by `sigma`.
 ///  - Outline: a thin ring along `a`, for selection.
+///  - Glyph: `quad` with normalized atlas coordinates in `a.rect`.
+///  - Segment: round-cap line between the zero-size `a.rect`/`b.rect` origins,
+///    with diameter `strokeWidth`. `quad` includes both cap extents.
 struct DrawItem {
     DrawKind kind = DrawKind::Fill;
     bool ellipse = false;
@@ -35,6 +38,11 @@ struct DrawItem {
     double sigma = 0.0;
     StrokeStyle style = StrokeStyle::Solid;
     double strokeWidth = 0.0;
+    /// One union-distance primitive, avoiding alpha overlap at round joins.
+    std::vector<Vec2> points{};
+    bool closed = false;
+    bool filled = false;
+    const Raster* image = nullptr;
 };
 
 /// Fills `out` with what's visible inside `view`, in paint order, resolving tokens in `mode`.

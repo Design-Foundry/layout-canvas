@@ -13,6 +13,8 @@ import {
   TokenShadowLayer,
   TokenType,
   TokenUnit,
+  NodeProps,
+  TextRun,
 } from '@canvas/bridge';
 import {
   LucentButton,
@@ -27,6 +29,7 @@ import {
 } from '@design-foundry/lucent';
 import { NumberField } from './number-field';
 import { TOKEN_FAMILIES, formatMagnitude } from './token-model';
+import { TextPanel } from './text-panel';
 
 type TokenKind = 'primitive' | 'alias';
 
@@ -62,6 +65,7 @@ const KIND_OPTIONS = [
     LucentButton,
     LucentIconButton,
     NumberField,
+    TextPanel,
   ],
   template: `
     <h2 class="title typography-label-md">{{ family().label }} token</h2>
@@ -94,15 +98,29 @@ const KIND_OPTIONS = [
         <lucent-checkbox size="sm" label="Deprecated" [formControl]="deprecatedControl" />
       </section>
 
-      @if (border(); as border) {
+      @if (typographyNode(); as typography) {
+        <app-text-panel [node]="typography" [save]="saveTypography" [styleOnly]="true" />
+      } @else if (border(); as border) {
         <section class="section">
-          <lucent-select size="sm" [options]="familyOptions('dimension')" [formControl]="borderWidthControl">
+          <lucent-select
+            size="sm"
+            [options]="familyOptions('dimension')"
+            [formControl]="borderWidthControl"
+          >
             <span lucentLabel>Width</span>
           </lucent-select>
-          <lucent-select size="sm" [options]="borderStyleOptions" [formControl]="borderStyleControl">
+          <lucent-select
+            size="sm"
+            [options]="borderStyleOptions"
+            [formControl]="borderStyleControl"
+          >
             <span lucentLabel>Style</span>
           </lucent-select>
-          <lucent-select size="sm" [options]="familyOptions('color')" [formControl]="borderColorControl">
+          <lucent-select
+            size="sm"
+            [options]="familyOptions('color')"
+            [formControl]="borderColorControl"
+          >
             <span lucentLabel>Color</span>
           </lucent-select>
         </section>
@@ -110,7 +128,13 @@ const KIND_OPTIONS = [
         <section class="section">
           <header class="section-header">
             <h3 class="heading typography-caption">Layers</h3>
-            <lucent-icon-button icon="add" size="sm" variant="ghost" ariaLabel="Add layer" (clicked)="addLayer()" />
+            <lucent-icon-button
+              icon="add"
+              size="sm"
+              variant="ghost"
+              ariaLabel="Add layer"
+              (clicked)="addLayer()"
+            />
           </header>
           @for (layer of shadow.layers; track $index; let i = $index) {
             <div class="layer">
@@ -123,81 +147,112 @@ const KIND_OPTIONS = [
                   (valueChange)="setLayer(i, { inset: $event === 'inner' })"
                 />
                 @if (shadow.layers.length > 1) {
-                  <lucent-icon-button icon="remove" size="sm" variant="ghost" ariaLabel="Remove layer" (clicked)="removeLayer(i)" />
+                  <lucent-icon-button
+                    icon="remove"
+                    size="sm"
+                    variant="ghost"
+                    ariaLabel="Remove layer"
+                    (clicked)="removeLayer(i)"
+                  />
                 }
               </div>
               <div class="pair">
-                <app-number-field label="X" [value]="layer.offsetX" (commit)="setLayerNumber(i, 'offsetX', $event)" />
-                <app-number-field label="Y" [value]="layer.offsetY" (commit)="setLayerNumber(i, 'offsetY', $event)" />
-                <app-number-field label="Blur" [value]="layer.blur" [min]="0" (commit)="setLayerNumber(i, 'blur', $event)" />
-                <app-number-field label="Spread" [value]="layer.spread" (commit)="setLayerNumber(i, 'spread', $event)" />
+                <app-number-field
+                  label="X"
+                  [value]="layer.offsetX"
+                  (commit)="setLayerNumber(i, 'offsetX', $event)"
+                />
+                <app-number-field
+                  label="Y"
+                  [value]="layer.offsetY"
+                  (commit)="setLayerNumber(i, 'offsetY', $event)"
+                />
+                <app-number-field
+                  label="Blur"
+                  [value]="layer.blur"
+                  [min]="0"
+                  (commit)="setLayerNumber(i, 'blur', $event)"
+                />
+                <app-number-field
+                  label="Spread"
+                  [value]="layer.spread"
+                  (commit)="setLayerNumber(i, 'spread', $event)"
+                />
               </div>
-              <lucent-select size="sm" [options]="familyOptions('color')" [formControl]="layerColorControl(i)">
+              <lucent-select
+                size="sm"
+                [options]="familyOptions('color')"
+                [formControl]="layerColorControl(i)"
+              >
                 <span lucentLabel>Color</span>
               </lucent-select>
             </div>
           }
         </section>
       } @else {
-      <section class="section">
-        <lucent-segmented-control
-          size="sm"
-          label="Kind"
-          [options]="kindOptions()"
-          [value]="token.source ? 'alias' : 'primitive'"
-          (valueChange)="setKind($event)"
-        />
+        <section class="section">
+          <lucent-segmented-control
+            size="sm"
+            label="Kind"
+            [options]="kindOptions()"
+            [value]="token.source ? 'alias' : 'primitive'"
+            (valueChange)="setKind($event)"
+          />
 
-        @if (token.source; as source) {
-          @for (mode of modes(); track mode.id) {
-            <lucent-select
-              size="sm"
-              [placeholder]="mode.isDefault ? '' : 'Same as ' + defaultModeName()"
-              [options]="sourceOptions(mode)"
-              [formControl]="sourceControl(mode.id)"
-            >
-              <span lucentLabel>{{ mode.name }}</span>
-            </lucent-select>
+          @if (token.source; as source) {
+            @for (mode of modes(); track mode.id) {
+              <lucent-select
+                size="sm"
+                [placeholder]="mode.isDefault ? '' : 'Same as ' + defaultModeName()"
+                [options]="sourceOptions(mode)"
+                [formControl]="sourceControl(mode.id)"
+              >
+                <span lucentLabel>{{ mode.name }}</span>
+              </lucent-select>
+            }
+          } @else if (color(); as color) {
+            <div class="color">
+              <label class="swatch" [style.background]="color.hex">
+                <input
+                  type="color"
+                  class="picker"
+                  [value]="color.hex"
+                  (change)="pickColor($event)"
+                />
+              </label>
+              <lucent-text-input
+                size="sm"
+                [formControl]="hexControl"
+                (focusout)="commitHex()"
+                (keydown.enter)="blur($event)"
+              >
+                <span lucentPrefix class="typography-caption">#</span>
+              </lucent-text-input>
+            </div>
+          } @else if (magnitude(); as magnitude) {
+            <div class="magnitude">
+              <app-number-field
+                label="Value"
+                [value]="magnitude.value"
+                [min]="bounds().min"
+                [max]="bounds().max"
+                (commit)="$event !== null && setMagnitude({ value: $event, unit: magnitude.unit })"
+              />
+              @if (family().units.length > 1) {
+                <lucent-select size="sm" [options]="unitOptions()" [formControl]="unitControl" />
+              }
+            </div>
           }
-        } @else if (color(); as color) {
-          <div class="color">
-            <label class="swatch" [style.background]="color.hex">
-              <input type="color" class="picker" [value]="color.hex" (change)="pickColor($event)" />
-            </label>
-            <lucent-text-input
-              size="sm"
-              [formControl]="hexControl"
-              (focusout)="commitHex()"
-              (keydown.enter)="blur($event)"
-            >
-              <span lucentPrefix class="typography-caption">#</span>
-            </lucent-text-input>
-          </div>
-        } @else if (magnitude(); as magnitude) {
-          <div class="magnitude">
-            <app-number-field
-              label="Value"
-              [value]="magnitude.value"
-              [min]="bounds().min"
-              [max]="bounds().max"
-              (commit)="$event !== null && setMagnitude({ value: $event, unit: magnitude.unit })"
-            />
-            @if (family().units.length > 1) {
-              <lucent-select size="sm" [options]="unitOptions()" [formControl]="unitControl" />
-            }
-          </div>
-        }
 
-        @if (token.source && resolved(); as resolved) {
-          <div class="resolved typography-body-sm">
-            @if (resolved.hex) {
-              <span class="chip" [style.background]="resolved.hex"></span>
-            }
-            {{ resolved.text }}
-          </div>
-        }
-      </section>
-
+          @if (token.source && resolved(); as resolved) {
+            <div class="resolved typography-body-sm">
+              @if (resolved.hex) {
+                <span class="chip" [style.background]="resolved.hex"></span>
+              }
+              {{ resolved.text }}
+            </div>
+          }
+        </section>
       }
 
       @if (modifierLines().length) {
@@ -210,7 +265,12 @@ const KIND_OPTIONS = [
       }
 
       <section class="section">
-        <lucent-button size="sm" variant="secondary" [disabled]="token.referenced" (clicked)="remove.emit(token.id)">
+        <lucent-button
+          size="sm"
+          variant="secondary"
+          [disabled]="token.referenced"
+          (clicked)="remove.emit(token.id)"
+        >
           Delete token
         </lucent-button>
       </section>
@@ -219,6 +279,17 @@ const KIND_OPTIONS = [
   styleUrls: ['./panel.scss', './inspector-panel.scss', './token-inspector.scss'],
 })
 export class TokenInspector {
+  protected readonly typographyNode = computed(() => {
+    const token = this.token(),
+      value = token.value;
+    return token.type === 'typography' && value && 'fontSize' in value
+      ? ({ id: token.id, type: 'text', text: { ...value, content: '' } } as NodeProps)
+      : null;
+  });
+  protected readonly saveTypography = (_id: string, text: TextRun): boolean => {
+    const { content: _content, ...value } = text;
+    return this.emit({ value });
+  };
   readonly token = input.required<TokenRow>();
   readonly tokens = input.required<readonly TokenRow[]>();
   readonly modes = input.required<readonly ModeRow[]>();
@@ -227,18 +298,27 @@ export class TokenInspector {
   readonly replace = input.required<(token: TokenDef) => boolean>();
   readonly remove = output<string>();
 
-  protected readonly family = computed(() => TOKEN_FAMILIES.find((f) => f.type === this.token().type)!);
+  protected readonly family = computed(
+    () => TOKEN_FAMILIES.find((f) => f.type === this.token().type)!,
+  );
   protected readonly siblings = computed(() =>
     this.tokens().filter((t) => t.type === this.token().type && t.id !== this.token().id),
   );
   protected readonly kindOptions = computed(() =>
-    KIND_OPTIONS.map((option) => ({ ...option, disabled: option.value === 'alias' && !this.siblings().length })),
+    KIND_OPTIONS.map((option) => ({
+      ...option,
+      disabled: option.value === 'alias' && !this.siblings().length,
+    })),
   );
   protected readonly bounds = computed(() =>
     this.token().type === 'opacity' ? { min: 0, max: 1 } : { min: -Infinity, max: Infinity },
   );
-  protected readonly unitOptions = computed(() => this.family().units.map((unit) => ({ label: unit, value: unit })));
-  protected readonly defaultModeName = computed(() => this.modes().find((m) => m.isDefault)?.name ?? '');
+  protected readonly unitOptions = computed(() =>
+    this.family().units.map((unit) => ({ label: unit, value: unit })),
+  );
+  protected readonly defaultModeName = computed(
+    () => this.modes().find((m) => m.isDefault)?.name ?? '',
+  );
   protected readonly color = computed(() => {
     const token = this.token();
     return !token.source && token.resolved && 'hex' in token.resolved ? token.resolved : null;
@@ -251,7 +331,10 @@ export class TokenInspector {
     const resolved = this.token().resolved;
     if (!resolved) return null;
     if ('hex' in resolved) {
-      return { hex: resolved.hex, text: resolved.a < 1 ? `${resolved.hex} ${Math.round(resolved.a * 100)}%` : resolved.hex };
+      return {
+        hex: resolved.hex,
+        text: resolved.a < 1 ? `${resolved.hex} ${Math.round(resolved.a * 100)}%` : resolved.hex,
+      };
     }
     return 'value' in resolved ? { hex: '', text: formatMagnitude(resolved) } : null;
   });
@@ -265,7 +348,9 @@ export class TokenInspector {
   });
   protected readonly borderStyleOptions = BORDER_STYLE_OPTIONS;
   protected readonly shadowKindOptions = SHADOW_KIND_OPTIONS;
-  protected readonly modifierLines = computed(() => (this.token().modifiers ?? []).map((m) => this.describeModifier(m)));
+  protected readonly modifierLines = computed(() =>
+    (this.token().modifiers ?? []).map((m) => this.describeModifier(m)),
+  );
 
   protected readonly identifierControl = new FormControl('', { nonNullable: true });
   protected readonly displayNameControl = new FormControl('', { nonNullable: true });
@@ -336,7 +421,9 @@ export class TokenInspector {
     while (this.layerColorControls.length <= index) {
       const at = this.layerColorControls.length;
       const control = new FormControl<string | null>(null);
-      control.valueChanges.subscribe((color) => color && !this.syncing() && this.setLayer(at, { color }));
+      control.valueChanges.subscribe(
+        (color) => color && !this.syncing() && this.setLayer(at, { color }),
+      );
       this.layerColorControls.push(control);
     }
     return this.layerColorControls[index];
@@ -350,16 +437,27 @@ export class TokenInspector {
   protected setLayer(index: number, changes: Partial<TokenShadowLayer>): void {
     const shadow = this.shadow();
     if (!shadow) return;
-    this.emit({ value: { layers: shadow.layers.map((layer, i) => (i === index ? { ...layer, ...changes } : layer)) } });
+    this.emit({
+      value: {
+        layers: shadow.layers.map((layer, i) => (i === index ? { ...layer, ...changes } : layer)),
+      },
+    });
   }
 
-  protected setLayerNumber(index: number, field: 'offsetX' | 'offsetY' | 'blur' | 'spread', value: number | null): void {
+  protected setLayerNumber(
+    index: number,
+    field: 'offsetX' | 'offsetY' | 'blur' | 'spread',
+    value: number | null,
+  ): void {
     if (value !== null) this.setLayer(index, { [field]: value });
   }
 
   protected addLayer(): void {
     const shadow = this.shadow();
-    if (shadow) this.emit({ value: { layers: [...shadow.layers, { ...shadow.layers[shadow.layers.length - 1] }] } });
+    if (shadow)
+      this.emit({
+        value: { layers: [...shadow.layers, { ...shadow.layers[shadow.layers.length - 1] }] },
+      });
   }
 
   protected removeLayer(index: number): void {
@@ -368,8 +466,13 @@ export class TokenInspector {
   }
 
   protected sourceOptions(mode: ModeRow): { label: string; value: string | null }[] {
-    const options = this.siblings().map((t) => ({ label: t.identifier, value: t.id as string | null }));
-    return mode.isDefault ? options : [{ label: `Same as ${this.defaultModeName()}`, value: null }, ...options];
+    const options = this.siblings().map((t) => ({
+      label: t.identifier,
+      value: t.id as string | null,
+    }));
+    return mode.isDefault
+      ? options
+      : [{ label: `Same as ${this.defaultModeName()}`, value: null }, ...options];
   }
 
   protected sourceControl(modeId: string): FormControl<string | null> {
@@ -382,7 +485,10 @@ export class TokenInspector {
     return control;
   }
 
-  protected commitText(field: 'identifier' | 'displayName' | 'description', control: FormControl<string>): void {
+  protected commitText(
+    field: 'identifier' | 'displayName' | 'description',
+    control: FormControl<string>,
+  ): void {
     control.markAsPristine();
     const value = control.value.trim();
     const current = this.token()[field] ?? '';
@@ -419,7 +525,10 @@ export class TokenInspector {
       this.emit({ value: undefined, source: { [defaultMode.id]: first.id } });
     } else if (kind === 'primitive' && token.source && token.resolved) {
       const resolved = token.resolved;
-      const value = 'hex' in resolved ? { l: resolved.l, c: resolved.c, h: resolved.h } : (resolved as TokenMagnitude);
+      const value =
+        'hex' in resolved
+          ? { l: resolved.l, c: resolved.c, h: resolved.h }
+          : (resolved as TokenMagnitude);
       this.emit({ value, source: undefined });
     }
   }
@@ -449,8 +558,10 @@ export class TokenInspector {
   }
 
   private describeModifier(modifier: NonNullable<TokenDef['modifiers']>[number]): string {
-    const nameOf = (id?: string) => this.tokens().find((t) => t.id === id)?.identifier ?? 'unknown token';
-    if ('mix' in modifier) return `Mix with ${nameOf(modifier.mix)}, ${Math.round(modifier.amount * 100)}%`;
+    const nameOf = (id?: string) =>
+      this.tokens().find((t) => t.id === id)?.identifier ?? 'unknown token';
+    if ('mix' in modifier)
+      return `Mix with ${nameOf(modifier.mix)}, ${Math.round(modifier.amount * 100)}%`;
     const operand = modifier.ref ? nameOf(modifier.ref) : String(modifier.value);
     return 'channel' in modifier
       ? `${modifier.channel} ${modifier.kind} ${operand}`

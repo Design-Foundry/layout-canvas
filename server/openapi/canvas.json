@@ -86,6 +86,46 @@
         }
       }
     },
+    "/api/documents/import": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "operationId": "ImportDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/documents/{id}": {
       "get": {
         "tags": [
@@ -509,6 +549,21 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "ImportDocumentRequest": {
+        "required": [
+          "name",
+          "snapshot"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/JsonElement"
           }
         }
       },

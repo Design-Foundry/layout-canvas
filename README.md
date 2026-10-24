@@ -1,6 +1,7 @@
 # canvas
 
-Design canvas in the spirit of Figma, consuming Design Foundry releases (RF) read-only.
+Design canvas in the spirit of Figma, with native editable components, typography,
+vectors, drawing tools and local raster images. See [editor capabilities and limits](docs/editor-features.md).
 
 | Folder        | What                                              | Stack                          |
 |---------------|---------------------------------------------------|--------------------------------|
@@ -33,3 +34,33 @@ and serves the client on http://localhost:4200 with `/api` proxied to the server
     ctest --preset native-debug      # in visualcore/, from a Dev PowerShell terminal
     pnpm --filter @canvas/client test
     dotnet test server/Canvas.Server.slnx
+
+## Components and portable files
+
+Open **Assets** to search main components, create linked instances, export a
+portable Canvas component or import one into a separate document. Imported files
+include required main components and tokens and are validated natively before
+storage. The editor supports visibility/text/swap properties, variant axes and
+independent instance overrides. Importing a component never overwrites its source
+document.
+
+Static PNG/JPEG files can also be imported from Assets. Source dimensions and size
+are validated before decoding; pixels are explicitly reduced to at most 512 px per
+side and stored in the document. See the feature inventory for resource limits.
+
+Additional checks (Node.js 24 or newer):
+
+    npm run test:integration
+    npm run test:server-integration  # a local Canvas server on :5180 is required
+
+## Authors and contributors
+
+Human authors are listed in [AUTHORS](AUTHORS). Copyright remains with those
+individuals; the project name is not a legal entity or an assignment of rights.
+[CONTRIBUTORS](CONTRIBUTORS) is generated from Git history with `.mailmap` applied:
+
+    npm run contributors
+    npm run contributors:check
+
+Attribution files do not grant a license or transfer copyright. Bundled fonts and
+third-party source retain their respective license notices.
