@@ -7,7 +7,7 @@ import type {
   NodeProps,
   OklchColor,
 } from '@canvas/bridge';
-import { LucentButton } from '@design-foundry/lucent';
+import { LucentButton } from '@designfoundry/lucent-angular';
 import type { ComponentSnapshot, SnapshotNode } from './component-package';
 import { componentOptions } from './component-options';
 

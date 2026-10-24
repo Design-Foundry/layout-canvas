@@ -2,7 +2,7 @@ import { Component, ElementRef, afterNextRender, computed, input, output, viewCh
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { TokenRow } from '@canvas/bridge';
-import { LucentIcon, LucentPrefix, LucentTextInput } from '@design-foundry/lucent';
+import { LucentIcon, LucentPrefix, LucentTextInput } from '@designfoundry/lucent-angular';
 import { tokenSummary } from './token-model';
 
 /** A searchable list of tokens. Hovering one previews it; clicking picks it. */

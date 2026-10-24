@@ -28,7 +28,7 @@ import {
   LucentReferenceTag,
   LucentSegmentedControl,
   LucentSelect,
-} from '@design-foundry/lucent';
+} from '@designfoundry/lucent-angular';
 import { ComponentCommand } from './editor-model';
 import { BindableFamily, ColorField, PickRequest, ValueField, isToken } from './inspector-fields';
 import { NumberField } from './number-field';

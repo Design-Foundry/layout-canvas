@@ -32,7 +32,7 @@
             <lucent-icon-button
               icon="restart_alt"
               size="sm"
-              variant="ghost"
+              variant="text"
               ariaLabel="Reset overrides"
               (clicked)="componentCommand.emit('resetOverrides')"
             />
@@ -41,7 +41,7 @@
             <lucent-icon-button
               icon="link_off"
               size="sm"
-              variant="ghost"
+              variant="text"
               ariaLabel="Detach instance"
               (clicked)="componentCommand.emit('detach')"
             />
@@ -132,7 +132,7 @@
           <lucent-icon-button
             icon="unfold_more"
             size="sm"
-            variant="ghost"
+            variant="text"
             [ariaLabel]="hasLimits() ? 'Remove min and max' : 'Min and max'"
             (clicked)="toggleLimits()"
           />
@@ -190,7 +190,7 @@
             <lucent-icon-button
               icon="add"
               size="sm"
-              variant="ghost"
+              variant="text"
               ariaLabel="Add auto layout"
               (clicked)="addLayout()"
             />
@@ -198,7 +198,7 @@
             <lucent-icon-button
               icon="remove"
               size="sm"
-              variant="ghost"
+              variant="text"
               ariaLabel="Remove auto layout"
               (clicked)="removeLayout()"
             />
@@ -258,7 +258,7 @@
           <lucent-icon-button
             icon="crop_free"
             size="sm"
-            variant="ghost"
+            variant="text"
             [ariaLabel]="hasCorners() ? 'Same radius on every corner' : 'Radius per corner'"
             (clicked)="toggleCorners()"
           />
@@ -323,7 +323,7 @@
           <lucent-icon-button
             [icon]="n.fillVisible ? 'visibility' : 'visibility_off'"
             size="sm"
-            variant="ghost"
+            variant="text"
             [ariaLabel]="n.fillVisible ? 'Hide fill' : 'Show fill'"
             (clicked)="toggleFill()"
           />
@@ -354,7 +354,7 @@
               <lucent-icon-button
                 icon="link"
                 size="sm"
-                variant="ghost"
+                variant="text"
                 ariaLabel="Apply border token"
                 (clicked)="openPicker('stroke', $any({ nativeElement: borderApply }))"
               />
@@ -363,7 +363,7 @@
               <lucent-icon-button
                 icon="border_outer"
                 size="sm"
-                variant="ghost"
+                variant="text"
                 [ariaLabel]="hasSides() ? 'Same width on every side' : 'Width per side'"
                 (clicked)="toggleSides()"
               />
@@ -372,7 +372,7 @@
               <lucent-icon-button
                 icon="remove"
                 size="sm"
-                variant="ghost"
+                variant="text"
                 ariaLabel="Remove stroke"
                 (clicked)="removeStroke()"
               />
@@ -380,7 +380,7 @@
               <lucent-icon-button
                 icon="add"
                 size="sm"
-                variant="ghost"
+                variant="text"
                 ariaLabel="Add stroke"
                 (clicked)="addStroke()"
               />
@@ -405,7 +405,7 @@
             <lucent-icon-button
               icon="link_off"
               size="sm"
-              variant="ghost"
+              variant="text"
               ariaLabel="Detach token"
               (clicked)="detachBorder()"
             />
@@ -468,14 +468,14 @@
               <lucent-icon-button
                 icon="link"
                 size="sm"
-                variant="ghost"
+                variant="text"
                 ariaLabel="Apply shadow token"
                 (clicked)="openPicker('shadows', $any({ nativeElement: shadowApply }))"
               />
               <lucent-icon-button
                 icon="add"
                 size="sm"
-                variant="ghost"
+                variant="text"
                 ariaLabel="Add shadow"
                 (clicked)="addShadow()"
               />
@@ -495,7 +495,7 @@
             <lucent-icon-button
               icon="link_off"
               size="sm"
-              variant="ghost"
+              variant="text"
               ariaLabel="Detach token"
               (clicked)="detachShadows()"
             />
@@ -514,14 +514,14 @@
               <lucent-icon-button
                 [icon]="shadow.visible ? 'visibility' : 'visibility_off'"
                 size="sm"
-                variant="ghost"
+                variant="text"
                 [ariaLabel]="shadow.visible ? 'Hide shadow' : 'Show shadow'"
                 (clicked)="setShadow(i, { visible: !shadow.visible })"
               />
               <lucent-icon-button
                 icon="remove"
                 size="sm"
-                variant="ghost"
+                variant="text"
                 ariaLabel="Remove shadow"
                 (clicked)="removeShadow(i)"
               />

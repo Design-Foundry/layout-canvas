@@ -26,7 +26,7 @@ import {
   LucentSelect,
   LucentTextInput,
   LucentTextarea,
-} from '@design-foundry/lucent';
+} from '@designfoundry/lucent-angular';
 import { NumberField } from './number-field';
 import { TOKEN_FAMILIES, formatMagnitude } from './token-model';
 import { TextPanel } from './text-panel';
@@ -131,7 +131,7 @@ const KIND_OPTIONS = [
             <lucent-icon-button
               icon="add"
               size="sm"
-              variant="ghost"
+              variant="text"
               ariaLabel="Add layer"
               (clicked)="addLayer()"
             />
@@ -150,7 +150,7 @@ const KIND_OPTIONS = [
                   <lucent-icon-button
                     icon="remove"
                     size="sm"
-                    variant="ghost"
+                    variant="text"
                     ariaLabel="Remove layer"
                     (clicked)="removeLayer(i)"
                   />

@@ -10,7 +10,7 @@ import {
   LucentMenuItem,
   LucentMenuTrigger,
   LucentSelect,
-} from '@design-foundry/lucent';
+} from '@designfoundry/lucent-angular';
 import { TOKEN_FAMILIES, tokenSummary } from './token-model';
 
 export interface ModeRename {
@@ -44,11 +44,11 @@ export interface ModeRename {
       } @else {
         <lucent-select class="mode-select" size="sm" [options]="modeOptions()" [formControl]="modeControl" />
       }
-      <lucent-icon-button icon="add" size="sm" variant="ghost" ariaLabel="Add mode" (clicked)="addMode.emit()" />
+      <lucent-icon-button icon="add" size="sm" variant="text" ariaLabel="Add mode" (clicked)="addMode.emit()" />
       <lucent-icon-button
         icon="more_vert"
         size="sm"
-        variant="ghost"
+        variant="text"
         ariaLabel="Mode options"
         [lucentMenuTrigger]="modeMenu"
       />
@@ -70,7 +70,7 @@ export interface ModeRename {
             <lucent-icon-button
               icon="add"
               size="sm"
-              variant="ghost"
+              variant="text"
               [ariaLabel]="'Add ' + family.label.toLowerCase() + ' token'"
               (clicked)="addToken.emit(family.type)"
             />
