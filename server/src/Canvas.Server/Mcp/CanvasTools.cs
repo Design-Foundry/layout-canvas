@@ -43,7 +43,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
     }
 
     [McpServerTool(Name = "get_document", ReadOnly = true, Idempotent = true)]
-    [Description("A document's modes, its tokens with values resolved in a mode, and its layer tree (topmost first, each layer followed by its children, with depth).")]
+    [Description("A document's modes, its tokens with values resolved in a mode, and its layer tree in document order (each layer followed by its children, with depth; siblings back to front, as auto layout places them).")]
     public async Task<JsonElement> GetDocument(
         [Description("Document id.")] Guid documentId,
         [Description("Mode to resolve token values in; the default mode when omitted.")] Guid? mode = null,
@@ -69,7 +69,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
                 Alias = token.TryGetProperty("source", out _),
                 Resolved = token.TryGetProperty("resolved", out var resolved) ? resolved : (JsonElement?)null,
             }).ToList(),
-            value.Layers,
+            Layers = InDocumentOrder(value.Layers),
         }, JsonOptions);
     }
 
@@ -87,7 +87,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
     }
 
     [McpServerTool(Name = "get_layout", ReadOnly = true, Idempotent = true)]
-    [Description("Laid-out boxes in absolute canvas coordinates for a subtree or the whole document, topmost first. overflows marks a layer that extends outside its parent; check it after building to catch clipped text and misaligned children.")]
+    [Description("Laid-out boxes in absolute canvas coordinates for a subtree or the whole document, in document order like get_document. overflows marks a layer that extends outside its parent; check it after building to catch clipped text and misaligned children.")]
     public async Task<JsonElement> GetLayout(
         [Description("Document id.")] Guid documentId,
         [Description("Root of the subtree; the whole document when omitted.")] Guid? rootId = null,
@@ -115,12 +115,12 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         {
             throw new McpException($"Send between 1 and {AppendOpsRequest.MaxOps} ops.");
         }
-        var (found, lastOrders) = await host.ReadAsync(documentId, LastOrders, ct);
+        var (found, existing) = await host.ReadAsync(documentId, core => (LastOrders: LastOrders(core), ComponentNames: ComponentNames(core)), ct);
         if (!found)
         {
             throw NotFound(documentId);
         }
-        var (prepared, ids) = OpBatch.Prepare(ops, lastOrders);
+        var (prepared, ids) = OpBatch.Prepare(ops, existing.LastOrders, existing.ComponentNames);
         AppendOpsResponse? response;
         try
         {
@@ -173,6 +173,42 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         return last;
     }
 
+    private static Dictionary<Guid, string> ComponentNames(VisualCoreDocument core) =>
+        core.Layers().EnumerateArray()
+            .Where(row => row.GetProperty("type").GetString() == "component" && !row.TryGetProperty("inInstance", out _))
+            .ToDictionary(row => row.GetProperty("id").GetGuid(), row => row.GetProperty("name").GetString() ?? "");
+
+    private sealed record LayerTree(JsonElement Row, List<LayerTree> Children);
+
+    /// <summary>Reorders layer rows, which come topmost first, so siblings run back to front.</summary>
+    private static List<JsonElement> InDocumentOrder(JsonElement layers)
+    {
+        var roots = new List<LayerTree>();
+        var path = new List<LayerTree>();
+        foreach (var row in layers.EnumerateArray())
+        {
+            var depth = row.GetProperty("depth").GetInt32();
+            var tree = new LayerTree(row, []);
+            if (path.Count > depth)
+            {
+                path.RemoveRange(depth, path.Count - depth);
+            }
+            (depth == 0 || path.Count < depth ? roots : path[depth - 1].Children).Add(tree);
+            path.Add(tree);
+        }
+        var ordered = new List<JsonElement>();
+        void Walk(List<LayerTree> siblings)
+        {
+            for (var i = siblings.Count - 1; i >= 0; i--)
+            {
+                ordered.Add(siblings[i].Row);
+                Walk(siblings[i].Children);
+            }
+        }
+        Walk(roots);
+        return ordered;
+    }
+
     private sealed record LayoutRow(Guid Id, string Name, string Type, int Depth, double X, double Y, double W, double H, bool? Overflows);
 
     /// <summary>Null when <paramref name="rootId"/> is not in the document.</summary>
@@ -181,7 +217,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         var rows = new List<LayoutRow>();
         var ancestors = new List<LayoutRow>();
         int? rootDepth = null;
-        foreach (var row in core.Layers().EnumerateArray())
+        foreach (var row in InDocumentOrder(core.Layers()))
         {
             var id = row.GetProperty("id").GetGuid();
             var depth = row.GetProperty("depth").GetInt32();

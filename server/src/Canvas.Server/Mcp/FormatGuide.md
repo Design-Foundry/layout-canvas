@@ -79,7 +79,7 @@ All five fields are required when `layout` is present. Typical card: a `column` 
   - Names and axis values: lowercase kebab-case.
   - `properties` show or hide their target.
   - `rules` patch a layer when the axis values match: fill, stroke, opacity, size, layout, path, `textStyle` (partial text metrics), and similar. Rules cannot change name, visibility, sizing modes or type, nor `text` on a layer a text property controls.
-- Instance: `{ "type": "instance", "component": "<main id>", "componentValues": { "<property or axis>": value } }`. Its layers come from the main; give the instance its own `w`, `h` and sizing.
+- Instance: `{ "type": "instance", "component": "<main id>", "componentValues": { "<property or axis>": value } }`. Its layers come from the main; give the instance its own `w`, `h` and sizing. Without a `name` it takes the main's.
 - Per-instance changes beyond properties: `SetOverride` with `node` = the main's layer id.
 
 ## Ops (`kind` and `data`)

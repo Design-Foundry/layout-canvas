@@ -19,7 +19,7 @@ public sealed class OpBatchTests
             Op("CreateNode", new { node = new { id = "$card", type = "frame" } }),
             Op("CreateNode", new { node = new { id = "$title", type = "text", parent = "$card" } }),
             Op("CreateToken", new { token = new { id = "$ink", source = new Dictionary<string, string> { ["$dark"] = "$base" } } }),
-        ], new Dictionary<Guid, string>());
+        ], new Dictionary<Guid, string>(), new Dictionary<Guid, string>());
 
         Assert.Equal(["$base", "$card", "$dark", "$ink", "$title"], ids.Keys.Order());
         Assert.Equal(ids["$card"].ToString(), ops[1].Data.GetProperty("node").GetProperty("parent").GetString());
@@ -39,10 +39,26 @@ public sealed class OpBatchTests
             Op("CreateNode", new { node = new { id = "$c", parent, order = "b0" } }),
             Op("CreateNode", new { node = new { id = "$d", parent } }),
             Op("CreateNode", new { node = new { id = "$top" } }),
-        ], new Dictionary<Guid, string> { [parent] = "a4" });
+        ], new Dictionary<Guid, string> { [parent] = "a4" }, new Dictionary<Guid, string>());
 
         var orders = ops.Select(o => o.Data.GetProperty("node").GetProperty("order").GetString()).ToList();
         Assert.Equal(["a5", "a6", "b0", "b0V", "a0"], orders);
+    }
+
+    [Fact]
+    public void Unnamed_instances_take_their_component_name()
+    {
+        var existing = Guid.NewGuid();
+        var (ops, _) = OpBatch.Prepare(
+        [
+            Op("CreateNode", new { node = new { id = "$button", type = "component", name = "Button" } }),
+            Op("CreateNode", new { node = new { type = "instance", component = "$button" } }),
+            Op("CreateNode", new { node = new { type = "instance", component = "$button", name = "Save" } }),
+            Op("CreateNode", new { node = new { type = "instance", component = existing } }),
+        ], new Dictionary<Guid, string>(), new Dictionary<Guid, string> { [existing] = "Row" });
+
+        var names = ops.Select(o => o.Data.GetProperty("node").GetProperty("name").GetString()).ToList();
+        Assert.Equal(["Button", "Button", "Save", "Row"], names);
     }
 
     [Theory]
@@ -81,9 +97,10 @@ public sealed class McpToolsTests(CanvasFactory factory) : IClassFixture<CanvasF
                 layout = new { type = "column", gap = 8, padding, justify = "start", align = "stretch" } } }),
             Op("CreateNode", new { node = new { id = "$title", type = "text", parent = "$card", w = 10, h = 10, widthSizing = "fill", heightSizing = "hug", text = Text("Pedidos") } }),
             Op("SetProps", new { id = "$title", patch = new { cornerRadius = 4 } }),
+            Op("CreateNode", new { node = new { id = "$count", type = "text", parent = "$card", w = 10, h = 10, widthSizing = "hug", heightSizing = "hug", text = Text("12") } }),
         ], Ct);
 
-        Assert.Equal(2, result.GetProperty("applied").GetInt32());
+        Assert.Equal(3, result.GetProperty("applied").GetInt32());
         var card = result.GetProperty("ids").GetProperty("$card").GetGuid();
         var refused = result.GetProperty("results")[2];
         Assert.False(refused.GetProperty("applied").GetBoolean());
@@ -98,14 +115,16 @@ public sealed class McpToolsTests(CanvasFactory factory) : IClassFixture<CanvasF
         Assert.Equal("Nothing was applied: ops[1].patch.text: letterSpacing must be between 0 and 128", malformed.Message);
 
         var layout = await Tools.GetLayout(document.Id, card, null, Ct);
-        Assert.Equal(2, layout.GetArrayLength());
+        Assert.Equal(3, layout.GetArrayLength());
+        Assert.Equal(result.GetProperty("ids").GetProperty("$title").GetGuid(), layout[1].GetProperty("id").GetGuid());
         Assert.Equal(200, layout[0].GetProperty("w").GetDouble());
         Assert.Equal(168, layout[1].GetProperty("w").GetDouble());
         Assert.Equal(16, layout[1].GetProperty("x").GetDouble() - layout[0].GetProperty("x").GetDouble());
         Assert.False(layout[1].TryGetProperty("overflows", out _));
 
         var read = await Tools.GetDocument(document.Id, null, Ct);
-        Assert.Equal(2, read.GetProperty("layers").GetArrayLength());
+        Assert.Equal(layout.EnumerateArray().Select(r => r.GetProperty("id").GetGuid()),
+            read.GetProperty("layers").EnumerateArray().Select(r => r.GetProperty("id").GetGuid()));
     }
 
     [Fact]
