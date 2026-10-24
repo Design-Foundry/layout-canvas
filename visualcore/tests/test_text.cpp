@@ -604,6 +604,25 @@ TEST_CASE("Text draw list emits only clipped glyphs with paint opacity, never a 
     buildDrawList(doc, {-100,-100,1000,1000}, kDefaultModeId, items); REQUIRE(items.empty());
 }
 
+TEST_CASE("Text with an unresolved fill keeps its paint opacity on the fallback color") {
+    Document doc;
+    Node text; text.id = {77,2}; text.type = NodeType::Text; text.order = "a0";
+    text.text.content = "Hola"; text.w = 100; text.h = 40; text.opacity = .25;
+    for (std::uint64_t i = 0; i <= 70; ++i) {
+        Token token; token.id = {78,i}; token.identifier = "chain-" + std::to_string(i); token.order = "a0";
+        if (i == 0) token.value = Oklch{.5, 0, 0, 1};
+        else token.source = {{kDefaultModeId, Id{78,i - 1}}};
+        REQUIRE(doc.apply(CreateToken{token}));
+    }
+    text.fill = TokenRef{Id{78,70}};
+    REQUIRE_FALSE(doc.resolveColor(text.fill, kDefaultModeId));
+    REQUIRE(doc.apply(CreateNode{text}));
+    std::vector<DrawItem> items;
+    buildDrawList(doc, {-100,-100,1000,1000}, kDefaultModeId, items);
+    REQUIRE_FALSE(items.empty());
+    for (const auto& item : items) REQUIRE_THAT(item.color.a, WithinAbs(.25, 1e-6));
+}
+
 TEST_CASE("Text tool creates real text and frame-shaped nodes cannot carry hidden text") {
     Session session{IdGenerator{73}}; Camera camera; Editor editor{session, camera};
     editor.setTool(Tool::Text); editor.pointerDown({0,0}, PointerButton::Primary); editor.pointerUp();

@@ -108,7 +108,8 @@ private:
             if (node.type == NodeType::Text) {
                 const auto text = layoutText(node.text, box.w, node.textWrap);
                 const auto fill = document_.resolveColor(node.fill, mode_);
-                const Color color = fill ? withAlpha(*fill, alpha) : kUnresolvedColor;
+                Color color = fill ? withAlpha(*fill, alpha) : kUnresolvedColor;
+                if (!fill) color.a = static_cast<float>(alpha);
                 const auto textClip = intersect(clip, box);
                 bool visible = false;
                 if (node.fillVisible) for (const auto& glyph : text.glyphs) {
