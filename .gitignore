@@ -16,3 +16,7 @@ Thumbs.db
 
 # Server data
 server/**/data/
+
+# Local development tools and isolated checkouts
+.tools/
+.local/
