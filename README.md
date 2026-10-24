@@ -44,6 +44,15 @@ Additional checks (Node.js 24 or newer):
     npm run test:integration
     npm run test:server-integration  # a local Canvas server on :5180 is required
 
+## MCP
+
+The server exposes an MCP endpoint at http://localhost:5180/mcp (Streamable HTTP) that answers
+only requests from this machine. Agents can list, create and import documents, read tokens, layers
+and laid-out boxes, and apply ops through the same log the editor syncs with. `get_format_guide`
+describes the document format. With the server running, add it to Claude Code:
+
+    claude mcp add --transport http canvas http://localhost:5180/mcp
+
 ## Authors and contributors
 
 Human authors are listed in [AUTHORS](AUTHORS). Copyright remains with those

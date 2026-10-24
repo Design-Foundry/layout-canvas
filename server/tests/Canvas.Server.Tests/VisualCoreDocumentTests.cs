@@ -60,7 +60,9 @@ public sealed class VisualCoreDocumentTests
 
         var rejected = Assert.Throws<SnapshotRejectedException>(() => VisualCoreDocument.Open("{}"));
         Assert.NotEmpty(rejected.Reason.Message);
-        Assert.Throws<ArgumentException>(() => document.Apply([new VisualCoreOp("Unknown", JsonSerializer.SerializeToElement(new { }))]));
+        var malformed = Assert.Throws<MalformedOpsException>(() => document.Apply([new VisualCoreOp("Unknown", JsonSerializer.SerializeToElement(new { }))]));
+        Assert.Equal("ops[0]", malformed.Reason.Path);
+        Assert.StartsWith("unknown op kind Unknown", malformed.Reason.Message);
     }
 
     [Fact]

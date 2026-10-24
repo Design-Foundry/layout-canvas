@@ -17,8 +17,11 @@
     <None Include="@(VisualCoreNative)" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
-  <Target Name="WarnMissingVisualCore" BeforeTargets="Build"
-          Condition="!Exists('$(VisualCoreNativeDir)/vc_native.dll') And !Exists('$(VisualCoreNativeDir)/libvc_native.so')">
+  <ItemGroup>
+    <EmbeddedResource Include="Mcp/FormatGuide.md" LogicalName="Canvas.Server.Mcp.FormatGuide.md" />
+  </ItemGroup>
+
+  <Target Name="WarnMissingVisualCore" BeforeTargets="Build" Condition="!Exists('$(VisualCoreNativeDir)/vc_native.dll') And !Exists('$(VisualCoreNativeDir)/libvc_native.so')">
     <Warning Text="vc_native was not found in $(VisualCoreNativeDir). Build visualcore natively (cmake --build --preset native-debug) or set VisualCoreNativeDir." />
   </Target>
 
@@ -29,6 +32,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.3.0" />
   </ItemGroup>
 
 </Project>

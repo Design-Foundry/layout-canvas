@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Canvas.Server.Documents;
+using Canvas.Server.Mcp;
 using Canvas.Server.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +17,7 @@ builder.Services.AddHostedService<DatabaseInitializer>();
 builder.Services.AddSingleton<DocumentStore>();
 builder.Services.Configure<DocumentHostOptions>(builder.Configuration.GetSection(DocumentHostOptions.Section));
 builder.Services.AddSingleton<DocumentHost>();
+builder.Services.AddCanvasMcp();
 
 var app = builder.Build();
 
@@ -33,6 +35,7 @@ api.MapGet("/health", () => TypedResults.Ok(new HealthResponse("ok", typeof(Prog
     .WithName("GetHealth");
 
 api.MapDocuments();
+app.MapCanvasMcp();
 
 app.Run();
 

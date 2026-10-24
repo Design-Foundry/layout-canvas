@@ -66,6 +66,24 @@ public sealed class DocumentHost : IDisposable
         }
     }
 
+    /// <summary>
+    /// Runs <paramref name="read"/> on the document once it has caught up with its log, serialized with
+    /// writes. Found is false if the document doesn't exist.
+    /// </summary>
+    public async Task<(bool Found, T Value)> ReadAsync<T>(Guid id, Func<VisualCoreDocument, T> read, CancellationToken ct)
+    {
+        var (found, result) = await WithDocumentAsync(id, async live =>
+        {
+            if (!await CatchUpAsync(live, ct))
+            {
+                Discard(live);
+                return (Found: false, Value: default(T)!);
+            }
+            return (Found: true, Value: read(live.Core));
+        }, ct);
+        return found && result.Found ? (true, result.Value) : (false, default!);
+    }
+
     /// <summary>Unloads the document, for example after it was deleted.</summary>
     public async Task CloseAsync(Guid id)
     {

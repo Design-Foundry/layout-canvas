@@ -4,6 +4,13 @@ using Canvas.Server.Documents;
 
 namespace Canvas.Server.VisualCore;
 
+/// <summary>visualcore could not read a list of ops, so it applied none of them.</summary>
+public sealed class MalformedOpsException(OpRefusal reason)
+    : ArgumentException(reason.Path.Length == 0 ? reason.Message : $"{reason.Path}: {reason.Message}")
+{
+    public OpRefusal Reason { get; } = reason;
+}
+
 /// <summary>visualcore could not read a snapshot.</summary>
 public sealed class SnapshotRejectedException(OpRefusal reason)
     : Exception(reason.Path.Length == 0 ? reason.Message : $"{reason.Path}: {reason.Message}")
@@ -50,13 +57,13 @@ public sealed class VisualCoreDocument : IDisposable
     }
 
     /// <summary>Applies <paramref name="ops"/> in order. Returns, per op, null when it applied or why it was refused; refused ops change nothing.</summary>
-    /// <exception cref="ArgumentException">An op's kind is unknown or its payload malformed. Nothing was applied.</exception>
+    /// <exception cref="MalformedOpsException">An op's kind is unknown or its payload malformed. Nothing was applied.</exception>
     public OpRefusal?[] Apply(IReadOnlyList<VisualCoreOp> ops)
     {
         var text = NativeMethods.Apply(handle, Serialize(ops));
         var reason = text == 0 ? LastError() : null;
         var result = NativeMethods.Take(text)
-            ?? throw new ArgumentException(reason is null ? "visualcore could not read the ops." : $"{reason.Path}: {reason.Message}", nameof(ops));
+            ?? throw new MalformedOpsException(reason ?? new OpRefusal("", "visualcore could not read the ops"));
         using var document = JsonDocument.Parse(result);
         return document.RootElement.EnumerateArray()
             .Select(entry => entry.ValueKind == JsonValueKind.True ? null : entry.Deserialize<OpRefusal>(JsonOptions))
