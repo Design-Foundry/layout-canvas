@@ -108,8 +108,11 @@ public sealed class DocumentHost : IDisposable
 
         var logged = await store.FindOpsAsync(live.Id, ops.Select(o => o.Id).Distinct().ToList(), ct);
         var fresh = ops.Where(o => !logged.ContainsKey(o.Id)).DistinctBy(o => o.Id).ToList();
-        var valid = live.Core.Apply(fresh.Select(o => new VisualCoreOp(o.Kind, o.Data)).ToList());
-        var accepted = fresh.Where((_, i) => valid[i]).ToList();
+        var refusals = live.Core.Apply(fresh.Select(o => new VisualCoreOp(o.Kind, o.Data)).ToList());
+        var accepted = fresh.Where((_, i) => refusals[i] is null).ToList();
+        var errors = fresh.Select((op, i) => (op.Id, Error: refusals[i]))
+            .Where(r => r.Error is not null)
+            .ToDictionary(r => r.Id, r => r.Error!);
 
         if (await store.AppendAsync(live.Id, live.Seq, accepted, ct) != AppendStatus.Appended)
         {
@@ -124,7 +127,7 @@ public sealed class DocumentHost : IDisposable
         }
         await CompactIfDueAsync(live, ct);
 
-        var acks = ops.Select(o => new OpAck(o.Id, seqs.TryGetValue(o.Id, out var seq) ? seq : null)).ToList();
+        var acks = ops.Select(o => new OpAck(o.Id, seqs.TryGetValue(o.Id, out var seq) ? seq : null, errors.GetValueOrDefault(o.Id))).ToList();
         return new AppendOpsResponse(acks, live.Seq);
     }
 
@@ -249,7 +252,8 @@ public sealed class DocumentHost : IDisposable
         var core = VisualCoreDocument.Open(detail.Snapshot?.Data.GetRawText());
         if (core.RejectedOnLoad > 0)
         {
-            logger.LogWarning("Document {Id}: {Count} nodes of its snapshot were refused", id, core.RejectedOnLoad);
+            logger.LogWarning("Document {Id}: {Count} nodes of its snapshot were refused, the first at {Path}: {Message}",
+                id, core.RejectedOnLoad, core.FirstRejection?.Path, core.FirstRejection?.Message);
         }
         var seq = detail.Snapshot?.Seq ?? 0;
         var live = new LiveDocument(id, core, seq, seq) { LastUsed = clock.GetTimestamp() };
@@ -282,19 +286,20 @@ public sealed class DocumentHost : IDisposable
             }
 
             var ops = page.Ops.Select(o => new VisualCoreOp(o.Kind, o.Data)).ToList();
-            bool[] valid;
+            OpRefusal?[] refusals;
             try
             {
-                valid = live.Core.Apply(ops);
+                refusals = live.Core.Apply(ops);
             }
             catch (ArgumentException)
             {
-                valid = ops.Select(op => TryApply(live.Core, op)).ToArray();
+                refusals = ops.Select(op => TryApply(live.Core, op)).ToArray();
             }
-            var refused = valid.Count(v => !v);
-            if (refused > 0)
+            var refused = refusals.Where(r => r is not null).ToList();
+            if (refused.Count > 0)
             {
-                logger.LogWarning("Document {Id}: {Count} logged ops were refused on replay", live.Id, refused);
+                logger.LogWarning("Document {Id}: {Count} logged ops were refused on replay, the first at {Path}: {Message}",
+                    live.Id, refused.Count, refused[0]!.Path, refused[0]!.Message);
             }
 
             live.Seq = page.Ops[^1].Seq;
@@ -305,15 +310,15 @@ public sealed class DocumentHost : IDisposable
         }
     }
 
-    private static bool TryApply(VisualCoreDocument core, VisualCoreOp op)
+    private static OpRefusal? TryApply(VisualCoreDocument core, VisualCoreOp op)
     {
         try
         {
             return core.Apply([op])[0];
         }
-        catch (ArgumentException)
+        catch (ArgumentException malformed)
         {
-            return false;
+            return new OpRefusal("", malformed.Message);
         }
     }
 

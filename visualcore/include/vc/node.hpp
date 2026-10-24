@@ -108,6 +108,8 @@ struct Path {
     }
 };
 [[nodiscard]] bool validPath(const Path& path);
+/// Why `validPath` refuses `path`, or null when it accepts it.
+[[nodiscard]] const char* pathProblem(const Path& path);
 
 struct ImageCrop : Rect {
     ImageCrop() : Rect{0,0,1,1} {}

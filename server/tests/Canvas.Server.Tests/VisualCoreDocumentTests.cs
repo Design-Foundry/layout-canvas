@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Canvas.Server.Documents;
 using Canvas.Server.VisualCore;
 
 namespace Canvas.Server.Tests;
@@ -17,9 +18,10 @@ public sealed class VisualCoreDocumentTests
     {
         using var document = VisualCoreDocument.Open(null);
 
-        var applied = document.Apply([CreateFrame(FrameId), CreateFrame(Guid.NewGuid(), parent: Guid.NewGuid())]);
+        var refusals = document.Apply([CreateFrame(FrameId), CreateFrame(Guid.NewGuid(), parent: Guid.NewGuid())]);
 
-        Assert.Equal([true, false], applied);
+        Assert.Null(refusals[0]);
+        Assert.Equal(new OpRefusal("ops[1]", "the parent does not exist or cannot have children"), refusals[1]);
         var layers = document.Layers();
         Assert.Equal(1, layers.GetArrayLength());
         Assert.Equal("Card", layers[0].GetProperty("name").GetString());
@@ -56,7 +58,23 @@ public sealed class VisualCoreDocumentTests
     {
         using var document = VisualCoreDocument.Open(null);
 
-        Assert.Throws<InvalidDataException>(() => VisualCoreDocument.Open("{}"));
+        var rejected = Assert.Throws<SnapshotRejectedException>(() => VisualCoreDocument.Open("{}"));
+        Assert.NotEmpty(rejected.Reason.Message);
         Assert.Throws<ArgumentException>(() => document.Apply([new VisualCoreOp("Unknown", JsonSerializer.SerializeToElement(new { }))]));
+    }
+
+    [Fact]
+    public void A_snapshot_with_refused_layers_explains_the_first()
+    {
+        var snapshot = $$"""
+            {"version":2,"modes":[],"tokens":[],"nodes":[
+              {"id":"{{FrameId}}","type":"frame","order":"V","w":200,"h":100},
+              {"id":"{{Guid.NewGuid()}}","type":"rect","order":"W","parent":"{{Guid.NewGuid()}}"}]}
+            """;
+
+        using var document = VisualCoreDocument.Open(snapshot);
+
+        Assert.Equal(1, document.RejectedOnLoad);
+        Assert.Equal("the parent does not exist or cannot have children", document.FirstRejection?.Message);
     }
 }

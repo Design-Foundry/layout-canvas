@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <unordered_set>
+#include "vc/diagnostics.hpp"
 #include "vc/document.hpp"
 
 namespace vc {
@@ -79,6 +81,46 @@ TokenType familyOf(TokenFamilyHint hint) {
 
 bool isComposite(TokenType type) {
     return type == TokenType::Border || type == TokenType::Shadow || type == TokenType::Typography;
+}
+
+std::string familyName(TokenType type) {
+    switch (type) {
+    case TokenType::Color:
+        return "color";
+    case TokenType::Dimension:
+        return "dimension";
+    case TokenType::Duration:
+        return "duration";
+    case TokenType::Ratio:
+        return "ratio";
+    case TokenType::Opacity:
+        return "opacity";
+    case TokenType::Border:
+        return "border";
+    case TokenType::Shadow:
+        return "shadow";
+    case TokenType::Typography:
+        return "typography";
+    }
+    return "color";
+}
+
+std::string allowedUnits(TokenType type) {
+    const auto units = unitsFor(type);
+    if (units.size() == 1 && units.front() == Unit::None) return "no unit";
+    std::string out = "unit ";
+    for (std::size_t i = 0; i < units.size(); ++i) {
+        out += i == 0 ? "" : i + 1 == units.size() ? " or " : ", ";
+        out += unitName(units[i]);
+    }
+    return out;
+}
+
+std::string refProblem(const Id& id, const Token* target, TokenType expected, std::string_view field) {
+    std::string out{field};
+    out += " references token " + id.toString();
+    if (!target) return out + " which does not exist";
+    return out + ", a " + familyName(target->type) + " token, but it must be a " + familyName(expected) + " token";
 }
 
 } // namespace
@@ -339,89 +381,127 @@ std::vector<ResolvedShadow> Document::resolveShadows(const Value<std::vector<Sha
 }
 
 bool Document::isValidColorModifiers(const std::vector<Modifier>& modifiers) const {
-    for (const Modifier& modifier : modifiers) {
+    for (std::size_t i = 0; i < modifiers.size(); ++i) {
+        const DiagnosticScope scope{"modifiers[" + std::to_string(i) + "]"};
+        const Modifier& modifier = modifiers[i];
         if (const auto* channel = std::get_if<ColorChannelModifier>(&modifier)) {
-            if (!hasOneOperand(channel->value, channel->ref)) return false;
+            if (!hasOneOperand(channel->value, channel->ref)) {
+                return refuse("a channel modifier takes exactly one operand: value or ref");
+            }
             if (channel->ref) {
+                if (channel->channel != ColorChannel::Alpha) {
+                    return refuse("only the alpha channel takes a ref operand");
+                }
                 const Token* target = findToken(*channel->ref);
-                if (channel->channel != ColorChannel::Alpha || !target || target->type != TokenType::Opacity) {
-                    return false;
+                if (!target || target->type != TokenType::Opacity) {
+                    return refuse(refProblem(*channel->ref, target, TokenType::Opacity, "the alpha operand"));
                 }
             }
         } else if (const auto* mixer = std::get_if<ColorMixModifier>(&modifier)) {
             const Token* target = findToken(mixer->token);
-            if (!target || target->type != TokenType::Color || mixer->amount < 0.0 || mixer->amount > 1.0) {
-                return false;
+            if (!target || target->type != TokenType::Color) {
+                return refuse(refProblem(mixer->token, target, TokenType::Color, "the mix"));
             }
+            if (mixer->amount < 0.0 || mixer->amount > 1.0) return refuse("the mix amount must be between 0 and 1");
         } else {
-            return false;
+            return refuse("a color modifier is a channel modifier (l, c, h or alpha) or a mix");
         }
     }
     return true;
 }
 
 bool Document::isValidToken(const Token& token) const {
-    if (token.id.isNil() || !isValidIdentifier(token.identifier) || token.value.has_value() == token.isAlias()) {
-        return false;
+    if (token.id.isNil()) return refuse("a token needs an id");
+    if (!isValidIdentifier(token.identifier)) {
+        return refuse("identifier \"" + token.identifier +
+                      "\" must be dot-separated lowercase kebab-case segments that each start with a letter, such as space.lg or color.text-subtle");
+    }
+    if (token.value.has_value() == token.isAlias()) {
+        return refuse(token.value ? "a token holds either a value or an alias source, not both"
+                                  : "a token needs either a value or an alias source");
     }
     for (const auto& [id, other] : tokens_) {
         if (id != token.id && other.type == token.type && other.identifier == token.identifier) {
-            return false;
+            return refuse("identifier \"" + token.identifier + "\" is already used by another " + familyName(token.type) +
+                          " token");
         }
     }
     const auto refersTo = [this](const Id& id, TokenType type) {
         const Token* target = findToken(id);
         return target && target->type == type;
     };
+    const auto refuseRef = [this](const Id& id, TokenType type, std::string_view field) {
+        return refuse(refProblem(id, findToken(id), type, field));
+    };
+    const auto refuseCycle = [] { return refuse("this alias or modifier would create a reference cycle"); };
 
     if (isComposite(token.type)) {
-        if (token.isAlias() || !token.modifiers.empty()) return false;
+        if (token.isAlias()) return refuse(familyName(token.type) + " tokens cannot be aliases");
+        if (!token.modifiers.empty()) return refuse(familyName(token.type) + " tokens cannot have modifiers");
         if (token.type == TokenType::Typography) {
             const auto* style = std::get_if<TextStyle>(&*token.value);
-            if (!style || !style->complete() || !style->font) return false;
+            if (!style) return refuse("a typography token holds a text style");
+            if (!style->font) return refuse("a typography token needs font");
+            if (!style->fontSize) return refuse("a typography token needs fontSize");
+            if (!style->lineHeight) return refuse("a typography token needs lineHeight");
+            if (!style->letterSpacing) return refuse("a typography token needs letterSpacing");
+            if (!style->align) return refuse("a typography token needs align");
             TextRun run; Node node; node.text=run; NodePatch patch; patch.textStyle=*style;
             applyPatch(node,patch);
-            return validText(node.text);
+            if (const char* why = textProblem(node.text)) return refuse(why);
+            return true;
         }
         if (token.type == TokenType::Border) {
             const auto* border = std::get_if<BorderValue>(&*token.value);
-            return border && refersTo(border->width, TokenType::Dimension) &&
-                   refersTo(border->color, TokenType::Color) && !hasCycle(token);
+            if (!border) return refuse("a border token holds a width, a style and a color");
+            if (!refersTo(border->width, TokenType::Dimension)) {
+                return refuseRef(border->width, TokenType::Dimension, "the border width");
+            }
+            if (!refersTo(border->color, TokenType::Color)) {
+                return refuseRef(border->color, TokenType::Color, "the border color");
+            }
+            return !hasCycle(token) || refuseCycle();
         }
         const auto* shadow = std::get_if<ShadowValue>(&*token.value);
-        if (!shadow || shadow->layers.empty()) return false;
-        for (const ShadowLayerValue& layer : shadow->layers) {
-            if (layer.blur < 0.0 || !refersTo(layer.color, TokenType::Color) ||
-                !isValidColorModifiers(layer.colorModifiers)) {
-                return false;
+        if (!shadow) return refuse("a shadow token holds a list of layers");
+        if (shadow->layers.empty()) return refuse("a shadow token needs at least one layer");
+        for (std::size_t i = 0; i < shadow->layers.size(); ++i) {
+            const ShadowLayerValue& layer = shadow->layers[i];
+            const DiagnosticScope scope{"layers[" + std::to_string(i) + "]"};
+            if (layer.blur < 0.0) return refuse("blur cannot be negative");
+            if (!refersTo(layer.color, TokenType::Color)) {
+                return refuseRef(layer.color, TokenType::Color, "the layer color");
             }
+            if (!isValidColorModifiers(layer.colorModifiers)) return false;
         }
-        return !hasCycle(token);
+        return !hasCycle(token) || refuseCycle();
     }
 
     if (token.value) {
         if (token.type == TokenType::Color) {
             const auto* color = std::get_if<Oklch>(&*token.value);
-            if (!color || color->l < 0.0 || color->l > 1.0 || color->c < 0.0 || color->h < 0.0 || color->h > 360.0) {
-                return false;
-            }
+            if (!color) return refuse("a color token holds an oklch color");
+            if (color->l < 0.0 || color->l > 1.0) return refuse("color l must be between 0 and 1");
+            if (color->c < 0.0) return refuse("color c cannot be negative");
+            if (color->h < 0.0 || color->h > 360.0) return refuse("color h must be between 0 and 360");
         } else {
             const auto* magnitude = std::get_if<Magnitude>(&*token.value);
+            if (!magnitude) return refuse("a " + familyName(token.type) + " token holds a value with a unit");
             const auto units = unitsFor(token.type);
-            if (!magnitude || std::find(units.begin(), units.end(), magnitude->unit) == units.end()) {
-                return false;
+            if (std::find(units.begin(), units.end(), magnitude->unit) == units.end()) {
+                return refuse(familyName(token.type) + " values take " + allowedUnits(token.type));
             }
             if (token.type == TokenType::Opacity && (magnitude->value < 0.0 || magnitude->value > 1.0)) {
-                return false;
+                return refuse("opacity must be between 0 and 1");
             }
         }
     } else {
-        if (!token.source.contains(kDefaultModeId)) {
-            return false;
-        }
+        if (!token.source.contains(kDefaultModeId)) return refuse("an alias needs a source for the default mode");
         for (const auto& [mode, source] : token.source) {
-            if (!modes_.contains(mode) || source == token.id || !refersTo(source, token.type)) {
-                return false;
+            if (!modes_.contains(mode)) return refuse("alias source for mode " + mode.toString() + " names a mode that does not exist");
+            if (source == token.id) return refuse("an alias cannot point to itself");
+            if (!refersTo(source, token.type)) {
+                return refuseRef(source, token.type, "the alias source");
             }
         }
     }
@@ -429,13 +509,17 @@ bool Document::isValidToken(const Token& token) const {
     if (token.type == TokenType::Color) {
         if (!isValidColorModifiers(token.modifiers)) return false;
     } else {
-        for (const Modifier& modifier : token.modifiers) {
-            const auto* step = std::get_if<MagnitudeModifier>(&modifier);
-            if (!step || !hasOneOperand(step->value, step->ref)) return false;
-            if (step->ref && !refersTo(*step->ref, token.type)) return false;
+        for (std::size_t i = 0; i < token.modifiers.size(); ++i) {
+            const DiagnosticScope scope{"modifiers[" + std::to_string(i) + "]"};
+            const auto* step = std::get_if<MagnitudeModifier>(&token.modifiers[i]);
+            if (!step) return refuse(familyName(token.type) + " tokens take only magnitude modifiers (factor, delta, min, max)");
+            if (!hasOneOperand(step->value, step->ref)) return refuse("a modifier takes exactly one operand: value or ref");
+            if (step->ref && !refersTo(*step->ref, token.type)) {
+                return refuseRef(*step->ref, token.type, "the modifier operand");
+            }
         }
     }
-    return !hasCycle(token);
+    return !hasCycle(token) || refuseCycle();
 }
 
 bool Document::hasCycle(const Token& candidate) const {
@@ -464,25 +548,31 @@ bool Document::isValidNodeRefs(const Node& node) const {
 bool Document::isValidPatchRefs(const NodePatch& patch) const {
     bool valid = true;
     forEachPatchTokenRef(patch, [&](const Id& id, TokenFamilyHint hint) {
+        if (!valid) return;
         const Token* token = findToken(id);
-        valid = valid && token && token->type == familyOf(hint);
+        if (token && token->type == familyOf(hint)) return;
+        valid = false;
+        if (!token) {
+            refuse("token " + id.toString() + " does not exist");
+        } else {
+            refuse("token " + id.toString() + " is a " + familyName(token->type) + ", but this field takes a " +
+                   familyName(familyOf(hint)) + " token");
+        }
     });
     return valid;
 }
 
 std::optional<OpBody> Document::createToken(const CreateToken& op) {
-    if (tokens_.contains(op.token.id) || !isValidToken(op.token)) {
-        return std::nullopt;
-    }
+    if (tokens_.contains(op.token.id)) return refused("a token with this id already exists");
+    if (!isValidToken(op.token)) return std::nullopt;
     tokens_.emplace(op.token.id, op.token);
     return DeleteToken{op.token.id};
 }
 
 std::optional<OpBody> Document::deleteToken(const DeleteToken& op) {
     const auto it = tokens_.find(op.id);
-    if (it == tokens_.end() || isTokenReferenced(op.id)) {
-        return std::nullopt;
-    }
+    if (it == tokens_.end()) return refused("no token has this id");
+    if (isTokenReferenced(op.id)) return refused("token is still referenced by a node or another token, remove those references first");
     CreateToken inverse{it->second};
     tokens_.erase(it);
     return inverse;
@@ -490,30 +580,31 @@ std::optional<OpBody> Document::deleteToken(const DeleteToken& op) {
 
 std::optional<OpBody> Document::replaceToken(const ReplaceToken& op) {
     const auto it = tokens_.find(op.token.id);
-    if (it == tokens_.end() || it->second.type != op.token.type || !isValidToken(op.token)) {
-        return std::nullopt;
+    if (it == tokens_.end()) return refused("no token has this id");
+    if (it->second.type != op.token.type) {
+        return refused("a token cannot change family, it is a " + familyName(it->second.type));
     }
+    if (!isValidToken(op.token)) return std::nullopt;
     ReplaceToken inverse{it->second};
     it->second = op.token;
     return inverse;
 }
 
 std::optional<OpBody> Document::createMode(const CreateMode& op) {
-    if (op.mode.id.isNil() || modes_.contains(op.mode.id) || op.mode.name.empty()) {
-        return std::nullopt;
-    }
+    if (op.mode.id.isNil()) return refused("a mode needs an id");
+    if (modes_.contains(op.mode.id)) return refused("a mode with this id already exists");
+    if (op.mode.name.empty()) return refused("a mode needs a name");
     modes_.emplace(op.mode.id, op.mode);
     return DeleteMode{op.mode.id};
 }
 
 std::optional<OpBody> Document::deleteMode(const DeleteMode& op) {
     const auto it = modes_.find(op.id);
-    if (it == modes_.end() || op.id == kDefaultModeId) {
-        return std::nullopt;
-    }
+    if (it == modes_.end()) return refused("no mode has this id");
+    if (op.id == kDefaultModeId) return refused("the default mode cannot be deleted");
     for (const auto& [id, token] : tokens_) {
         if (token.source.contains(op.id)) {
-            return std::nullopt;
+            return refused("token \"" + token.identifier + "\" still has an alias source for this mode, remove it first");
         }
     }
     CreateMode inverse{it->second};
@@ -523,9 +614,8 @@ std::optional<OpBody> Document::deleteMode(const DeleteMode& op) {
 
 std::optional<OpBody> Document::replaceMode(const ReplaceMode& op) {
     const auto it = modes_.find(op.mode.id);
-    if (it == modes_.end() || op.mode.name.empty()) {
-        return std::nullopt;
-    }
+    if (it == modes_.end()) return refused("no mode has this id");
+    if (op.mode.name.empty()) return refused("a mode needs a name");
     ReplaceMode inverse{it->second};
     it->second = op.mode;
     return inverse;

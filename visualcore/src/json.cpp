@@ -1,4 +1,5 @@
 #include "vc/json.hpp"
+#include "vc/diagnostics.hpp"
 
 #include <algorithm>
 #include <array>
@@ -77,6 +78,8 @@ constexpr std::array<std::pair<Align, std::string_view>, 4> kAligns{{
     {Align::Start, "start"}, {Align::Center, "center"}, {Align::End, "end"}, {Align::Stretch, "stretch"}}};
 constexpr std::array<std::pair<Sizing, std::string_view>, 3> kSizings{{
     {Sizing::Fixed, "fixed"}, {Sizing::Hug, "hug"}, {Sizing::Fill, "fill"}}};
+constexpr std::array<std::string_view, 12> kOpKinds{"CreateNode", "DeleteNode", "SetProps", "MoveNode", "CreateToken", "DeleteToken",
+                                                      "ReplaceToken", "CreateMode", "DeleteMode", "ReplaceMode", "SetOverride", "SetComponentDefinition"};
 
 json token(const TokenRef& ref) {
     return {{"token", ref.token.toString()}};
@@ -263,29 +266,69 @@ json write(const Node& n) {
     return out;
 }
 
-// Readers return false when a present field has the wrong shape. Absent fields are fine.
+// Readers return nullopt or false when a present field has the wrong shape. Absent fields are fine.
+
+enum class Shape { String, Boolean, Number };
+
+constexpr std::string_view kNodeTypeNames = "frame, rect, ellipse, component, instance, text, line, path or image";
+
+std::string slot(std::size_t index) {
+    return "[" + std::to_string(index) + "]";
+}
+
+bool require(const json& j, const char* key, Shape shape) {
+    DiagnosticScope scope{key};
+    const auto it = j.find(key);
+    if (it == j.end()) return refuse(std::string{key} + " is required");
+    if (shape == Shape::String ? it->is_string() : shape == Shape::Boolean ? it->is_boolean() : it->is_number()) return true;
+    return refuse(std::string{key} + (shape == Shape::String ? " must be a string" : shape == Shape::Boolean ? " must be a boolean" : " must be a number"));
+}
+
+std::optional<Id> parseId(const json& j) {
+    return j.is_string() ? Id::parse(j.get_ref<const std::string&>()) : std::nullopt;
+}
 
 std::optional<Id> readId(const json& j) {
-    return j.is_string() ? Id::parse(j.get_ref<const std::string&>()) : std::nullopt;
+    auto id = parseId(j);
+    if (!id) return refused("must be a UUID string");
+    return id;
+}
+
+std::optional<Id> requireId(const json& j, const char* key) {
+    DiagnosticScope scope{key};
+    const auto it = j.find(key);
+    if (it == j.end()) return refused(std::string{key} + " is required: a UUID string");
+    return readId(*it);
+}
+
+std::optional<std::string> requireOrder(const json& j) {
+    DiagnosticScope scope{"order"};
+    const auto it = j.find("order");
+    if (it == j.end() || !it->is_string()) return refused("order is required: a fractional index string such as a0");
+    return it->get<std::string>();
 }
 
 std::optional<TokenRef> readToken(const json& j) {
     if (!j.is_object() || j.size() != 1) return std::nullopt;
     const auto it = j.find("token");
     if (it == j.end()) return std::nullopt;
-    const auto id = readId(*it);
+    const auto id = parseId(*it);
     return id ? std::optional{TokenRef{*id}} : std::nullopt;
+}
+
+bool isTokenRefShape(const json& j) {
+    return j.is_object() && j.size() == 1 && j.contains("token");
 }
 
 std::optional<Value<Oklch>> readColor(const json& j) {
     if (auto ref = readToken(j)) return *ref;
-    if (!j.is_object()) return std::nullopt;
+    if (isTokenRefShape(j)) return refused("token must be a UUID string");
+    if (!j.is_object()) return refused("must be an object {l, c, h, a} of numbers or a {token} reference");
     Oklch c;
     const std::array<std::pair<const char*, double*>, 4> fields{{{"l", &c.l}, {"c", &c.c}, {"h", &c.h}, {"a", &c.a}}};
     for (const auto& [key, field] : fields) {
-        const auto it = j.find(key);
-        if (it == j.end() || !it->is_number()) return std::nullopt;
-        *field = it->get<double>();
+        if (!require(j, key, Shape::Number)) return std::nullopt;
+        *field = j.find(key)->get<double>();
     }
     return c;
 }
@@ -293,36 +336,59 @@ std::optional<Value<Oklch>> readColor(const json& j) {
 std::optional<Value<double>> readLength(const json& j) {
     if (j.is_number()) return j.get<double>();
     if (auto ref = readToken(j)) return *ref;
-    return std::nullopt;
+    if (isTokenRefShape(j)) return refused("token must be a UUID string");
+    return refused("must be a number or a {token} reference");
 }
 
 template <typename T, typename Reader>
 bool readField(const json& j, const char* key, std::optional<T>& out, Reader reader) {
     const auto it = j.find(key);
     if (it == j.end()) return true;
+    DiagnosticScope scope{key};
     auto value = reader(*it);
-    if (!value) return false;
+    if (!value) return refuse("has the wrong shape");
     out = std::move(*value);
     return true;
 }
 
+template <typename E, std::size_t N>
+bool readNamed(const json& j, const char* key, const std::array<std::pair<E, std::string_view>, N>& names, E& out, std::string_view message) {
+    const auto it = j.find(key);
+    if (it == j.end()) return true;
+    DiagnosticScope scope{key};
+    const auto value = valueOf(names, *it);
+    if (!value) return refuse(message);
+    out = *value;
+    return true;
+}
+
 std::optional<double> readNumber(const json& j) {
-    return j.is_number() ? std::optional{j.get<double>()} : std::nullopt;
+    if (!j.is_number()) return refused("must be a number");
+    return j.get<double>();
 }
 
 std::optional<bool> readBool(const json& j) {
-    return j.is_boolean() ? std::optional{j.get<bool>()} : std::nullopt;
+    if (!j.is_boolean()) return refused("must be a boolean");
+    return j.get<bool>();
 }
 
 std::optional<std::string> readString(const json& j) {
-    return j.is_string() ? std::optional{j.get<std::string>()} : std::nullopt;
+    if (!j.is_string()) return refused("must be a string");
+    return j.get<std::string>();
+}
+
+std::optional<NodeType> readNodeType(const json& j) {
+    const auto type = j.is_string() ? typeFromName(j.get_ref<const std::string&>()) : std::nullopt;
+    if (!type) return refused("type must be " + std::string{kNodeTypeNames});
+    return type;
 }
 
 std::optional<std::array<std::optional<Value<double>>, 4>> readFour(const json& j) {
-    if (!j.is_array() || j.size() != 4) return std::nullopt;
+    if (!j.is_array() || j.size() != 4) return refused("must be an array of 4 lengths: numbers, {token} references or null");
     std::array<std::optional<Value<double>>, 4> out{};
     for (std::size_t i = 0; i < 4; ++i) {
         if (j[i].is_null()) continue;
+        DiagnosticScope item{slot(i)};
         out[i] = readLength(j[i]);
         if (!out[i]) return std::nullopt;
     }
@@ -331,43 +397,40 @@ std::optional<std::array<std::optional<Value<double>>, 4>> readFour(const json& 
 
 std::optional<Value<Stroke>> readStroke(const json& j) {
     if (auto ref = readToken(j)) return *ref;
-    if (!j.is_object()) return std::nullopt;
+    if (isTokenRefShape(j)) return refused("token must be a UUID string");
+    if (!j.is_object()) return refused("must be an object {width, style, color, align, sides} or a {token} reference");
     Stroke stroke;
     std::optional<Value<double>> width;
     std::optional<Value<Oklch>> color;
+    std::optional<std::array<std::optional<Value<double>>, 4>> sides;
     if (!readField(j, "width", width, readLength) || !readField(j, "color", color, readColor)) return std::nullopt;
     if (width) stroke.width = *width;
     if (color) stroke.color = *color;
-    if (const auto it = j.find("style"); it != j.end()) {
-        const auto style = valueOf(kStrokeStyles, *it);
-        if (!style) return std::nullopt;
-        stroke.style = *style;
+    if (!readNamed(j, "style", kStrokeStyles, stroke.style, "style must be solid, none, dashed, dotted or double") ||
+        !readNamed(j, "align", kStrokeAligns, stroke.align, "align must be inside, center or outside") ||
+        !readField(j, "sides", sides, readFour)) {
+        return std::nullopt;
     }
-    if (const auto it = j.find("align"); it != j.end()) {
-        const auto align = valueOf(kStrokeAligns, *it);
-        if (!align) return std::nullopt;
-        stroke.align = *align;
-    }
-    if (const auto it = j.find("sides"); it != j.end()) {
-        const auto sides = readFour(*it);
-        if (!sides) return std::nullopt;
-        stroke.sides = *sides;
-    }
+    if (sides) stroke.sides = *sides;
     return stroke;
 }
 
 std::optional<Value<std::vector<Shadow>>> readShadows(const json& j) {
     if (auto ref = readToken(j)) return *ref;
-    if (!j.is_array()) return std::nullopt;
+    if (isTokenRefShape(j)) return refused("token must be a UUID string");
+    if (!j.is_array()) return refused("must be an array of shadow layers or a {token} reference");
     std::vector<Shadow> layers;
-    for (const json& item : j) {
-        if (!item.is_object()) return std::nullopt;
+    for (std::size_t index = 0; index < j.size(); ++index) {
+        const json& item = j[index];
+        DiagnosticScope entry{slot(index)};
+        if (!item.is_object()) return refused("must be an object with x, y, blur, spread, color, inset and visible");
         Shadow layer;
         const std::array<std::pair<const char*, double*>, 4> numbers{
             {{"x", &layer.x}, {"y", &layer.y}, {"blur", &layer.blur}, {"spread", &layer.spread}}};
         for (const auto& [key, field] : numbers) {
             if (const auto it = item.find(key); it != item.end()) {
-                if (!it->is_number()) return std::nullopt;
+                DiagnosticScope number{key};
+                if (!it->is_number()) return refused("must be a number");
                 *field = it->get<double>();
             }
         }
@@ -387,27 +450,18 @@ std::optional<Value<std::vector<Shadow>>> readShadows(const json& j) {
 }
 
 std::optional<Layout> readLayout(const json& j) {
-    if (!j.is_object()) return std::nullopt;
+    if (!j.is_object()) return refused("must be an object with type, gap, padding, justify and align");
     Layout layout;
-    if (const auto it = j.find("type"); it != j.end()) {
-        const auto type = valueOf(kLayoutTypes, *it);
-        if (!type) return std::nullopt;
-        layout.type = *type;
-    }
-    if (const auto it = j.find("justify"); it != j.end()) {
-        const auto justify = valueOf(kJustifies, *it);
-        if (!justify) return std::nullopt;
-        layout.justify = *justify;
-    }
-    if (const auto it = j.find("align"); it != j.end()) {
-        const auto align = valueOf(kAligns, *it);
-        if (!align) return std::nullopt;
-        layout.align = *align;
+    if (!readNamed(j, "type", kLayoutTypes, layout.type, "type must be none, row or column") ||
+        !readNamed(j, "justify", kJustifies, layout.justify, "justify must be start, center, end, spaceBetween, spaceAround or spaceEvenly") ||
+        !readNamed(j, "align", kAligns, layout.align, "align must be start, center, end or stretch")) {
+        return std::nullopt;
     }
     std::optional<Value<double>> gap;
     if (!readField(j, "gap", gap, readLength)) return std::nullopt;
     if (gap) layout.gap = *gap;
     if (const auto it = j.find("padding"); it != j.end()) {
+        DiagnosticScope field{"padding"};
         const auto padding = readFour(*it);
         if (!padding) return std::nullopt;
         for (std::size_t i = 0; i < 4; ++i) layout.padding[i] = (*padding)[i].value_or(0.0);
@@ -416,7 +470,7 @@ std::optional<Layout> readLayout(const json& j) {
 }
 
 std::optional<SizeLimits> readLimits(const json& j) {
-    if (!j.is_object()) return std::nullopt;
+    if (!j.is_object()) return refused("must be an object with minWidth, maxWidth, minHeight and maxHeight");
     SizeLimits limits;
     const bool ok = readField(j, "minWidth", limits.minWidth, readLength) &&
                     readField(j, "maxWidth", limits.maxWidth, readLength) &&
@@ -426,97 +480,120 @@ std::optional<SizeLimits> readLimits(const json& j) {
 }
 
 std::optional<Sizing> readSizing(const json& j) {
-    return valueOf(kSizings, j);
+    const auto sizing = valueOf(kSizings, j);
+    if (!sizing) return refused("sizing must be fixed, hug or fill");
+    return sizing;
 }
 
 std::optional<ComponentValues> readValues(const json& j) {
-    if (!j.is_object() || j.size() > 200) return std::nullopt;
+    if (!j.is_object() || j.size() > 200) return refused("must be an object of at most 200 values");
     ComponentValues values;
     for (auto it = j.begin(); it != j.end(); ++it) {
-        if (it.key().size() > 64) return std::nullopt;
+        if (it.key().size() > 64) return refused("value names are at most 64 characters");
+        DiagnosticScope entry{it.key()};
         if (it->is_boolean()) values[it.key()] = it->get<bool>();
         else if (it->is_string() && it->get_ref<const std::string&>().size() <= 4096) values[it.key()] = it->get<std::string>();
-        else return std::nullopt;
+        else return refused("must be a boolean or a string of at most 4096 characters");
     }
     return values;
+}
+
+std::optional<TextStyle> readTextStyle(const json& v) {
+    if (!v.is_object() || v.empty() || v.size() > 5) return refused("must be an object with 1 to 5 of font, fontSize, lineHeight, letterSpacing and align");
+    TextStyle style; TextRun test;
+    for (const auto& [key, value] : v.items()) {
+        DiagnosticScope field{key};
+        if (key == "font") {
+            if (!value.is_string()) return refused("font must be a string");
+            style.font = test.font = value.get<std::string>();
+        } else if (key == "align") {
+            if (!value.is_string()) return refused("align must be left, center or right");
+            const std::string align = value;
+            if (align != "left" && align != "center" && align != "right") return refused("align must be left, center or right");
+            style.align = test.align = align == "center" ? TextAlign::Center : align == "right" ? TextAlign::Right : TextAlign::Left;
+        } else {
+            if (key != "fontSize" && key != "lineHeight" && key != "letterSpacing") return refused("unknown key, use font, fontSize, lineHeight, letterSpacing or align");
+            if (!value.is_number()) return refused(key + " must be a number");
+            if (key == "fontSize") style.fontSize = test.fontSize = value;
+            else if (key == "lineHeight") style.lineHeight = test.lineHeight = value;
+            else style.letterSpacing = test.letterSpacing = value;
+        }
+    }
+    if (const char* why = textProblem(test)) return refused(why);
+    return style;
 }
 
 std::optional<NodePatch> readPatch(const json& j) {
     NodePatch p;
     if(j.contains("image")) {
+        DiagnosticScope scope{"image"};
         const auto& v=j["image"];
-        if(!v.is_object()||v.size()!=4||!v.contains("width")||!v.contains("height")||!v.contains("pixels")||!v.contains("id")||!v["width"].is_number_integer()||!v["height"].is_number_integer()||!v["pixels"].is_string()||!v["id"].is_string()) return std::nullopt;
-        const auto w=readNumber(v["width"]),h=readNumber(v["height"]);if(!w||!h||*w<1||*w>512||*h<1||*h>512) return std::nullopt;
+        if(!v.is_object()||v.size()!=4||!v.contains("width")||!v.contains("height")||!v.contains("pixels")||!v.contains("id")) return refused("must be an object with exactly width, height, pixels and id");
+        if(!v["width"].is_number_integer()||!v["height"].is_number_integer()) return refused("width and height must be integers");
+        if(!v["pixels"].is_string()||!v["id"].is_string()) return refused("pixels and id must be strings");
+        const auto w=readNumber(v["width"]),h=readNumber(v["height"]);if(!w||!h||*w<1||*w>512||*h<1||*h>512) return refused("width and height must be between 1 and 512");
         Raster image{int(*w),int(*h),v["pixels"].get<std::string>(),v["id"].get<std::string>()};
-        if(!validRaster(image)) return std::nullopt;p.image=std::move(image);
+        if(!validRaster(image)) return refused("pixels do not match the width, height and id");p.image=std::move(image);
     }
     if(!readField(j,"imageFit",p.imageFit,readString)) return std::nullopt;
-    if(p.imageFit && *p.imageFit!="cover" && *p.imageFit!="contain" && *p.imageFit!="stretch") return std::nullopt;
+    if(p.imageFit && *p.imageFit!="cover" && *p.imageFit!="contain" && *p.imageFit!="stretch") {DiagnosticScope scope{"imageFit"};return refused("imageFit must be cover, contain or stretch");}
     if(j.contains("imageCrop")) {
-        const auto& c=j["imageCrop"];if(!c.is_object()||c.size()!=4||!c.contains("x")||!c.contains("y")||!c.contains("w")||!c.contains("h")) return std::nullopt;
+        DiagnosticScope scope{"imageCrop"};
+        const auto& c=j["imageCrop"];if(!c.is_object()||c.size()!=4||!c.contains("x")||!c.contains("y")||!c.contains("w")||!c.contains("h")) return refused("must be an object with exactly x, y, w and h");
+        for(const char* key:{"x","y","w","h"}) if(!require(c,key,Shape::Number)) return std::nullopt;
         const auto x=readNumber(c["x"]),y=readNumber(c["y"]),w=readNumber(c["w"]),h=readNumber(c["h"]);
-        if(!x||!y||!w||!h||*x<0||*y<0||*w<=0||*h<=0||*x+*w>1||*y+*h>1) return std::nullopt;
+        if(*x<0||*y<0||*w<=0||*h<=0||*x+*w>1||*y+*h>1) return refused("must be a normalized rect inside 0 to 1 with positive w and h");
         p.imageCrop=ImageCrop{*x,*y,*w,*h};
     }
     if(j.contains("path")) {
+        DiagnosticScope scope{"path"};
         const auto& v=j["path"];
-        if(!v.is_object() || !v.contains("closed") || !v["closed"].is_boolean() || !v.contains("points")) return std::nullopt;
-        for(const auto& [key,value]:v.items()) if(key!="points" && key!="closed" && key!="inHandles" && key!="outHandles" && key!="filled") return std::nullopt;
+        if(!v.is_object()) return refused("must be an object with closed, points and optionally filled, inHandles and outHandles");
+        if(!require(v,"closed",Shape::Boolean)) return std::nullopt;
+        if(!v.contains("points")) {DiagnosticScope field{"points"};return refused("points is required");}
+        for(const auto& [key,value]:v.items()) if(key!="points" && key!="closed" && key!="inHandles" && key!="outHandles" && key!="filled") {DiagnosticScope field{key};return refused("unknown key, use points, closed, inHandles, outHandles or filled");}
         Path path;path.closed=v["closed"].get<bool>();
-        if(v.contains("filled")) {if(!v["filled"].is_boolean()) return std::nullopt;path.filled=v["filled"].get<bool>();}
-        const auto readPoints=[&](const json& values,std::vector<Vec2>& target) {
-            if(!values.is_array() || values.size()>64) return false;
-            for(const auto& point:values) {
-                if(!point.is_object() || point.size()!=2 || !point.contains("x") || !point.contains("y")) return false;
-                const auto x=readNumber(point["x"]),y=readNumber(point["y"]);if(!x||!y) return false;
-                target.push_back({*x,*y});
+        if(v.contains("filled")) {if(!require(v,"filled",Shape::Boolean)) return std::nullopt;path.filled=v["filled"].get<bool>();}
+        const auto readPoints=[&](const char* name,const json& values,std::vector<Vec2>& target) {
+            DiagnosticScope list{name};
+            if(!values.is_array() || values.size()>64) return refuse("must be an array of at most 64 points");
+            for(std::size_t i=0;i<values.size();++i) {
+                const auto& point=values[i];
+                DiagnosticScope entry{slot(i)};
+                if(!point.is_object() || point.size()!=2) return refuse("must be an object with exactly x and y numbers");
+                if(!require(point,"x",Shape::Number) || !require(point,"y",Shape::Number)) return false;
+                target.push_back({point["x"].get<double>(),point["y"].get<double>()});
             }
             return true;
         };
-        if(!readPoints(v["points"],path.points)) return std::nullopt;
-        if(v.contains("inHandles")!=v.contains("outHandles")) return std::nullopt;
-        if(v.contains("inHandles") && (!readPoints(v["inHandles"],path.inHandles) || !readPoints(v["outHandles"],path.outHandles))) return std::nullopt;
-        if(!validPath(path)) return std::nullopt;
+        if(!readPoints("points",v["points"],path.points)) return std::nullopt;
+        if(v.contains("inHandles")!=v.contains("outHandles")) return refused("inHandles and outHandles must be given together");
+        if(v.contains("inHandles") && (!readPoints("inHandles",v["inHandles"],path.inHandles) || !readPoints("outHandles",v["outHandles"],path.outHandles))) return std::nullopt;
+        if(const char* why=pathProblem(path)) return refused(why);
         p.path=std::move(path);
     }
     if (!readField(j,"lineWidth",p.lineWidth,readNumber) || !readField(j,"lineReverse",p.lineReverse,readBool)) return std::nullopt;
     if (!readField(j, "typography", p.typography, readId)) return std::nullopt;
     if (!readField(j, "textWrap", p.textWrap, readBool)) return std::nullopt;
     if (j.contains("textStyle")) {
-        const auto& v = j["textStyle"];
-        if (!v.is_object() || v.empty() || v.size() > 5) return std::nullopt;
-        TextStyle style; TextRun test;
-        for (const auto& [key, value] : v.items()) {
-            if (key == "font") {
-                if (!value.is_string()) return std::nullopt;
-                style.font = test.font = value.get<std::string>();
-            } else if (key == "align") {
-                if (!value.is_string()) return std::nullopt;
-                const std::string align = value;
-                if (align != "left" && align != "center" && align != "right") return std::nullopt;
-                style.align = test.align = align == "center" ? TextAlign::Center : align == "right" ? TextAlign::Right : TextAlign::Left;
-            } else {
-                if (!value.is_number()) return std::nullopt;
-                if (key == "fontSize") style.fontSize = test.fontSize = value;
-                else if (key == "lineHeight") style.lineHeight = test.lineHeight = value;
-                else if (key == "letterSpacing") style.letterSpacing = test.letterSpacing = value;
-                else return std::nullopt;
-            }
-        }
-        if (!validText(test)) return std::nullopt;
-        p.textStyle = style;
+        DiagnosticScope scope{"textStyle"};
+        const auto style = readTextStyle(j["textStyle"]);
+        if (!style) return std::nullopt;
+        p.textStyle = *style;
     }
     if (j.contains("text")) {
+        DiagnosticScope scope{"text"};
         const auto& value = j["text"];
-        if (!value.is_object() || value.size() != 6 || !value.contains("content") || !value["content"].is_string() ||
-            !value.contains("font") || !value["font"].is_string() || !value.contains("fontSize") || !value["fontSize"].is_number() ||
-            !value.contains("lineHeight") || !value["lineHeight"].is_number() || !value.contains("letterSpacing") || !value["letterSpacing"].is_number() ||
-            !value.contains("align") || !value["align"].is_string()) return std::nullopt;
+        if (!value.is_object()) return refused("must be an object with exactly content, font, fontSize, lineHeight, letterSpacing and align");
+        const std::array<std::pair<const char*, Shape>, 6> keys{{{"content", Shape::String}, {"font", Shape::String}, {"fontSize", Shape::Number},
+            {"lineHeight", Shape::Number}, {"letterSpacing", Shape::Number}, {"align", Shape::String}}};
+        for (const auto& [key, shape] : keys) if (!require(value, key, shape)) return std::nullopt;
+        if (value.size() != 6) return refused("has keys other than content, font, fontSize, lineHeight, letterSpacing and align");
         const auto align = value["align"].get<std::string>();
-        if (align != "left" && align != "center" && align != "right") return std::nullopt;
+        if (align != "left" && align != "center" && align != "right") {DiagnosticScope field{"align"};return refused("align must be left, center or right");}
         TextRun text{value["content"], value["font"], value["fontSize"], value["lineHeight"], value["letterSpacing"],
             align == "center" ? TextAlign::Center : align == "right" ? TextAlign::Right : TextAlign::Left};
-        if (!validText(text)) return std::nullopt;
+        if (const char* why = textProblem(text)) return refused(why);
         p.text = std::move(text);
     }
     const bool ok = readField(j, "name", p.name, readString) && readField(j, "x", p.x, readNumber) &&
@@ -536,116 +613,199 @@ std::optional<NodePatch> readPatch(const json& j) {
                     readField(j, "heightSizing", p.heightSizing, readSizing) &&
                     readField(j, "limits", p.limits, readLimits) &&
                     readField(j, "absolute", p.absolute, readBool) &&
-                    readField(j, "type", p.type, [](const json& v) {
-                        return v.is_string() ? typeFromName(v.get_ref<const std::string&>()) : std::nullopt;
-                    }) &&
+                    readField(j, "type", p.type, readNodeType) &&
                     readField(j, "component", p.component, readId) &&
                     readField(j, "componentValues", p.componentValues, readValues);
     return ok ? std::optional{p} : std::nullopt;
 }
 
 std::optional<ComponentDefinition> readDefinition(const json& j) {
-    if (!j.is_object() || j.size() != 3 + j.contains("swaps") + j.contains("texts") || !j.contains("properties") || !j["properties"].is_array() || j["properties"].size() > 64 ||
-        !j.contains("axes") || !j["axes"].is_array() || j["axes"].size() > 8 ||
-        !j.contains("rules") || !j["rules"].is_array() || j["rules"].size() > 256) return std::nullopt;
+    if (!j.is_object()) return refused("must be an object with properties, axes and rules, and optionally texts and swaps");
+    const std::array<std::pair<const char*, std::size_t>, 3> required{{{"properties", 64}, {"axes", 8}, {"rules", 256}}};
+    for (const auto& [key, limit] : required) {
+        DiagnosticScope field{key};
+        const auto it = j.find(key);
+        if (it == j.end()) return refused(std::string{key} + " is required");
+        if (!it->is_array() || it->size() > limit) return refused(std::string{key} + " must be an array of at most " + std::to_string(limit) + " entries");
+    }
+    if (j.size() != 3 + j.contains("swaps") + j.contains("texts")) return refused("has keys other than properties, axes, rules, texts and swaps");
     ComponentDefinition d;
     if (j.contains("texts")) {
-        if (!j["texts"].is_array() || j["texts"].size() > 64) return std::nullopt;
-        for (const auto& t : j["texts"]) {
-            if (!t.is_object() || t.size() != 3 || !t.contains("name") || !t["name"].is_string() || !t.contains("target") || !t.contains("default") || !t["default"].is_string()) return std::nullopt;
-            const auto target = readId(t["target"]); if (!target) return std::nullopt;
-            TextRun run; run.content = t["default"].get<std::string>(); if (!validText(run)) return std::nullopt;
+        DiagnosticScope list{"texts"};
+        if (!j["texts"].is_array() || j["texts"].size() > 64) return refused("texts must be an array of at most 64 entries");
+        for (std::size_t i = 0; i < j["texts"].size(); ++i) {
+            const auto& t = j["texts"][i];
+            DiagnosticScope entry{slot(i)};
+            if (!t.is_object() || t.size() != 3) return refused("must be an object with exactly name, target and default");
+            if (!require(t, "name", Shape::String)) return std::nullopt;
+            const auto target = requireId(t, "target"); if (!target) return std::nullopt;
+            if (!require(t, "default", Shape::String)) return std::nullopt;
+            TextRun run; run.content = t["default"].get<std::string>();
+            if (const char* why = textProblem(run)) {DiagnosticScope field{"default"};return refused(why);}
             d.texts.push_back({t["name"].get<std::string>(), *target, run.content});
         }
     }
     if (j.contains("swaps")) {
-        if (!j["swaps"].is_array() || j["swaps"].size() > 64) return std::nullopt;
-        for (const auto& s : j["swaps"]) {
-            if (!s.is_object() || s.size() != 4 || !s.contains("name") || !s["name"].is_string() ||
-                !s.contains("target") || !s.contains("default") || !s.contains("choices") || !s["choices"].is_array() || s["choices"].size() > 32) return std::nullopt;
-            const auto target = readId(s["target"]), selected = readId(s["default"]);
+        DiagnosticScope list{"swaps"};
+        if (!j["swaps"].is_array() || j["swaps"].size() > 64) return refused("swaps must be an array of at most 64 entries");
+        for (std::size_t i = 0; i < j["swaps"].size(); ++i) {
+            const auto& s = j["swaps"][i];
+            DiagnosticScope entry{slot(i)};
+            if (!s.is_object() || s.size() != 4) return refused("must be an object with exactly name, target, default and choices");
+            if (!require(s, "name", Shape::String)) return std::nullopt;
+            const auto target = requireId(s, "target"), selected = requireId(s, "default");
             if (!target || !selected) return std::nullopt;
+            const auto choicesIt = s.find("choices");
+            DiagnosticScope field{"choices"};
+            if (choicesIt == s.end() || !choicesIt->is_array() || choicesIt->size() > 32) return refused("choices is required: an array of at most 32 component ids");
             std::vector<Id> choices;
-            for (const auto& item : s["choices"]) { const auto choice = readId(item); if (!choice) return std::nullopt; choices.push_back(*choice); }
+            for (std::size_t c = 0; c < choicesIt->size(); ++c) {
+                DiagnosticScope choiceEntry{slot(c)};
+                const auto choice = readId((*choicesIt)[c]); if (!choice) return std::nullopt;
+                choices.push_back(*choice);
+            }
             d.swaps.push_back({s["name"].get<std::string>(), *target, *selected, choices});
         }
     }
-    for (const auto& p : j["properties"]) {
-        if (!p.is_object() || p.size() != 3 || !p.contains("name") || !p["name"].is_string() || !p.contains("target") ||
-            !p.contains("default") || !p["default"].is_boolean()) return std::nullopt;
-        const auto target = readId(p["target"]); if (!target) return std::nullopt;
-        d.properties.push_back({p["name"].get<std::string>(), *target, p["default"].get<bool>()});
+    {
+        DiagnosticScope list{"properties"};
+        for (std::size_t i = 0; i < j["properties"].size(); ++i) {
+            const auto& p = j["properties"][i];
+            DiagnosticScope entry{slot(i)};
+            if (!p.is_object() || p.size() != 3) return refused("must be an object with exactly name, target and default");
+            if (!require(p, "name", Shape::String)) return std::nullopt;
+            const auto target = requireId(p, "target"); if (!target) return std::nullopt;
+            if (!require(p, "default", Shape::Boolean)) return std::nullopt;
+            d.properties.push_back({p["name"].get<std::string>(), *target, p["default"].get<bool>()});
+        }
     }
-    for (const auto& a : j["axes"]) {
-        if (!a.is_object() || a.size() != 3 || !a.contains("name") || !a["name"].is_string() || !a.contains("values") ||
-            !a["values"].is_array() || a["values"].size() > 32 || !a.contains("default") || !a["default"].is_string()) return std::nullopt;
-        std::vector<std::string> values;
-        for (const auto& v : a["values"]) { if (!v.is_string()) return std::nullopt; values.push_back(v.get<std::string>()); }
-        d.axes.push_back({a["name"].get<std::string>(), values, a["default"].get<std::string>()});
+    {
+        DiagnosticScope list{"axes"};
+        for (std::size_t i = 0; i < j["axes"].size(); ++i) {
+            const auto& a = j["axes"][i];
+            DiagnosticScope entry{slot(i)};
+            if (!a.is_object() || a.size() != 3) return refused("must be an object with exactly name, values and default");
+            if (!require(a, "name", Shape::String)) return std::nullopt;
+            const auto valuesIt = a.find("values");
+            {
+                DiagnosticScope field{"values"};
+                if (valuesIt == a.end() || !valuesIt->is_array() || valuesIt->size() > 32) return refused("values is required: an array of at most 32 strings");
+            }
+            if (!require(a, "default", Shape::String)) return std::nullopt;
+            std::vector<std::string> values;
+            DiagnosticScope field{"values"};
+            for (std::size_t v = 0; v < valuesIt->size(); ++v) {
+                DiagnosticScope valueEntry{slot(v)};
+                if (!(*valuesIt)[v].is_string()) return refused("must be a string");
+                values.push_back((*valuesIt)[v].get<std::string>());
+            }
+            d.axes.push_back({a["name"].get<std::string>(), values, a["default"].get<std::string>()});
+        }
     }
-    for (const auto& r : j["rules"]) {
-        if (!r.is_object() || r.size() != 3 || !r.contains("when") || !r["when"].is_object() || r["when"].size() > 8 ||
-            !r.contains("target") || !r.contains("patch") || !r["patch"].is_object()) return std::nullopt;
-        const auto target = readId(r["target"]); const auto patch = readPatch(r["patch"]);
-        if (!target || !patch) return std::nullopt;
-        json canonical = json::object(); writePatch(canonical, *patch);
-        if (canonical.size() != r["patch"].size()) return std::nullopt;
-        std::map<std::string, std::string> when;
-        for (auto it = r["when"].begin(); it != r["when"].end(); ++it) { if (!it->is_string()) return std::nullopt; when[it.key()] = it->get<std::string>(); }
-        d.rules.push_back({when, *target, *patch});
+    {
+        DiagnosticScope list{"rules"};
+        for (std::size_t i = 0; i < j["rules"].size(); ++i) {
+            const auto& r = j["rules"][i];
+            DiagnosticScope entry{slot(i)};
+            if (!r.is_object() || r.size() != 3) return refused("must be an object with exactly when, target and patch");
+            const auto whenIt = r.find("when");
+            std::map<std::string, std::string> when;
+            {
+                DiagnosticScope field{"when"};
+                if (whenIt == r.end() || !whenIt->is_object() || whenIt->size() > 8) return refused("when is required: an object of at most 8 axis values");
+                for (auto it = whenIt->begin(); it != whenIt->end(); ++it) {
+                    DiagnosticScope axis{it.key()};
+                    if (!it->is_string()) return refused("must be a string");
+                    when[it.key()] = it->get<std::string>();
+                }
+            }
+            const auto target = requireId(r, "target"); if (!target) return std::nullopt;
+            DiagnosticScope field{"patch"};
+            const auto patchIt = r.find("patch");
+            if (patchIt == r.end() || !patchIt->is_object()) return refused("patch is required: an object");
+            const auto patch = readPatch(*patchIt);
+            if (!patch) return std::nullopt;
+            json canonical = json::object(); writePatch(canonical, *patch);
+            if (canonical.size() != patchIt->size()) {
+                for (auto it = patchIt->begin(); it != patchIt->end(); ++it) {
+                    DiagnosticScope key{it.key()};
+                    if (!canonical.contains(it.key())) return refused("unknown patch key, or a value that is not written back");
+                }
+                return refused("has keys that are unknown or not written back");
+            }
+            d.rules.push_back({when, *target, *patch});
+        }
     }
     return d;
 }
 
 std::optional<Node> readNode(const json& j) {
-    if (!j.is_object()) return std::nullopt;
+    if (!j.is_object()) return refused("a node must be an object");
     Node n;
 
-    const auto id = j.contains("id") ? readId(j["id"]) : std::nullopt;
-    const auto type = j.contains("type") && j["type"].is_string()
-                          ? typeFromName(j["type"].get_ref<const std::string&>())
-                          : std::nullopt;
-    const auto order = j.contains("order") ? readString(j["order"]) : std::nullopt;
-    if (!id || !type || !order) return std::nullopt;
+    const auto id = requireId(j, "id");
+    if (!id) return std::nullopt;
+    std::optional<NodeType> type;
+    {
+        DiagnosticScope field{"type"};
+        const auto it = j.find("type");
+        if (it == j.end()) return refused("type is required: " + std::string{kNodeTypeNames});
+        type = readNodeType(*it);
+        if (!type) return std::nullopt;
+    }
+    const auto order = requireOrder(j);
+    if (!order) return std::nullopt;
     n.id = *id;
     n.type = *type;
     n.order = *order;
 
     if (j.contains("parent")) {
-        const auto parent = readId(j["parent"]);
+        const auto parent = requireId(j, "parent");
         if (!parent) return std::nullopt;
         n.parent = *parent;
     }
 
     const auto patch = readPatch(j);
     if (!patch) return std::nullopt;
-    if (*type != NodeType::Line && patch->lineReverse) return std::nullopt;
-    if (*type != NodeType::Line && *type != NodeType::Path && patch->lineWidth) return std::nullopt;
-    if ((*type == NodeType::Path) != patch->path.has_value()) return std::nullopt;
-    if((*type==NodeType::Image)!=patch->image.has_value()) return std::nullopt;
-    if(*type!=NodeType::Image && (patch->imageFit || patch->imageCrop)) return std::nullopt;
-    if (patch->textStyle) return std::nullopt;
-    if ((*type == NodeType::Text) != patch->text.has_value()) return std::nullopt;
+    const auto misplaced = [](const char* key, std::string_view message) {
+        DiagnosticScope field{key};
+        return refused(message);
+    };
+    if (*type != NodeType::Line && patch->lineReverse) return misplaced("lineReverse", "only line nodes take lineReverse");
+    if (*type != NodeType::Line && *type != NodeType::Path && patch->lineWidth) return misplaced("lineWidth", "only line and path nodes take lineWidth");
+    if (*type == NodeType::Path && !patch->path) return misplaced("path", "path nodes need a path");
+    if (*type != NodeType::Path && patch->path) return misplaced("path", "only path nodes take a path");
+    if (*type == NodeType::Image && !patch->image) return misplaced("image", "image nodes need an image");
+    if (*type != NodeType::Image && patch->image) return misplaced("image", "only image nodes take an image");
+    if (*type != NodeType::Image && patch->imageFit) return misplaced("imageFit", "only image nodes take imageFit");
+    if (*type != NodeType::Image && patch->imageCrop) return misplaced("imageCrop", "only image nodes take imageCrop");
+    if (patch->textStyle) return misplaced("textStyle", "nodes store their full text, use text instead of textStyle");
+    if (*type == NodeType::Text && !patch->text) return misplaced("text", "text nodes need text");
+    if (*type != NodeType::Text && patch->text) return misplaced("text", "only text nodes take text");
     applyPatch(n, *patch);
     if (j.contains("definition")) {
+        DiagnosticScope field{"definition"};
         auto definition = readDefinition(j["definition"]); if (!definition) return std::nullopt;
         n.definition = *definition;
     }
     n.type = *type;
     if (const auto it = j.find("overrides"); it != j.end()) {
-        if (!it->is_array()) return std::nullopt;
-        for (const json& item : *it) {
-            const auto node = item.is_object() && item.contains("node") ? readId(item["node"]) : std::nullopt;
-            const auto overridePatch = item.is_object() && item.contains("patch") ? readPatch(item["patch"]) : std::nullopt;
-            if (!node || !overridePatch) return std::nullopt;
+        DiagnosticScope field{"overrides"};
+        if (!it->is_array()) return refused("overrides must be an array of {node, patch} objects");
+        for (std::size_t i = 0; i < it->size(); ++i) {
+            const json& item = (*it)[i];
+            DiagnosticScope entry{slot(i)};
+            if (!item.is_object()) return refused("must be an object with node and patch");
+            const auto node = requireId(item, "node");
+            if (!node) return std::nullopt;
+            DiagnosticScope patchField{"patch"};
+            if (!item.contains("patch")) return refused("patch is required: an object");
+            const auto overridePatch = readPatch(item["patch"]);
+            if (!overridePatch) return std::nullopt;
             n.overrides.push_back({*node, *overridePatch});
         }
     }
     return n;
-}
-
-std::optional<Id> readIdField(const json& j, const char* key) {
-    return j.contains(key) ? readId(j[key]) : std::nullopt;
 }
 
 json writeModifier(const Modifier& modifier);
@@ -728,45 +888,56 @@ json writeMode(const Mode& mode) {
 std::optional<Modifier> readModifier(const json& j);
 
 std::optional<TokenLiteral> readLiteral(TokenType type, const json& j) {
-    if (!j.is_object()) return std::nullopt;
+    if (!j.is_object()) return refused("a token value must be an object");
     if (type == TokenType::Typography) {
-        if (j.size()!=5) return std::nullopt;
-        const auto patch=readPatch(json{{"textStyle",j}});
-        if (!patch || !patch->textStyle || !patch->textStyle->complete() || !patch->textStyle->font) return std::nullopt;
-        return *patch->textStyle;
+        if (j.size()!=5) return refused("a typography value needs exactly font, fontSize, lineHeight, letterSpacing and align");
+        const auto style=readTextStyle(j);
+        if (!style) return std::nullopt;
+        if (!style->complete() || !style->font) return refused("a typography value needs exactly font, fontSize, lineHeight, letterSpacing and align");
+        return *style;
     }
     if (type == TokenType::Border) {
-        const auto width = j.contains("width") ? readId(j["width"]) : std::nullopt;
-        const auto color = j.contains("color") ? readId(j["color"]) : std::nullopt;
-        const auto style = j.contains("style") ? valueOf(kStrokeStyles, j["style"]) : std::optional{StrokeStyle::Solid};
-        if (!width || !color || !style) return std::nullopt;
-        return BorderValue{*width, *style, *color};
+        const auto width = requireId(j, "width");
+        if (!width) return std::nullopt;
+        const auto color = requireId(j, "color");
+        if (!color) return std::nullopt;
+        StrokeStyle style = StrokeStyle::Solid;
+        if (!readNamed(j, "style", kStrokeStyles, style, "style must be solid, none, dashed, dotted or double")) return std::nullopt;
+        return BorderValue{*width, style, *color};
     }
     if (type == TokenType::Shadow) {
         ShadowValue shadow;
-        if (!j.contains("layers") || !j["layers"].is_array()) return std::nullopt;
-        for (const json& item : j["layers"]) {
-            if (!item.is_object()) return std::nullopt;
+        {
+            DiagnosticScope field{"layers"};
+            if (!j.contains("layers") || !j["layers"].is_array()) return refused("layers is required: an array of shadow layers");
+        }
+        DiagnosticScope list{"layers"};
+        for (std::size_t index = 0; index < j["layers"].size(); ++index) {
+            const json& item = j["layers"][index];
+            DiagnosticScope entry{slot(index)};
+            if (!item.is_object()) return refused("must be an object with offsetX, offsetY, blur, spread, color, inset and colorModifiers");
             ShadowLayerValue layer;
             const std::array<std::pair<const char*, double*>, 4> numbers{
                 {{"offsetX", &layer.x}, {"offsetY", &layer.y}, {"blur", &layer.blur}, {"spread", &layer.spread}}};
             for (const auto& [key, field] : numbers) {
                 if (const auto it = item.find(key); it != item.end()) {
-                    if (!it->is_number()) return std::nullopt;
+                    if (!require(item, key, Shape::Number)) return std::nullopt;
                     *field = it->get<double>();
                 }
             }
-            const auto color = item.contains("color") ? readId(item["color"]) : std::nullopt;
+            const auto color = requireId(item, "color");
             if (!color) return std::nullopt;
             layer.color = *color;
-            if (const auto it = item.find("inset"); it != item.end()) {
-                if (!it->is_boolean()) return std::nullopt;
-                layer.inset = it->get<bool>();
+            if (item.contains("inset")) {
+                if (!require(item, "inset", Shape::Boolean)) return std::nullopt;
+                layer.inset = item["inset"].get<bool>();
             }
             if (const auto it = item.find("colorModifiers"); it != item.end()) {
-                if (!it->is_array()) return std::nullopt;
-                for (const json& m : *it) {
-                    auto modifier = readModifier(m);
+                DiagnosticScope modifiers{"colorModifiers"};
+                if (!it->is_array()) return refused("colorModifiers must be an array of modifiers");
+                for (std::size_t m = 0; m < it->size(); ++m) {
+                    DiagnosticScope modifierEntry{slot(m)};
+                    auto modifier = readModifier((*it)[m]);
                     if (!modifier) return std::nullopt;
                     layer.colorModifiers.push_back(std::move(*modifier));
                 }
@@ -779,18 +950,17 @@ std::optional<TokenLiteral> readLiteral(TokenType type, const json& j) {
         Oklch color;
         const std::array<std::pair<const char*, double*>, 3> fields{{{"l", &color.l}, {"c", &color.c}, {"h", &color.h}}};
         for (const auto& [key, field] : fields) {
-            const auto it = j.find(key);
-            if (it == j.end() || !it->is_number()) return std::nullopt;
-            *field = it->get<double>();
+            if (!require(j, key, Shape::Number)) return std::nullopt;
+            *field = j.find(key)->get<double>();
         }
         return color;
     }
-    const auto value = j.find("value");
-    if (value == j.end() || !value->is_number()) return std::nullopt;
-    Magnitude magnitude{value->get<double>(), Unit::None};
+    if (!require(j, "value", Shape::Number)) return std::nullopt;
+    Magnitude magnitude{j.find("value")->get<double>(), Unit::None};
     if (const auto unit = j.find("unit"); unit != j.end()) {
+        DiagnosticScope field{"unit"};
         const auto parsed = unit->is_string() ? unitFromName(unit->get_ref<const std::string&>()) : std::nullopt;
-        if (!parsed) return std::nullopt;
+        if (!parsed) return refused("unit must be px, rem, em, pt, ms, s or empty");
         magnitude.unit = *parsed;
     }
     return magnitude;
@@ -798,10 +968,11 @@ std::optional<TokenLiteral> readLiteral(TokenType type, const json& j) {
 
 bool readOperand(const json& j, std::optional<double>& value, std::optional<Id>& ref) {
     if (const auto it = j.find("value"); it != j.end()) {
-        if (!it->is_number()) return false;
+        if (!require(j, "value", Shape::Number)) return false;
         value = it->get<double>();
     }
     if (const auto it = j.find("ref"); it != j.end()) {
+        DiagnosticScope field{"ref"};
         ref = readId(*it);
         if (!ref) return false;
     }
@@ -809,37 +980,54 @@ bool readOperand(const json& j, std::optional<double>& value, std::optional<Id>&
 }
 
 std::optional<Modifier> readModifier(const json& j) {
-    if (!j.is_object()) return std::nullopt;
+    if (!j.is_object()) return refused("a modifier must be an object");
     if (j.contains("mix")) {
-        const auto token = readId(j["mix"]);
-        const auto amount = j.find("amount");
-        if (!token || amount == j.end() || !amount->is_number()) return std::nullopt;
-        return ColorMixModifier{*token, amount->get<double>()};
+        const auto token = requireId(j, "mix");
+        if (!token || !require(j, "amount", Shape::Number)) return std::nullopt;
+        return ColorMixModifier{*token, j.find("amount")->get<double>()};
     }
     if (j.contains("channel")) {
         ColorChannelModifier channel;
-        const auto name = valueOf(kChannels, j["channel"]);
-        const auto op = j.contains("kind") ? valueOf(kColorOps, j["kind"]) : std::nullopt;
-        if (!name || !op || !readOperand(j, channel.value, channel.ref)) return std::nullopt;
-        channel.channel = *name;
-        channel.op = *op;
+        {
+            DiagnosticScope field{"channel"};
+            const auto name = valueOf(kChannels, j["channel"]);
+            if (!name) return refused("channel must be l, c, h or alpha");
+            channel.channel = *name;
+        }
+        {
+            DiagnosticScope field{"kind"};
+            const auto op = j.contains("kind") ? valueOf(kColorOps, j["kind"]) : std::nullopt;
+            if (!op) return refused("kind must be set, delta or factor for a color channel modifier");
+            channel.op = *op;
+        }
+        if (!readOperand(j, channel.value, channel.ref)) return std::nullopt;
         return channel;
     }
     MagnitudeModifier step;
-    const auto op = j.contains("kind") ? valueOf(kMagnitudeOps, j["kind"]) : std::nullopt;
-    if (!op || !readOperand(j, step.value, step.ref)) return std::nullopt;
-    step.op = *op;
+    {
+        DiagnosticScope field{"kind"};
+        const auto op = j.contains("kind") ? valueOf(kMagnitudeOps, j["kind"]) : std::nullopt;
+        if (!op) return refused("kind must be factor, delta, min or max, or give channel or mix for a color modifier");
+        step.op = *op;
+    }
+    if (!readOperand(j, step.value, step.ref)) return std::nullopt;
     return step;
 }
 
 std::optional<Token> readTokenDef(const json& j) {
-    if (!j.is_object()) return std::nullopt;
+    if (!j.is_object()) return refused("a token must be an object");
     Token token;
-    const auto id = j.contains("id") ? readId(j["id"]) : std::nullopt;
-    const auto type = j.contains("type") && j["type"].is_string()
-                          ? tokenTypeFromName(j["type"].get_ref<const std::string&>())
-                          : std::nullopt;
-    if (!id || !type) return std::nullopt;
+    const auto id = requireId(j, "id");
+    if (!id) return std::nullopt;
+    std::optional<TokenType> type;
+    {
+        DiagnosticScope field{"type"};
+        const auto it = j.find("type");
+        const std::string_view allowed = "color, dimension, duration, ratio, opacity, border, shadow or typography";
+        if (it == j.end()) return refused("type is required: " + std::string{allowed});
+        type = it->is_string() ? tokenTypeFromName(it->get_ref<const std::string&>()) : std::nullopt;
+        if (!type) return refused("type must be " + std::string{allowed});
+    }
     token.id = *id;
     token.type = *type;
 
@@ -847,31 +1035,37 @@ std::optional<Token> readTokenDef(const json& j) {
         {"order", &token.order}, {"displayName", &token.displayName}, {"description", &token.description}}};
     for (const auto& [key, field] : texts) {
         if (const auto it = j.find(key); it != j.end()) {
-            if (!it->is_string()) return std::nullopt;
+            if (!require(j, key, Shape::String)) return std::nullopt;
             *field = it->get<std::string>();
         }
     }
     if (const auto it = j.find("deprecated"); it != j.end()) {
-        if (!it->is_boolean()) return std::nullopt;
+        if (!require(j, "deprecated", Shape::Boolean)) return std::nullopt;
         token.deprecated = it->get<bool>();
     }
     if (const auto it = j.find("value"); it != j.end()) {
+        DiagnosticScope field{"value"};
         token.value = readLiteral(token.type, *it);
         if (!token.value) return std::nullopt;
     }
     if (const auto it = j.find("source"); it != j.end()) {
-        if (!it->is_object()) return std::nullopt;
+        DiagnosticScope field{"source"};
+        if (!it->is_object()) return refused("source must be an object mapping mode ids to token ids");
         for (const auto& [mode, target] : it->items()) {
             const auto modeId = Id::parse(mode);
+            if (!modeId) return refused("source keys must be mode ids (UUID strings)");
+            DiagnosticScope entry{mode};
             const auto targetId = readId(target);
-            if (!modeId || !targetId) return std::nullopt;
+            if (!targetId) return std::nullopt;
             token.source[*modeId] = *targetId;
         }
     }
     if (const auto it = j.find("modifiers"); it != j.end()) {
-        if (!it->is_array()) return std::nullopt;
-        for (const json& item : *it) {
-            auto modifier = readModifier(item);
+        DiagnosticScope field{"modifiers"};
+        if (!it->is_array()) return refused("modifiers must be an array of modifier objects");
+        for (std::size_t i = 0; i < it->size(); ++i) {
+            DiagnosticScope entry{slot(i)};
+            auto modifier = readModifier((*it)[i]);
             if (!modifier) return std::nullopt;
             token.modifiers.push_back(std::move(*modifier));
         }
@@ -880,37 +1074,62 @@ std::optional<Token> readTokenDef(const json& j) {
 }
 
 std::optional<Mode> readMode(const json& j) {
-    if (!j.is_object()) return std::nullopt;
-    const auto id = j.contains("id") ? readId(j["id"]) : std::nullopt;
-    const auto name = j.contains("name") ? readString(j["name"]) : std::nullopt;
-    const auto order = j.contains("order") ? readString(j["order"]) : std::optional<std::string>{""};
-    if (!id || !name || !order) return std::nullopt;
-    return Mode{*id, *name, *order};
+    if (!j.is_object()) return refused("a mode must be an object with id, name and order");
+    const auto id = requireId(j, "id");
+    if (!id) return std::nullopt;
+    if (!require(j, "name", Shape::String)) return std::nullopt;
+    std::string order;
+    if (j.contains("order")) {
+        if (!require(j, "order", Shape::String)) return std::nullopt;
+        order = j["order"].get<std::string>();
+    }
+    return Mode{*id, j["name"].get<std::string>(), order};
+}
+
+std::optional<NodePatch> requirePatch(const json& j) {
+    DiagnosticScope field{"patch"};
+    const auto it = j.find("patch");
+    if (it == j.end() || !it->is_object()) return refused("patch is required: an object");
+    return readPatch(*it);
+}
+
+std::string opKindList() {
+    std::string list;
+    for (const auto kind : kOpKinds) list += (list.empty() ? "" : ", ") + std::string{kind};
+    return list;
 }
 
 std::optional<OpBody> readOp(std::string_view kind, const json& j) {
-    if (!j.is_object()) return std::nullopt;
+    if (std::find(kOpKinds.begin(), kOpKinds.end(), kind) == kOpKinds.end()) {
+        return refused("unknown op kind " + std::string{kind} + ", expected one of " + opKindList());
+    }
+    if (!j.is_object()) return refused("op data must be an object");
 
     if (kind == "CreateToken" || kind == "ReplaceToken") {
-        auto token = j.contains("token") ? readTokenDef(j["token"]) : std::nullopt;
+        DiagnosticScope field{"token"};
+        if (!j.contains("token")) return refused("token is required: a token definition");
+        auto token = readTokenDef(j["token"]);
         if (!token) return std::nullopt;
         if (kind == "CreateToken") return CreateToken{std::move(*token)};
         return ReplaceToken{std::move(*token)};
     }
     if (kind == "CreateMode" || kind == "ReplaceMode") {
-        auto mode = j.contains("mode") ? readMode(j["mode"]) : std::nullopt;
+        DiagnosticScope field{"mode"};
+        if (!j.contains("mode")) return refused("mode is required: a mode object");
+        auto mode = readMode(j["mode"]);
         if (!mode) return std::nullopt;
         if (kind == "CreateMode") return CreateMode{std::move(*mode)};
         return ReplaceMode{std::move(*mode)};
     }
 
     if (kind == "CreateNode") {
-        if (!j.contains("node")) return std::nullopt;
+        DiagnosticScope field{"node"};
+        if (!j.contains("node")) return refused("node is required: a node object");
         auto node = readNode(j["node"]);
         if (!node) return std::nullopt;
         return CreateNode{std::move(*node)};
     }
-    const auto id = readIdField(j, "id");
+    const auto id = requireId(j, "id");
     if (!id) return std::nullopt;
 
     if (kind == "DeleteNode") {
@@ -920,13 +1139,16 @@ std::optional<OpBody> readOp(std::string_view kind, const json& j) {
         return DeleteToken{*id};
     }
     if (kind == "SetOverride") {
-        const auto node = readIdField(j, "node");
-        auto patch = j.contains("patch") && j["patch"].is_object() ? readPatch(j["patch"]) : std::nullopt;
-        if (!node || !patch) return std::nullopt;
+        const auto node = requireId(j, "node");
+        if (!node) return std::nullopt;
+        auto patch = requirePatch(j);
+        if (!patch) return std::nullopt;
         return SetOverride{*id, *node, std::move(*patch)};
     }
     if (kind == "SetComponentDefinition") {
-        const auto definition = j.contains("definition") ? readDefinition(j["definition"]) : std::nullopt;
+        DiagnosticScope field{"definition"};
+        if (!j.contains("definition")) return refused("definition is required: a component definition");
+        const auto definition = readDefinition(j["definition"]);
         if (!definition) return std::nullopt;
         return SetComponentDefinition{*id, *definition};
     }
@@ -934,22 +1156,22 @@ std::optional<OpBody> readOp(std::string_view kind, const json& j) {
         return DeleteMode{*id};
     }
     if (kind == "SetProps") {
-        auto patch = j.contains("patch") && j["patch"].is_object() ? readPatch(j["patch"]) : std::nullopt;
+        auto patch = requirePatch(j);
         if (!patch) return std::nullopt;
         return SetProps{*id, std::move(*patch)};
     }
     if (kind == "MoveNode") {
-        const auto order = j.contains("order") ? readString(j["order"]) : std::nullopt;
+        const auto order = requireOrder(j);
         if (!order) return std::nullopt;
         Id parent;
         if (j.contains("parent")) {
-            const auto p = readId(j["parent"]);
+            const auto p = requireId(j, "parent");
             if (!p) return std::nullopt;
             parent = *p;
         }
         return MoveNode{*id, parent, *order};
     }
-    return std::nullopt;
+    return refused("unknown op kind " + std::string{kind} + ", expected one of " + opKindList());
 }
 
 json writeOp(const OpBody& op) {
@@ -1004,11 +1226,7 @@ std::optional<OpBody> opFromJson(std::string_view kind, std::string_view data) {
 }
 
 std::string_view opKind(const OpBody& op) {
-    constexpr std::array<std::string_view, 12> kKinds{"CreateNode",  "DeleteNode",  "SetProps",
-                                                      "MoveNode",    "CreateToken", "DeleteToken",
-                                                      "ReplaceToken", "CreateMode", "DeleteMode",
-                                                      "ReplaceMode", "SetOverride", "SetComponentDefinition"};
-    return kKinds[op.index()];
+    return kOpKinds[op.index()];
 }
 
 std::string opToJson(const OpBody& op) {
@@ -1025,12 +1243,15 @@ std::string opsToJson(const std::vector<Op>& ops) {
 
 std::optional<std::vector<OpBody>> opsFromJson(std::string_view data) {
     const json j = json::parse(data, nullptr, false);
-    if (!j.is_array()) return std::nullopt;
+    if (!j.is_array()) return refused(j.is_discarded() ? "ops is not valid JSON" : "ops must be an array of {kind, data} objects");
+    DiagnosticScope list{"ops"};
     std::vector<OpBody> ops;
     ops.reserve(j.size());
-    for (const json& item : j) {
+    for (std::size_t i = 0; i < j.size(); ++i) {
+        const json& item = j[i];
+        DiagnosticScope entry{slot(i)};
         if (!item.is_object() || !item.contains("kind") || !item["kind"].is_string() || !item.contains("data")) {
-            return std::nullopt;
+            return refused("must be an object with a kind string and data");
         }
         auto op = readOp(item["kind"].get_ref<const std::string&>(), item["data"]);
         if (!op) return std::nullopt;
@@ -1080,7 +1301,8 @@ std::string inspectNodeJson(const Document& document, const Node& source, const 
 
 std::optional<NodePatch> patchFromJson(std::string_view data) {
     const json j = json::parse(data, nullptr, false);
-    return j.is_object() ? readPatch(j) : std::nullopt;
+    if (!j.is_object()) return refused("patch must be a JSON object");
+    return readPatch(j);
 }
 
 std::optional<ComponentDefinition> componentDefinitionFromJson(std::string_view data) {
@@ -1175,30 +1397,51 @@ std::string snapshotToJson(const Document& document) {
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
     const json j = json::parse(data, nullptr, false);
-    if (!j.is_object() || !j.contains("version") || !j["version"].is_number_integer()) return std::nullopt;
+    if (!j.is_object()) return refused(j.is_discarded() ? "snapshot is not valid JSON" : "snapshot must be a JSON object");
+    {
+        DiagnosticScope field{"version"};
+        if (!j.contains("version") || !j["version"].is_number_integer()) return refused("version is required: an integer from 1 to " + std::to_string(kSnapshotVersion));
+    }
     const int version = j["version"].get<int>();
-    if (version < 1 || version > kSnapshotVersion || !j.contains("nodes") || !j["nodes"].is_array()) {
-        return std::nullopt;
+    if (version < 1 || version > kSnapshotVersion) {
+        DiagnosticScope field{"version"};
+        return refused("version must be from 1 to " + std::to_string(kSnapshotVersion));
+    }
+    if (!j.contains("nodes") || !j["nodes"].is_array()) {
+        DiagnosticScope field{"nodes"};
+        return refused("nodes is required: an array of nodes");
     }
 
     std::vector<OpBody> ops;
     if (version >= 2) {
-        if (!j.contains("modes") || !j["modes"].is_array() || !j.contains("tokens") || !j["tokens"].is_array()) {
-            return std::nullopt;
-        }
-        for (const json& item : j["modes"]) {
-            auto mode = readMode(item);
-            if (!mode) return std::nullopt;
-            if (mode->id == kDefaultModeId) {
-                ops.push_back(ReplaceMode{std::move(*mode)});
-            } else {
-                ops.push_back(CreateMode{std::move(*mode)});
+        for (const char* key : {"modes", "tokens"}) {
+            if (!j.contains(key) || !j[key].is_array()) {
+                DiagnosticScope field{key};
+                return refused(std::string{key} + " is required from snapshot version 2: an array");
             }
         }
-        for (const json& item : j["tokens"]) {
-            auto token = readTokenDef(item);
+        {
+            DiagnosticScope list{"modes"};
+            for (std::size_t i = 0; i < j["modes"].size(); ++i) {
+                DiagnosticScope entry{slot(i)};
+                auto mode = readMode(j["modes"][i]);
+                if (!mode) return std::nullopt;
+                if (mode->id == kDefaultModeId) {
+                    ops.push_back(ReplaceMode{std::move(*mode)});
+                } else {
+                    ops.push_back(CreateMode{std::move(*mode)});
+                }
+            }
+        }
+        DiagnosticScope list{"tokens"};
+        for (std::size_t i = 0; i < j["tokens"].size(); ++i) {
+            DiagnosticScope entry{slot(i)};
+            auto token = readTokenDef(j["tokens"][i]);
             if (!token) return std::nullopt;
-            if (version < 11 && token->type == TokenType::Typography) return std::nullopt;
+            if (version < 11 && token->type == TokenType::Typography) {
+                DiagnosticScope field{"type"};
+                return refused("typography tokens need snapshot version 11 or later");
+            }
             ops.push_back(CreateToken{std::move(*token)});
         }
     }
@@ -1207,59 +1450,67 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
     std::vector<SetProps> values;
     std::vector<SetOverride> overrides;
     std::unordered_map<Id, std::size_t> indexOf;
-    for (const json& item : j["nodes"]) {
-        auto node = readNode(item);
+    DiagnosticScope nodeList{"nodes"};
+    for (std::size_t index = 0; index < j["nodes"].size(); ++index) {
+        DiagnosticScope entry{slot(index)};
+        auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
         const auto imagePatch=[](const NodePatch& p){return p.image || p.imageFit || p.imageCrop;};
-        if(version<15 && (node->type==NodeType::Image || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return imagePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return imagePatch(r.patch);}))) return std::nullopt;
+        if(version<15 && (node->type==NodeType::Image || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return imagePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return imagePatch(r.patch);}))) return refused("image layers need snapshot version 15 or later");
         const auto curvedPath=[](const Path& path){return path.filled || !path.inHandles.empty();};
-        if(version<14 && (curvedPath(node->path) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return o.patch.path && curvedPath(*o.patch.path);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return r.patch.path && curvedPath(*r.patch.path);}))) return std::nullopt;
-        if (version < 13 && (node->type == NodeType::Path || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.path.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.path.has_value();}))) return std::nullopt;
-        if (version < 12 && node->type == NodeType::Line) return std::nullopt;
-        if (version < 11 && !node->typography.isNil()) return std::nullopt;
+        if(version<14 && (curvedPath(node->path) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return o.patch.path && curvedPath(*o.patch.path);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return r.patch.path && curvedPath(*r.patch.path);}))) return refused("curved or filled paths need snapshot version 14 or later");
+        if (version < 13 && (node->type == NodeType::Path || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.path.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.path.has_value();}))) return refused("path layers need snapshot version 13 or later");
+        if (version < 12 && node->type == NodeType::Line) return refused("line layers need snapshot version 12 or later");
+        if (version < 11 && !node->typography.isNil()) return refused("text bound to shared typography needs snapshot version 11 or later");
         if (version < 10) {
             const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
             const auto selected = [&](const NodePatch& patch) {
                 return (patch.text && slanted(patch.text->font)) || (patch.textStyle && patch.textStyle->font && slanted(*patch.textStyle->font));
             };
-            if (slanted(node->text.font)) return std::nullopt;
-            for (const auto& o : node->overrides) if (selected(o.patch)) return std::nullopt;
-            for (const auto& r : node->definition.rules) if (selected(r.patch)) return std::nullopt;
+            constexpr std::string_view oblique = "oblique fonts need snapshot version 10 or later";
+            if (slanted(node->text.font)) return refused(oblique);
+            for (const auto& o : node->overrides) if (selected(o.patch)) return refused(oblique);
+            for (const auto& r : node->definition.rules) if (selected(r.patch)) return refused(oblique);
         }
         if (version < 9) {
             const auto selectedFont = [](const NodePatch& patch) {
                 return (patch.text && patch.text->font != "inter-regular-v1") || (patch.textStyle && patch.textStyle->font.has_value());
             };
-            if (node->text.font != "inter-regular-v1") return std::nullopt;
-            for (const auto& o : node->overrides) if (selectedFont(o.patch)) return std::nullopt;
-            for (const auto& r : node->definition.rules) if (selectedFont(r.patch)) return std::nullopt;
+            constexpr std::string_view fonts = "selecting a font needs snapshot version 9 or later";
+            if (node->text.font != "inter-regular-v1") return refused(fonts);
+            for (const auto& o : node->overrides) if (selectedFont(o.patch)) return refused(fonts);
+            for (const auto& r : node->definition.rules) if (selectedFont(r.patch)) return refused(fonts);
         }
         if (version < 8) {
-            if (node->textWrap) return std::nullopt;
-            for (const auto& o : node->overrides) if (o.patch.textWrap.has_value()) return std::nullopt;
-            for (const auto& r : node->definition.rules) if (r.patch.textWrap.has_value()) return std::nullopt;
+            constexpr std::string_view wrapping = "text wrapping needs snapshot version 8 or later";
+            if (node->textWrap) return refused(wrapping);
+            for (const auto& o : node->overrides) if (o.patch.textWrap.has_value()) return refused(wrapping);
+            for (const auto& r : node->definition.rules) if (r.patch.textWrap.has_value()) return refused(wrapping);
         }
-        if (version < 6 && !node->definition.texts.empty()) return std::nullopt;
+        if (version < 6 && !node->definition.texts.empty()) return refused("component text properties need snapshot version 6 or later");
         if (version < 7) {
-            for (const auto& o : node->overrides) if (o.patch.textStyle && !o.patch.textStyle->complete()) return std::nullopt;
-            for (const auto& r : node->definition.rules) if (r.patch.textStyle && !r.patch.textStyle->complete()) return std::nullopt;
+            constexpr std::string_view partial = "partial text styles need snapshot version 7 or later";
+            for (const auto& o : node->overrides) if (o.patch.textStyle && !o.patch.textStyle->complete()) return refused(partial);
+            for (const auto& r : node->definition.rules) if (r.patch.textStyle && !r.patch.textStyle->complete()) return refused(partial);
         }
         if (version < 6) {
-            for (const auto& o : node->overrides) if (o.patch.textStyle) return std::nullopt;
-            for (const auto& r : node->definition.rules) if (r.patch.textStyle) return std::nullopt;
+            constexpr std::string_view styles = "text styles in overrides and rules need snapshot version 6 or later";
+            for (const auto& o : node->overrides) if (o.patch.textStyle) return refused(styles);
+            for (const auto& r : node->definition.rules) if (r.patch.textStyle) return refused(styles);
         }
         if (version < 5) {
-            if (node->type == NodeType::Text) return std::nullopt;
-            for (const auto& o : node->overrides) if (o.patch.text) return std::nullopt;
-            for (const auto& r : node->definition.rules) if (r.patch.text) return std::nullopt;
+            constexpr std::string_view text = "text layers need snapshot version 5 or later";
+            if (node->type == NodeType::Text) return refused(text);
+            for (const auto& o : node->overrides) if (o.patch.text) return refused(text);
+            for (const auto& r : node->definition.rules) if (r.patch.text) return refused(text);
         }
         if (version >= 4) {
             for (const auto& o : node->overrides) overrides.push_back({node->id, o.node, o.patch});
             node->overrides.clear();
         }
         if (!node->definition.empty() || !node->componentValues.empty()) {
-            if (version < 3) return std::nullopt;
-            if (version < 4 && !node->definition.swaps.empty()) return std::nullopt;
+            if (version < 3) return refused("component definitions and component values need snapshot version 3 or later");
+            if (version < 4 && !node->definition.swaps.empty()) return refused("instance swap properties need snapshot version 4 or later");
             if (!node->definition.empty()) definitions.push_back({node->id, node->definition});
             if (!node->componentValues.empty()) { NodePatch p; p.componentValues = node->componentValues; values.push_back({node->id, p}); }
             node->definition = {}; node->componentValues = {};

@@ -32,6 +32,9 @@ internal static partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "vc_document_modes")]
     internal static partial nint Modes(DocumentHandle document);
 
+    [LibraryImport(Library, EntryPoint = "vc_last_error")]
+    internal static partial nint LastError();
+
     [LibraryImport(Library, EntryPoint = "vc_free")]
     private static partial void Free(nint text);
 

@@ -55,8 +55,24 @@ TEST_CASE("the native library applies ops and reports the ones it refuses") {
     orphan.parent = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-0000000001ff");
     orphan.order = "V";
     const std::string result = take(vc_document_apply(doc.get(), opsJson({vc::CreateNode{frame()}, vc::CreateNode{orphan}}).c_str()));
-    REQUIRE(result == "[true,false]");
+    REQUIRE(result == R"([true,{"path":"ops[1]","message":"the parent does not exist or cannot have children"}])");
+    REQUIRE(take(vc_last_error()) == R"({"path":"ops[1]","message":"the parent does not exist or cannot have children"})");
+    REQUIRE(take(vc_document_apply(doc.get(), "[]")) == "[]");
+    REQUIRE(vc_last_error() == nullptr);
     REQUIRE(vc_document_apply(doc.get(), "not json") == nullptr);
+    REQUIRE(vc_last_error() != nullptr);
+}
+
+TEST_CASE("opening a snapshot explains the first layer it refuses") {
+    const std::string snapshot = R"({"version":2,"modes":[],"tokens":[],"nodes":[
+        {"id":"0192a4b1-7c3d-4e5f-8a6b-000000000100","type":"frame","order":"V","w":200,"h":100},
+        {"id":"0192a4b1-7c3d-4e5f-8a6b-000000000103","type":"rect","order":"W","parent":"0192a4b1-7c3d-4e5f-8a6b-0000000001ff"}]})";
+    int rejected = 0;
+    Handle doc{vc_document_open(snapshot.c_str(), &rejected)};
+    REQUIRE(doc);
+    REQUIRE(rejected == 1);
+    REQUIRE(take(vc_last_error()) ==
+            R"({"path":"nodes[0192a4b1-7c3d-4e5f-8a6b-000000000103]","message":"the parent does not exist or cannot have children"})");
 }
 
 TEST_CASE("a native document round-trips through its snapshot") {

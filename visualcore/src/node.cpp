@@ -14,14 +14,20 @@ void swapIn(std::optional<T>& inverse, const std::optional<T>& next, T& field) {
 
 } // namespace
 
-bool validPath(const Path& path) {
-    if (path.points.size() < (path.closed ? 3u : 2u) || path.points.size() > 64) return false;
-    if(path.filled && !path.closed) return false;
+const char* pathProblem(const Path& path) {
+    if (path.points.size() < (path.closed ? 3u : 2u)) return "a path needs at least 2 points, or 3 when closed";
+    if (path.points.size() > 64) return "a path has at most 64 points";
+    if(path.filled && !path.closed) return "only a closed path can be filled";
     if((!path.inHandles.empty() || !path.outHandles.empty()) &&
-       (path.inHandles.size()!=path.points.size() || path.outHandles.size()!=path.points.size())) return false;
+       (path.inHandles.size()!=path.points.size() || path.outHandles.size()!=path.points.size())) return "inHandles and outHandles need one entry per point";
     for(const auto* list : {&path.points,&path.inHandles,&path.outHandles}) for(const auto& p:*list)
-        if (!std::isfinite(p.x) || !std::isfinite(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return false;
-    return true;
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1)
+            return "points and handles are normalized to the node's box: x and y between 0 and 1";
+    return nullptr;
+}
+
+bool validPath(const Path& path) {
+    return !pathProblem(path);
 }
 
 NodePatch applyPatch(Node& node, const NodePatch& patch) {
