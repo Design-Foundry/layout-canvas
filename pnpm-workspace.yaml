@@ -6,3 +6,6 @@ allowBuilds:
   esbuild: true
   lmdb: true
   msgpackr-extract: true
+minimumReleaseAgeExclude:
+  - '@designfoundry/lucent-angular@0.8.0'
+  - '@designfoundry/lucent-styles@0.8.0'

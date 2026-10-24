@@ -30,7 +30,7 @@ import {
   TextRun,
   RasterImage,
 } from '@canvas/bridge';
-import { LucentButton, LucentTab, LucentTabList } from '@design-foundry/lucent';
+import { LucentButton, LucentTab, LucentTabList } from '@designfoundry/lucent-angular';
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';

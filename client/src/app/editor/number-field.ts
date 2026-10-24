@@ -1,6 +1,6 @@
 import { Component, effect, input, output, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
-import { LucentIcon, LucentPrefix, LucentSuffix, LucentTextInput } from '@design-foundry/lucent';
+import { LucentIcon, LucentPrefix, LucentSuffix, LucentTextInput } from '@designfoundry/lucent-angular';
 
 const STEP = 1;
 const BIG_STEP = 10;

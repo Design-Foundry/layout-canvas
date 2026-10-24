@@ -1,7 +1,7 @@
 import { Component, effect, input, model, output } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { LucentIconButton, LucentInlineInput, LucentTooltip } from '@design-foundry/lucent';
+import { LucentIconButton, LucentInlineInput, LucentTooltip } from '@designfoundry/lucent-angular';
 import { EDITOR_TOOLS, EditorTool } from './editor-model';
 
 @Component({
@@ -11,7 +11,7 @@ import { EDITOR_TOOLS, EditorTool } from './editor-model';
     <div class="start">
       <lucent-icon-button
         icon="arrow_back"
-        variant="ghost"
+        variant="text"
         size="sm"
         ariaLabel="Documents"
         lucentTooltip="Documents"
@@ -32,7 +32,7 @@ import { EDITOR_TOOLS, EditorTool } from './editor-model';
         <lucent-icon-button
           [icon]="option.icon"
           size="sm"
-          [variant]="tool() === option.id ? 'secondary' : 'ghost'"
+          [variant]="tool() === option.id ? 'secondary' : 'text'"
           [ariaLabel]="option.label"
           [lucentTooltip]="option.label"
           lucentTooltipPosition="bottom"
@@ -43,7 +43,7 @@ import { EDITOR_TOOLS, EditorTool } from './editor-model';
     <div class="end">
       <lucent-icon-button
         icon="widgets"
-        variant="ghost"
+        variant="text"
         size="sm"
         ariaLabel="Create component"
         lucentTooltip="Create component"

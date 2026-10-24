@@ -1,7 +1,7 @@
 import { Component, ElementRef, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { ColorValue, Length, OklchColor, TokenRow, TokenType, TokenValue } from '@canvas/bridge';
-import { LucentIconButton, LucentPrefix, LucentReferenceTag, LucentTextInput } from '@design-foundry/lucent';
+import { LucentIconButton, LucentPrefix, LucentReferenceTag, LucentTextInput } from '@designfoundry/lucent-angular';
 import { NumberField } from './number-field';
 import { formatMagnitude, lengthInPx } from './token-model';
 
@@ -26,7 +26,7 @@ export type PickRequest = ElementRef<HTMLElement>;
         <span class="bound-value typography-caption">{{ token.text }}</span>
       </button>
       @if (!disabled()) {
-        <lucent-icon-button icon="link_off" size="sm" variant="ghost" ariaLabel="Detach token" (clicked)="detach()" />
+        <lucent-icon-button icon="link_off" size="sm" variant="text" ariaLabel="Detach token" (clicked)="detach()" />
       }
     } @else {
       <app-number-field
@@ -46,7 +46,7 @@ export type PickRequest = ElementRef<HTMLElement>;
           class="link"
           icon="link"
           size="sm"
-          variant="ghost"
+          variant="text"
           [ariaLabel]="'Apply ' + family() + ' token'"
           (clicked)="pick.emit(host)"
         />
@@ -115,7 +115,7 @@ export class ValueField {
         <lucent-reference-tag kind="token" [label]="token.identifier" [swatch]="token.hex" />
         <span class="bound-value typography-caption">{{ token.text }}</span>
       </button>
-      <lucent-icon-button icon="link_off" size="sm" variant="ghost" ariaLabel="Detach token" (clicked)="detach()" />
+      <lucent-icon-button icon="link_off" size="sm" variant="text" ariaLabel="Detach token" (clicked)="detach()" />
     } @else if (color(); as color) {
       <div class="color">
         <label class="swatch" [style.background]="hex()">
@@ -147,7 +147,7 @@ export class ValueField {
           (commit)="commitAlpha($event, color)"
         />
       </div>
-      <lucent-icon-button icon="link" size="sm" variant="ghost" ariaLabel="Apply color token" (clicked)="pick.emit(host)" />
+      <lucent-icon-button icon="link" size="sm" variant="text" ariaLabel="Apply color token" (clicked)="pick.emit(host)" />
     }
   `,
   styleUrl: './inspector-fields.scss',

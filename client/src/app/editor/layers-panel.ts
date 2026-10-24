@@ -1,7 +1,7 @@
 import { Component, input, output, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
-import { LucentIconButton, LucentInlineInput, LucentListItem, LucentTrailing } from '@design-foundry/lucent';
+import { LucentIconButton, LucentInlineInput, LucentListItem, LucentTrailing } from '@designfoundry/lucent-angular';
 import { LAYER_ICONS, LayerRow } from './editor-model';
 
 const ROW_HEIGHT = 32;
@@ -65,7 +65,7 @@ export interface LayerLock {
           class="toggle lock"
           [class.on]="layer.locked"
           size="sm"
-          variant="ghost"
+          variant="text"
           [icon]="layer.locked ? 'lock' : 'lock_open'"
           [ariaLabel]="layer.locked ? 'Unlock' : 'Lock'"
           (clicked)="lock.emit({ id: layer.id, locked: !layer.locked })"
@@ -76,7 +76,7 @@ export interface LayerLock {
           class="toggle visibility"
           [class.on]="!layer.visible"
           size="sm"
-          variant="ghost"
+          variant="text"
           [icon]="layer.visible ? 'visibility' : 'visibility_off'"
           [ariaLabel]="layer.visible ? 'Hide' : 'Show'"
           (clicked)="visibility.emit({ id: layer.id, visible: !layer.visible })"

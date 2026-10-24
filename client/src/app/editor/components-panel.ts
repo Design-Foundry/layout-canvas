@@ -2,7 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { LucentButton, LucentLabel, LucentTextInput } from '@design-foundry/lucent';
+import { LucentButton, LucentLabel, LucentTextInput } from '@designfoundry/lucent-angular';
 import { LayerRow } from './editor-model';
 import {
   ComponentPackage,
@@ -46,7 +46,7 @@ import { importDocument } from '../api/functions';
             >Use</lucent-button
           >
           <lucent-button
-            variant="ghost"
+            variant="text"
             size="sm"
             [disabled]="busy()"
             (clicked)="download(component.id)"

@@ -8,15 +8,13 @@
 />
 
 <aside class="layers side">
-  <lucent-tab-list
-    class="side-tabs"
-    [activeTab]="sideTab()"
-    (tabChange)="sideTab.set($any($event))"
-  >
-    <lucent-tab label="Layers" value="layers" />
-    <lucent-tab label="Tokens" value="tokens" />
-    <lucent-tab label="Assets" value="components" />
-  </lucent-tab-list>
+  <div class="side-tabs">
+    <lucent-tab-list [activeTab]="sideTab()" (tabChange)="sideTab.set($any($event))">
+      <lucent-tab label="Layers" value="layers" />
+      <lucent-tab label="Tokens" value="tokens" />
+      <lucent-tab label="Assets" value="components" />
+    </lucent-tab-list>
+  </div>
   @if (sideTab() === 'layers') {
     <app-layers-panel
       class="side-body"

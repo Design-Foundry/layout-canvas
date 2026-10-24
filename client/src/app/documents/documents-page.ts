@@ -11,7 +11,7 @@ import {
   LucentSpinner,
   LucentSupporting,
   LucentTrailing,
-} from '@design-foundry/lucent';
+} from '@designfoundry/lucent-angular';
 import { Api } from '../api/api';
 import { createDocument, deleteDocument, listDocuments } from '../api/functions';
 import { DocumentSummary } from '../api/models';

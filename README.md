@@ -12,15 +12,6 @@ vectors, drawing tools and local raster images. See [editor capabilities and lim
 
 ## Getting started
 
-`@design-foundry/*` packages (such as Lucent) come from GitHub Packages. One-time setup on each machine,
-in your user-level `~/.npmrc` (pnpm ignores credentials in the repo's `.npmrc`):
-
-    //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
-
-and set `NODE_AUTH_TOKEN` to a GitHub token with `read:packages` (`gh auth token` works).
-
-Then:
-
     pnpm install
     pnpm wasm          # build visualcore and hand it to bridge/wasm
     pnpm build         # bridge + client

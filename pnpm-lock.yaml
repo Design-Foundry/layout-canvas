@@ -198,9 +198,12 @@ importers:
       '@canvas/bridge':
         specifier: workspace:*
         version: link:../bridge
-      '@design-foundry/lucent':
-        specifier: ^0.1.1
-        version: 0.1.1(ff5873e873ae61e45f25149f568322e0)
+      '@designfoundry/lucent-angular':
+        specifier: ^0.8.0
+        version: 0.8.0(2ce4fe8ee4925c61abd54719714c0395)
+      '@designfoundry/lucent-styles':
+        specifier: ^0.8.0
+        version: 0.8.0
       material-icons:
         specifier: ^1.13.14
         version: 1.13.14
@@ -508,14 +511,18 @@ packages:
     resolution: {integrity: sha512-OoKoR0f76dCY666JlcbhmVTs2drYj1GUXZTYTcbUgJjh9Nv41aFfZ21bPQTERm5+L5cBDo466NltB2lplS5GBw==}
     engines: {node: '>=20.19.0'}
 
-  '@design-foundry/lucent@0.1.1':
-    resolution: {integrity: sha512-ZGepPqSRzCBS5Ykwo855MKdKnrX9H/li5o2wOt87S4vTX6tR4ia1WsmntvOZQthwDkx5k1vwWazWnj/W/4NgVA==, tarball: https://npm.pkg.github.com/download/@design-foundry/lucent/0.1.1/2f6e1308b12ec5a690e0fd897550bd3831966679}
+  '@designfoundry/lucent-angular@0.8.0':
+    resolution: {integrity: sha512-PAizJkWuQaB/9www7km3FCnsKrwdjGkNTANRMX4cpHlRNliD7W9h468xjFzKkS1unCUbZwAxvgAjfNjXBYDvAQ==}
     peerDependencies:
       '@angular/cdk': ^22.0.0
       '@angular/common': ^22.0.0
       '@angular/core': ^22.0.0
       '@angular/forms': ^22.0.0
       '@angular/router': ^22.0.0
+      '@designfoundry/lucent-styles': 0.8.0
+
+  '@designfoundry/lucent-styles@0.8.0':
+    resolution: {integrity: sha512-j32l1eM4sk5KDfE6gBm9+ImO6Md0fbIwR0UVwOLQdmupJmntMj4UlbcvRRbz5XSs92lO40Euz7mTmJ7R499gZg==}
 
   '@esbuild/aix-ppc64@0.28.2':
     resolution: {integrity: sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ==}
@@ -2721,14 +2728,17 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.2': {}
 
-  '@design-foundry/lucent@0.1.1(ff5873e873ae61e45f25149f568322e0)':
+  '@designfoundry/lucent-angular@0.8.0(2ce4fe8ee4925c61abd54719714c0395)':
     dependencies:
       '@angular/cdk': 22.2.0(@angular/common@22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(@angular/forms@22.2.0(@angular/common@22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(@angular/platform-browser@22.2.0(@angular/common@22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2)))(rxjs@7.8.2))(@angular/platform-browser@22.2.0(@angular/common@22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2)))(rxjs@7.8.2)
       '@angular/common': 22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2)
       '@angular/core': 22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2)
       '@angular/forms': 22.2.0(@angular/common@22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(@angular/platform-browser@22.2.0(@angular/common@22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2)))(rxjs@7.8.2)
       '@angular/router': 22.2.0(@angular/common@22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(@angular/platform-browser@22.2.0(@angular/common@22.2.0(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.0(@angular/compiler@22.2.0)(rxjs@7.8.2)))(rxjs@7.8.2)
+      '@designfoundry/lucent-styles': 0.8.0
       tslib: 2.8.1
+
+  '@designfoundry/lucent-styles@0.8.0': {}
 
   '@esbuild/aix-ppc64@0.28.2':
     optional: true
