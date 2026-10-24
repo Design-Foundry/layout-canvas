@@ -49,19 +49,28 @@ public static class DocumentEndpoints
             using var core = VisualCoreDocument.Open(request.Snapshot.GetRawText());
             if (core.RejectedOnLoad != 0)
             {
-                return ImportProblem("The snapshot has invalid layers, tokens or dependencies. Nothing was imported.");
+                return ImportProblem(
+                    "The snapshot has invalid layers, tokens or dependencies. Nothing was imported.", core.FirstRejection);
             }
             var document = await store.CreateAsync(request.Name, ct, core.Snapshot().GetRawText());
             return TypedResults.Created($"/api/documents/{document.Id}", document);
         }
-        catch (InvalidDataException)
+        catch (SnapshotRejectedException rejected)
         {
-            return ImportProblem("visualcore could not read this snapshot. Nothing was imported.");
+            return ImportProblem("visualcore could not read this snapshot. Nothing was imported.", rejected.Reason);
         }
     }
 
-    private static ValidationProblem ImportProblem(string message) =>
-        TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["snapshot"] = [message] });
+    private static ValidationProblem ImportProblem(string message, OpRefusal? reason = null)
+    {
+        var errors = new Dictionary<string, string[]> { ["snapshot"] = [message] };
+        if (reason is not null)
+        {
+            errors[reason.Path.Length == 0 ? "snapshot" : $"snapshot.{reason.Path}"] =
+                reason.Path.Length == 0 ? [message, reason.Message] : [reason.Message];
+        }
+        return TypedResults.ValidationProblem(errors);
+    }
 
     private static async Task<Results<Ok<DocumentSummary>, NotFound>> RenameDocument(
         Guid id, RenameDocumentRequest request, DocumentStore store, CancellationToken ct) =>

@@ -39,7 +39,13 @@ public sealed record AppendOpsRequest([Required, MinLength(1), MaxLength(AppendO
 
 /// <summary>What the server did with an op.</summary>
 /// <param name="Seq">Its sequence number in the log, or null if the document refused it and it was not logged.</param>
-public sealed record OpAck(Guid Id, long? Seq);
+/// <param name="Error">Why the document refused it, when it did.</param>
+public sealed record OpAck(Guid Id, long? Seq, OpRefusal? Error = null);
+
+/// <summary>Why visualcore refused an op or a snapshot.</summary>
+/// <param name="Path">Where in the op or snapshot, such as <c>nodes[4].text</c>; empty at the top level.</param>
+/// <param name="Message">The rule the input broke.</param>
+public sealed record OpRefusal(string Path, string Message);
 
 public sealed record AppendOpsResponse(IReadOnlyList<OpAck> Acks, long HeadSeq);
 

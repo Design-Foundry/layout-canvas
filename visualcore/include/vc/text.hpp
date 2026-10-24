@@ -47,6 +47,8 @@ struct TextLayout {
 
 /// Strict UTF-8, Latin-1 plus the documented punctuation set; no silent missing-glyph fallback.
 [[nodiscard]] bool validText(const TextRun& text);
+/// Why `validText` refuses `text`, or null when it accepts it.
+[[nodiscard]] const char* textProblem(const TextRun& text);
 /// Optional greedy wrapping at spaces, with glyph breaks for words wider than the available width.
 [[nodiscard]] TextLayout layoutText(const TextRun& text, double availableWidth = -1.0, bool wrap = false);
 /// Immutable trusted font atlas; external font bytes are deliberately not accepted.

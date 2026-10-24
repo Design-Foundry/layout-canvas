@@ -119,12 +119,20 @@ struct FontSet {
 const FontSet& fonts() { static const FontSet instance; return instance; }
 } // namespace
 
-bool validText(const TextRun& text) {
+const char* textProblem(const TextRun& text) {
+    if (text.font != "inter-regular-v1" && text.font != "inter-bold-v1" && text.font != "inter-oblique-v1" && text.font != "inter-bold-oblique-v1")
+        return "font must be inter-regular-v1, inter-bold-v1, inter-oblique-v1 or inter-bold-oblique-v1";
+    if (!std::isfinite(text.fontSize) || text.fontSize < 1 || text.fontSize > 512) return "fontSize must be between 1 and 512";
+    if (!std::isfinite(text.lineHeight) || text.lineHeight < 1 || text.lineHeight > 4) return "lineHeight must be between 1 and 4";
+    if (!std::isfinite(text.letterSpacing) || text.letterSpacing < 0 || text.letterSpacing > 128) return "letterSpacing must be between 0 and 128";
+    if (text.align != TextAlign::Left && text.align != TextAlign::Center && text.align != TextAlign::Right) return "align must be left, center or right";
     std::vector<std::uint32_t> codepoints;
-    return (text.font == "inter-regular-v1" || text.font == "inter-bold-v1" || text.font == "inter-oblique-v1" || text.font == "inter-bold-oblique-v1") && std::isfinite(text.fontSize) && text.fontSize >= 1 && text.fontSize <= 512 &&
-        std::isfinite(text.lineHeight) && text.lineHeight >= 1 && text.lineHeight <= 4 &&
-        std::isfinite(text.letterSpacing) && text.letterSpacing >= 0 && text.letterSpacing <= 128 &&
-        (text.align == TextAlign::Left || text.align == TextAlign::Center || text.align == TextAlign::Right) && decode(text.content, codepoints);
+    if (!decode(text.content, codepoints)) return "content must be UTF-8 using Latin characters the bundled fonts cover";
+    return nullptr;
+}
+
+bool validText(const TextRun& text) {
+    return !textProblem(text);
 }
 
 TextLayout layoutText(const TextRun& text, double availableWidth, bool wrap) {

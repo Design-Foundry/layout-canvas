@@ -1,7 +1,15 @@
 using System.Text;
 using System.Text.Json;
+using Canvas.Server.Documents;
 
 namespace Canvas.Server.VisualCore;
+
+/// <summary>visualcore could not read a snapshot.</summary>
+public sealed class SnapshotRejectedException(OpRefusal reason)
+    : Exception(reason.Path.Length == 0 ? reason.Message : $"{reason.Path}: {reason.Message}")
+{
+    public OpRefusal Reason { get; } = reason;
+}
 
 /// <summary>An op as the log stores it: its kind and payload.</summary>
 public readonly record struct VisualCoreOp(string Kind, JsonElement Data);
@@ -14,36 +22,51 @@ public sealed class VisualCoreDocument : IDisposable
 {
     private readonly DocumentHandle handle;
 
-    private VisualCoreDocument(DocumentHandle handle, int rejectedOnLoad)
+    private VisualCoreDocument(DocumentHandle handle, int rejectedOnLoad, OpRefusal? firstRejection)
     {
         this.handle = handle;
         RejectedOnLoad = rejectedOnLoad;
+        FirstRejection = firstRejection;
     }
 
     /// <summary>Nodes of the snapshot the document refused when it was opened.</summary>
     public int RejectedOnLoad { get; }
 
+    /// <summary>Why the document refused the first of <see cref="RejectedOnLoad"/>, if any.</summary>
+    public OpRefusal? FirstRejection { get; }
+
     /// <summary>Opens a snapshot, or an empty document when <paramref name="snapshot"/> is null.</summary>
-    /// <exception cref="InvalidDataException">The snapshot is malformed.</exception>
+    /// <exception cref="SnapshotRejectedException">The snapshot is malformed.</exception>
     public static VisualCoreDocument Open(string? snapshot)
     {
         var handle = NativeMethods.Open(snapshot, out var rejected);
+        var reason = LastError();
         if (handle.IsInvalid)
         {
             handle.Dispose();
-            throw new InvalidDataException("visualcore rejected the snapshot.");
+            throw new SnapshotRejectedException(reason ?? new OpRefusal("", "the snapshot is malformed"));
         }
-        return new VisualCoreDocument(handle, rejected);
+        return new VisualCoreDocument(handle, rejected, reason);
     }
 
-    /// <summary>Applies <paramref name="ops"/> in order. Returns, per op, whether it was valid; invalid ops change nothing.</summary>
+    /// <summary>Applies <paramref name="ops"/> in order. Returns, per op, null when it applied or why it was refused; refused ops change nothing.</summary>
     /// <exception cref="ArgumentException">An op's kind is unknown or its payload malformed. Nothing was applied.</exception>
-    public bool[] Apply(IReadOnlyList<VisualCoreOp> ops)
+    public OpRefusal?[] Apply(IReadOnlyList<VisualCoreOp> ops)
     {
-        var result = NativeMethods.Take(NativeMethods.Apply(handle, Serialize(ops)))
-            ?? throw new ArgumentException("visualcore could not read the ops.", nameof(ops));
-        return JsonSerializer.Deserialize<bool[]>(result)!;
+        var text = NativeMethods.Apply(handle, Serialize(ops));
+        var reason = text == 0 ? LastError() : null;
+        var result = NativeMethods.Take(text)
+            ?? throw new ArgumentException(reason is null ? "visualcore could not read the ops." : $"{reason.Path}: {reason.Message}", nameof(ops));
+        using var document = JsonDocument.Parse(result);
+        return document.RootElement.EnumerateArray()
+            .Select(entry => entry.ValueKind == JsonValueKind.True ? null : entry.Deserialize<OpRefusal>(JsonOptions))
+            .ToArray();
     }
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static OpRefusal? LastError() =>
+        NativeMethods.Take(NativeMethods.LastError()) is { } json ? JsonSerializer.Deserialize<OpRefusal>(json, JsonOptions) : null;
 
     public JsonElement Snapshot() => Parse(NativeMethods.Snapshot(handle))!.Value;
 

@@ -586,6 +586,17 @@
             ],
             "description": "Its sequence number in the log, or null if the document refused it and it was not logged.",
             "format": "int64"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "description": "Why the document refused it, when it did.",
+                "$ref": "#/components/schemas/OpRefusal"
+              }
+            ]
           }
         },
         "description": "What the server did with an op."
@@ -644,6 +655,24 @@
           }
         },
         "description": "An op as stored in the log."
+      },
+      "OpRefusal": {
+        "required": [
+          "path",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Where in the op or snapshot, such as `nodes[4].text`; empty at the top level."
+          },
+          "message": {
+            "type": "string",
+            "description": "The rule the input broke."
+          }
+        },
+        "description": "Why visualcore refused an op or a snapshot."
       },
       "OpsPage": {
         "required": [

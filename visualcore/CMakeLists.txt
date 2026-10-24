@@ -38,6 +38,7 @@ add_library(vc_core STATIC
     src/camera.cpp
     src/color.cpp
     src/demo.cpp
+    src/diagnostics.cpp
     src/document.cpp
     src/document_tokens.cpp
     src/draw_list.cpp
@@ -121,6 +122,9 @@ else()
         add_executable(vc_tests
             tests/test_camera.cpp
             tests/test_components.cpp
+            tests/test_diagnostics.cpp
+            tests/test_diagnostics_json.cpp
+            tests/test_diagnostics_tokens.cpp
             tests/test_document.cpp
             tests/test_draw_list.cpp
             tests/test_editor.cpp
