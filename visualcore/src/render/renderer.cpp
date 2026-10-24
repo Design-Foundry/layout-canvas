@@ -230,18 +230,30 @@ void Renderer::State::createPipelines() {
     wgpu::TextureDescriptor textureDesc{};
     textureDesc.size = {kTextAtlasSize, kTextAtlasSize, 1};
     textureDesc.format = wgpu::TextureFormat::R8Unorm;
+    textureDesc.mipLevelCount = kTextAtlasMipLevels;
     textureDesc.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
     glyphTexture = device.CreateTexture(&textureDesc);
     glyphView = glyphTexture.CreateView();
     wgpu::SamplerDescriptor samplerDesc{};
     samplerDesc.magFilter = wgpu::FilterMode::Linear;
     samplerDesc.minFilter = wgpu::FilterMode::Linear;
+    samplerDesc.mipmapFilter = wgpu::MipmapFilterMode::Linear;
     glyphSampler = device.CreateSampler(&samplerDesc);
-    wgpu::TexelCopyTextureInfo destination{}; destination.texture = glyphTexture;
-    wgpu::TexelCopyBufferLayout dataLayout{}; dataLayout.bytesPerRow = kTextAtlasSize; dataLayout.rowsPerImage = kTextAtlasSize;
-    const wgpu::Extent3D atlasSize{kTextAtlasSize, kTextAtlasSize, 1};
-    const auto pixels = textAtlas();
-    device.GetQueue().WriteTexture(&destination, pixels.data(), pixels.size(), &dataLayout, &atlasSize);
+    const auto atlas = textAtlas();
+    std::vector<std::uint8_t> level(atlas.begin(), atlas.end());
+    for (uint32_t mip = 0, size = kTextAtlasSize; mip < kTextAtlasMipLevels; ++mip, size /= 2) {
+        if (mip > 0) {
+            for (uint32_t y = 0; y < size; ++y)
+                for (uint32_t x = 0; x < size; ++x) {
+                    const auto at = [&](uint32_t dx, uint32_t dy) { return unsigned(level[(2 * y + dy) * 2 * size + 2 * x + dx]); };
+                    level[y * size + x] = std::uint8_t((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4);
+                }
+        }
+        wgpu::TexelCopyTextureInfo destination{}; destination.texture = glyphTexture; destination.mipLevel = mip;
+        wgpu::TexelCopyBufferLayout dataLayout{}; dataLayout.bytesPerRow = size; dataLayout.rowsPerImage = size;
+        const wgpu::Extent3D extent{size, size, 1};
+        device.GetQueue().WriteTexture(&destination, level.data(), std::size_t(size) * size, &dataLayout, &extent);
+    }
 
     wgpu::TextureDescriptor imageDesc{};imageDesc.size={512,512,8};imageDesc.format=wgpu::TextureFormat::RGBA8Unorm;
     imageDesc.usage=wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
@@ -455,6 +467,15 @@ void Renderer::State::buildInstances() {
         if (item.kind == DrawKind::Glyph || item.kind == DrawKind::Image) {
             gpu.aRect[0] = float(item.a.rect.x); gpu.aRect[1] = float(item.a.rect.y);
             gpu.aRect[2] = float(item.a.rect.w); gpu.aRect[3] = float(item.a.rect.h);
+        }
+        if (item.kind == DrawKind::Glyph && item.a.rect.w > 0 && item.a.rect.h > 0) {
+            // Grow into the transparent atlas padding so filtering can spread ink past its tight box.
+            const double pad = double(kTextAtlasPadding) / kTextAtlasSize;
+            const double worldPad = pad * item.quad.w / item.a.rect.w;
+            gpu.quad[0] -= float(worldPad); gpu.quad[1] -= float(worldPad);
+            gpu.quad[2] += float(2 * worldPad); gpu.quad[3] += float(2 * worldPad);
+            gpu.aRect[0] -= float(pad); gpu.aRect[1] -= float(pad);
+            gpu.aRect[2] += float(2 * pad); gpu.aRect[3] += float(2 * pad);
         }
         radii(item.a.radii, gpu.aRadii);
         box(item.b.rect, gpu.bRect);

@@ -54,5 +54,9 @@ struct TextLayout {
 /// Immutable trusted font atlas; external font bytes are deliberately not accepted.
 [[nodiscard]] std::span<const std::uint8_t> textAtlas();
 inline constexpr int kTextAtlasSize = 4096;
+/// Every glyph's `uv` has at least this many transparent atlas pixels around it, and cells are
+/// aligned to it, so the first `kTextAtlasMipLevels` mip levels keep glyphs apart.
+inline constexpr int kTextAtlasPadding = 8;
+inline constexpr int kTextAtlasMipLevels = 4;
 
 } // namespace vc

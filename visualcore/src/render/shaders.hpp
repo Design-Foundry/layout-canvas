@@ -67,6 +67,8 @@ const kDropShadow = 2u;
 const kInnerShadow = 3u;
 const kOutline = 4u;
 const kOutlineWidthPx = 1.5;
+const kGlyphAtlasSize = 4096.0;
+const kGlyphAtlasMaxLod = 3.0;
 
 struct VertexOut {
     @builtin(position) pos: vec4f,
@@ -202,9 +204,19 @@ fn fs(in: VertexOut) -> @location(0) vec4f {
     if (kind == 5u) {
         let local = (p - item.quad.xy) / item.quad.zw;
         if (any(local < vec2f(0.0)) || any(local > vec2f(1.0))) { discard; }
+        // Box-filter one device pixel with a 4x4 grid of taps from a finer mip level.
+        let texelsPerPixel = item.aRect.zw / item.quad.zw * kGlyphAtlasSize / (frame.zoom * frame.dpr);
+        let lod = clamp(log2(max(texelsPerPixel.x, texelsPerPixel.y)) - 1.5, 0.0, kGlyphAtlasMaxLod);
         let uv = item.aRect.xy + local * item.aRect.zw;
-        let mask = textureSampleLevel(glyphAtlas, glyphSampler, uv, 0.0).r;
-        return vec4f(item.color.rgb, item.color.a * mask);
+        let step = texelsPerPixel / kGlyphAtlasSize / 4.0;
+        var mask = 0.0;
+        for (var j = 0; j < 4; j++) {
+            for (var i = 0; i < 4; i++) {
+                let offset = (vec2f(f32(i), f32(j)) - 1.5) * step;
+                mask += textureSampleLevel(glyphAtlas, glyphSampler, uv + offset, lod).r;
+            }
+        }
+        return vec4f(item.color.rgb, item.color.a * mask / 16.0);
     }
     let dA = shapeDistance(p, item.aRect, item.aRadii, ellipse);
 
