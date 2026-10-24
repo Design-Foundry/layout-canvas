@@ -1,0 +1,446 @@
+@if (
+  !node().inInstance &&
+  !node().swapBound &&
+  (node().type === 'component' || node().type === 'instance')
+) {
+  <section aria-label="Component properties" class="properties">
+    <h3>Component properties</h3>
+    @if (node().type === 'instance') {
+      @for (text of definition().texts ?? []; track text.name) {
+        <div class="choice">
+          <label
+            >{{ text.name
+            }}<textarea
+              rows="2"
+              [attr.aria-label]="text.name"
+              #textControl="ngModel"
+              [ngModelOptions]="{ updateOn: 'blur' }"
+              [ngModel]="value(text.name, text.default)"
+              (ngModelChange)="choose(text.name, $event, textControl, text.default)"
+            ></textarea>
+          </label>
+          <button
+            type="button"
+            (click)="reset(text.name)"
+            [attr.aria-label]="'Use default for ' + text.name"
+          >
+            Default
+          </button>
+        </div>
+      }
+      @for (property of definition().properties; track property.name) {
+        <div class="choice">
+          <label
+            ><input
+              type="checkbox"
+              [ngModel]="value(property.name, property.default)"
+              (ngModelChange)="choose(property.name, $event)"
+            />{{ property.name }}</label
+          >
+          <button
+            type="button"
+            (click)="reset(property.name)"
+            [attr.aria-label]="'Use default for ' + property.name"
+          >
+            Default
+          </button>
+        </div>
+      }
+      @for (axis of definition().axes; track axis.name) {
+        <div class="choice">
+          <label
+            >{{ axis.name
+            }}<select
+              [ngModel]="value(axis.name, axis.default)"
+              (ngModelChange)="choose(axis.name, $event)"
+            >
+              @for (value of axis.values; track value) {
+                <option [value]="value">{{ value }}</option>
+              }
+            </select></label
+          >
+          <button
+            type="button"
+            (click)="reset(axis.name)"
+            [attr.aria-label]="'Use default for ' + axis.name"
+          >
+            Default
+          </button>
+        </div>
+      }
+      @for (swap of definition().swaps ?? []; track swap.name) {
+        <div class="choice">
+          <label
+            >{{ swap.name
+            }}<select
+              [attr.aria-label]="swap.name"
+              #swapControl="ngModel"
+              [ngModel]="value(swap.name, swap.default)"
+              (ngModelChange)="choose(swap.name, $event, swapControl, swap.default)"
+            >
+              @for (choice of swap.choices; track choice) {
+                <option [value]="choice">{{ mainLabel(choice) }}</option>
+              }
+            </select></label
+          >
+          <button
+            type="button"
+            (click)="reset(swap.name)"
+            [attr.aria-label]="'Use default for ' + swap.name"
+          >
+            Default
+          </button>
+        </div>
+      }
+      @if (hasValues()) {
+        <lucent-button size="sm" variant="secondary" (clicked)="reset()"
+          >Reset property choices</lucent-button
+        >
+      }
+      @if (
+        !definition().properties.length &&
+        !definition().axes.length &&
+        !definition().swaps?.length &&
+        !definition().texts?.length
+      ) {
+        <p>Define properties on the main component.</p>
+      }
+    } @else {
+      @for (text of definition().texts ?? []; track text.name) {
+        <div class="entry">
+          <label
+            >{{ text.name
+            }}<textarea
+              rows="2"
+              [attr.aria-label]="'Default text for ' + text.name"
+              #defaultTextControl="ngModel"
+              [ngModelOptions]="{ updateOn: 'blur' }"
+              [ngModel]="text.default"
+              (ngModelChange)="textDefaultChanged(text.name, $event, defaultTextControl)"
+            ></textarea>
+          </label>
+          <span>{{ label(text.target) }}</span>
+          <button
+            type="button"
+            (click)="removeText(text.name)"
+            [attr.aria-label]="'Remove text property ' + text.name"
+          >
+            Remove
+          </button>
+        </div>
+      }
+      <details>
+        <summary>Add text property</summary>
+        <label
+          >Text property name<input
+            aria-label="Text property name"
+            placeholder="label"
+            [(ngModel)]="textName"
+            maxlength="64"
+        /></label>
+        <label
+          >Text layer<select aria-label="Text property layer" [(ngModel)]="textTarget">
+            <option value="">Choose text layer</option>
+            @for (target of textTargets(); track target.id) {
+              <option [value]="target.id">{{ target['name'] || 'Text' }}</option>
+            }
+          </select></label
+        >
+        <label
+          >Default text<textarea
+            aria-label="Default property text"
+            [(ngModel)]="textDefault"
+            rows="2"
+          ></textarea>
+        </label>
+        <lucent-button size="sm" variant="secondary" (clicked)="addText()"
+          >Add text property</lucent-button
+        >
+      </details>
+      @for (property of definition().properties; track property.name) {
+        <div class="entry">
+          <label
+            ><input
+              type="checkbox"
+              [ngModel]="property.default"
+              (ngModelChange)="propertyDefaultChanged(property.name, $event)"
+            />{{ property.name }}</label
+          >
+          <span>{{ label(property.target) }}</span>
+          <button
+            type="button"
+            (click)="removeProperty(property.name)"
+            [attr.aria-label]="'Remove property ' + property.name"
+          >
+            Remove
+          </button>
+        </div>
+      }
+      <details>
+        <summary>Add visibility property</summary>
+        <label
+          >Property name<input placeholder="show-icon" [(ngModel)]="propertyName" maxlength="64"
+        /></label>
+        <label
+          >Visibility layer<select [(ngModel)]="propertyTarget">
+            <option value="">Choose layer</option>
+            @for (target of targets(); track target.id) {
+              <option [value]="target.id">{{ target['name'] || 'Layer' }}</option>
+            }
+          </select></label
+        >
+        <label><input type="checkbox" [(ngModel)]="propertyDefault" />Visible by default</label>
+        <lucent-button size="sm" variant="secondary" (clicked)="addProperty()"
+          >Add property</lucent-button
+        >
+      </details>
+      @for (swap of definition().swaps ?? []; track swap.name) {
+        <div class="entry">
+          <label
+            >{{ swap.name }} default<select
+              [attr.aria-label]="swap.name + ' default'"
+              #swapDefaultControl="ngModel"
+              [ngModel]="swap.default"
+              (ngModelChange)="swapDefaultChanged(swap.name, $event, swapDefaultControl)"
+            >
+              @for (choice of swap.choices; track choice) {
+                <option [value]="choice">{{ mainLabel(choice) }}</option>
+              }
+            </select></label
+          >
+          <span>{{ label(swap.target) }}</span>
+          <button
+            type="button"
+            (click)="removeSwap(swap.name)"
+            [attr.aria-label]="'Remove swap property ' + swap.name"
+          >
+            Remove
+          </button>
+        </div>
+      }
+      <details>
+        <summary>Add instance swap property</summary>
+        <label
+          >Swap property name<input placeholder="icon" [(ngModel)]="swapName" maxlength="64"
+        /></label>
+        <label
+          >Instance layer<select
+            aria-label="Instance layer"
+            [ngModel]="swapTarget()"
+            (ngModelChange)="setSwapTarget($event)"
+          >
+            <option value="">Choose instance</option>
+            @for (target of swapTargets(); track target.id) {
+              <option [value]="target.id">{{ target['name'] || 'Instance' }}</option>
+            }
+          </select></label
+        >
+        @if (swapTarget()) {
+          <p>Allowed components</p>
+          @for (choice of swapChoices(); track choice.value) {
+            <label
+              ><input
+                type="checkbox"
+                [ngModel]="swapAllowed.includes(choice.value)"
+                (ngModelChange)="allowSwap(choice.value, $event)"
+              />{{ choice.label }}</label
+            >
+          }
+          <label
+            >Default component<select aria-label="Default component" [(ngModel)]="swapDefault">
+              <option value="">Choose default</option>
+              @for (choice of swapChoices(); track choice.value) {
+                @if (swapAllowed.includes(choice.value)) {
+                  <option [value]="choice.value">{{ choice.label }}</option>
+                }
+              }
+            </select></label
+          >
+        }
+        <p>
+          Choose an instance inside this main. Its geometry stays in place when another allowed
+          component is selected.
+        </p>
+        <lucent-button size="sm" variant="secondary" (clicked)="addSwap()"
+          >Add swap property</lucent-button
+        >
+      </details>
+      <h3>Variants</h3>
+      @for (axis of definition().axes; track axis.name) {
+        <div class="entry">
+          <label
+            >{{ axis.name }} default<select
+              [attr.aria-label]="axis.name + ' default'"
+              #axisDefaultControl="ngModel"
+              [ngModel]="axis.default"
+              (ngModelChange)="axisDefaultChanged(axis.name, $event, axisDefaultControl)"
+            >
+              @for (value of axis.values; track value) {
+                <option [value]="value">{{ value }}</option>
+              }
+            </select></label
+          >
+          <button
+            type="button"
+            (click)="removeAxis(axis.name)"
+            [attr.aria-label]="'Remove axis ' + axis.name"
+          >
+            Remove
+          </button>
+        </div>
+        <details>
+          <summary>Edit choices for {{ axis.name }}</summary>
+          <label
+            >Choices<input
+              [attr.aria-label]="'Choices for ' + axis.name"
+              #axisChoicesControl="ngModel"
+              [ngModelOptions]="{ updateOn: 'blur' }"
+              [ngModel]="axis.values.join(', ')"
+              (ngModelChange)="axisChoicesChanged(axis.name, $event, axisChoicesControl)"
+          /></label>
+          <p>
+            Separate choices with commas. Changes apply when you leave this field. A choice used by
+            the default, a style or an instance must be released before removal.
+          </p>
+        </details>
+      }
+      <details>
+        <summary>Add variant axis</summary>
+        <label>Axis name<input placeholder="size" [(ngModel)]="axisName" maxlength="64" /></label>
+        <label
+          >Variant choices<input placeholder="compact, large" [(ngModel)]="axisChoices"
+        /></label>
+        <p>The first value is the initial default.</p>
+        <lucent-button size="sm" variant="secondary" (clicked)="addAxis()">Add axis</lucent-button>
+      </details>
+      @if (definition().axes.length) {
+        <details>
+          <summary>Add variant style</summary>
+          @for (axis of definition().axes; track axis.name) {
+            <label
+              >{{ axis.name }} condition<select
+                [ngModel]="cell[axis.name] || ''"
+                (ngModelChange)="cell[axis.name] = $event"
+              >
+                <option value="">Any</option>
+                @for (value of axis.values; track value) {
+                  <option [value]="value">{{ value }}</option>
+                }
+              </select></label
+            >
+          }
+          <label
+            >Style layer<select [(ngModel)]="ruleTarget">
+              <option value="">Choose layer</option>
+              @for (target of targets(); track target.id) {
+                <option [value]="target.id">{{ target['name'] || 'Layer' }}</option>
+              }
+            </select></label
+          >
+          <label
+            >Style property<select [(ngModel)]="ruleField">
+              <option value="cornerRadius">Corner radius</option>
+              <option value="opacity">Opacity</option>
+              <option value="fill">Background color</option>
+              <option value="w">Child width</option>
+              <option value="h">Child height</option>
+              @if (textRuleTarget()) {
+                <option value="fontSize">Font size</option>
+                <option value="lineHeight">Line height</option>
+                <option value="letterSpacing">Letter spacing</option>
+                <option value="align">Text alignment</option>
+              }
+            </select></label
+          >
+          @if (ruleField === 'align') {
+            <label
+              >Style value<select [(ngModel)]="ruleValue">
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select></label
+            >
+          } @else {
+            <label>Style value<input [(ngModel)]="ruleValue" /></label>
+          }
+          <p>
+            Matching rules combine. More specific combinations take precedence; local instance
+            overrides apply last.
+          </p>
+          <lucent-button size="sm" variant="secondary" (clicked)="addRule()"
+            >Save variant style</lucent-button
+          >
+        </details>
+      }
+      @for (rule of definition().rules; track $index) {
+        @let ruleIndex = $index;
+        <div class="entry">
+          <span
+            >{{ ruleLabel(rule.when) }}<br />{{ label(rule.target) }} ·
+            {{ patchLabel(rule.patch) }}</span
+          ><button
+            type="button"
+            (click)="removeRule($index)"
+            [attr.aria-label]="'Remove variant style ' + ($index + 1)"
+          >
+            Remove
+          </button>
+          <details>
+            <summary>Edit fields for variant style {{ ruleIndex + 1 }}</summary>
+            @for (field of ruleFields(rule.patch); track field.key) {
+              <div class="rule-field">
+                @if (field.editable) {
+                  <label
+                    >{{ field.label }}
+                    @if (field.key === 'textStyle.align') {
+                      <select
+                        [attr.aria-label]="field.label + ' in variant style ' + (ruleIndex + 1)"
+                        #alignmentControl="ngModel"
+                        [ngModel]="field.value"
+                        (ngModelChange)="
+                          ruleFieldChanged(ruleIndex, field.key, $event, alignmentControl)
+                        "
+                      >
+                        <option value="left">Left</option>
+                        <option value="center">Center</option>
+                        <option value="right">Right</option>
+                      </select>
+                    } @else {
+                      <input
+                        [attr.aria-label]="field.label + ' in variant style ' + (ruleIndex + 1)"
+                        #metricControl="ngModel"
+                        [ngModelOptions]="{ updateOn: 'blur' }"
+                        [ngModel]="field.value"
+                        (ngModelChange)="
+                          ruleFieldChanged(ruleIndex, field.key, $event, metricControl)
+                        "
+                      />
+                    }
+                  </label>
+                } @else {
+                  <span>{{ field.label }} · {{ field.value }}</span>
+                }
+                <button
+                  type="button"
+                  (click)="removeRuleField(ruleIndex, field.key)"
+                  [attr.aria-label]="
+                    'Inherit ' + field.label + ' in variant style ' + (ruleIndex + 1)
+                  "
+                >
+                  Inherit
+                </button>
+              </div>
+            }
+            <p>
+              Inherit removes only this field. The last field removes the rule; other matching
+              styles still apply.
+            </p>
+          </details>
+        </div>
+      }
+    }
+    @if (error()) {
+      <p role="alert">{{ error() }}</p>
+    }
+  </section>
+}

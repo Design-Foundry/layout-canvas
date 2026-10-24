@@ -70,7 +70,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 
-
   &.selected {
     color: var(--color--semantic--accent-default);
   }
@@ -95,6 +94,7 @@
   grid-area: status;
   display: flex;
   align-items: center;
+  gap: var(--dimension--primitive--spacing-3);
   padding: 0 var(--dimension--primitive--spacing-3);
   background: var(--color--semantic--surface-default);
   border-top: 1px solid var(--color--semantic--border-subtle);

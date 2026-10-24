@@ -1,4 +1,15 @@
-export type EditorTool = 'select' | 'frame' | 'rectangle' | 'ellipse' | 'hand';
+export type EditorTool =
+  | 'select'
+  | 'frame'
+  | 'rectangle'
+  | 'ellipse'
+  | 'hand'
+  | 'text'
+  | 'line'
+  | 'pen'
+  | 'pencil'
+  | 'polygon'
+  | 'star';
 
 export interface EditorToolOption {
   readonly id: EditorTool;
@@ -11,10 +22,25 @@ export const EDITOR_TOOLS: readonly EditorToolOption[] = [
   { id: 'frame', label: 'Frame', icon: 'tag' },
   { id: 'rectangle', label: 'Rectangle', icon: 'crop_square' },
   { id: 'ellipse', label: 'Ellipse', icon: 'radio_button_unchecked' },
+  { id: 'pen', label: 'Pen (P): click corners, drag curves', icon: 'gesture' },
+  { id: 'pencil', label: 'Pencil (Shift+P)', icon: 'edit' },
+  { id: 'polygon', label: 'Polygon (Y)', icon: 'hexagon' },
+  { id: 'star', label: 'Star', icon: 'star_border' },
+  { id: 'line', label: 'Line', icon: 'show_chart' },
+  { id: 'text', label: 'Text', icon: 'title' },
   { id: 'hand', label: 'Hand', icon: 'pan_tool' },
 ];
 
-export type LayerKind = 'frame' | 'rectangle' | 'ellipse' | 'text' | 'image' | 'component' | 'instance';
+export type LayerKind =
+  | 'path'
+  | 'line'
+  | 'frame'
+  | 'rectangle'
+  | 'ellipse'
+  | 'text'
+  | 'image'
+  | 'component'
+  | 'instance';
 
 /** A component action from the inspector, applied to the selected node. */
 export type ComponentCommand = 'createInstance' | 'goToMain' | 'detach' | 'resetOverrides';
@@ -28,9 +54,12 @@ export interface LayerRow {
   readonly depth: number;
   readonly visible: boolean;
   readonly locked: boolean;
+  readonly inInstance?: boolean;
 }
 
 export const LAYER_ICONS: Readonly<Record<LayerKind, string>> = {
+  path: 'polyline',
+  line: 'show_chart',
   frame: 'tag',
   rectangle: 'crop_square',
   ellipse: 'radio_button_unchecked',

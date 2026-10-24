@@ -15,7 +15,7 @@ const BIG_STEP = 10;
       [placeholder]="placeholder()"
       [readonly]="disabled()"
       [formControl]="control"
-      (focusin)="focused.set(true)"
+      (focusin)="onFocus()"
       (focusout)="onBlur()"
       (keydown)="onKeydown($event)"
     >
@@ -61,12 +61,18 @@ export class NumberField {
   constructor() {
     effect(() => {
       const value = this.value();
-      if (!this.focused()) this.control.setValue(format(value));
+      if (!this.focused() || !this.control.dirty) this.control.setValue(format(value));
     });
+  }
+
+  protected onFocus(): void {
+    this.control.markAsPristine();
+    this.focused.set(true);
   }
 
   protected onBlur(): void {
     this.focused.set(false);
+    if (!this.control.dirty) return;
     const text = this.control.value.trim();
     if (text === format(this.value())) return;
     if (!text && this.optional()) {
@@ -82,6 +88,7 @@ export class NumberField {
       target.blur();
     } else if (event.key === 'Escape') {
       this.control.setValue(format(this.value()));
+      this.control.markAsPristine();
       target.blur();
     } else if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !this.disabled()) {
       event.preventDefault();
