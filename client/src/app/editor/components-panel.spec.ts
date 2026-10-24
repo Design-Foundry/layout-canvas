@@ -2,6 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { vi } from 'vitest';
 import { ComponentsPanel } from './components-panel';
 import { exportComponent } from './component-package';
 
@@ -92,6 +93,21 @@ describe('ComponentsPanel', () => {
     element().querySelector<HTMLButtonElement>('.component-name')!.click();
     expect(revealed).toEqual([id]);
   });
+  it('downloads the same compact JSON whose size the export checked', async () => {
+    let blob: Blob | undefined;
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation((value) => {
+      blob = value as Blob;
+      return 'blob:component';
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    [...element().querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Export')!
+      .click();
+    expect(await blob!.text()).toBe(JSON.stringify(exportComponent(snapshot(), id)));
+    create.mockRestore();
+    click.mockRestore();
+  });
+
   it('rejects an unsupported native snapshot before starting an export', async () => {
     fixture.componentRef.setInput('snapshot', () => ({ ...snapshot(), version: 999 }));
     await fixture.whenStable();

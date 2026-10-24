@@ -150,7 +150,7 @@ export class ComponentsPanel {
 
   private save(data: unknown, filename: string): void {
     const url = URL.createObjectURL(
-      new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
+      new Blob([JSON.stringify(data)], { type: 'application/json' }),
     );
     const link = document.createElement('a');
     link.href = url;
