@@ -204,3 +204,112 @@ TEST_CASE("remote ops are applied but never undone or resent") {
     REQUIRE_FALSE(session.canUndo());
     REQUIRE(session.takeOutbox().empty());
 }
+
+namespace {
+
+SetProps moveTo(std::uint64_t id, double x) {
+    vc::NodePatch patch;
+    patch.x = x;
+    return {idOf(id), patch};
+}
+
+/// Two clients that both start from the same frame with a rect inside.
+struct Pair {
+    Session a{vc::IdGenerator{1}};
+    Session b{vc::IdGenerator{2}};
+
+    Pair() {
+        for (Session* s : {&a, &b}) {
+            s->applyRemote(CreateNode{node(1, NodeType::Frame)});
+            s->applyRemote(CreateNode{node(2, NodeType::Rect, 1)});
+        }
+    }
+};
+
+} // namespace
+
+TEST_CASE("own edits coming back from the log settle the session without touching the document") {
+    Pair p;
+    p.a.edit(moveTo(2, 5));
+    REQUIRE_FALSE(p.a.isSettled());
+    const auto log = p.a.takeOutbox();
+    const auto revision = p.a.revision();
+
+    REQUIRE(p.a.receive(log) == 1);
+    REQUIRE(p.a.isSettled());
+    REQUIRE(p.a.revision() == revision);
+    REQUIRE(p.a.document().find(idOf(2))->x == 5);
+}
+
+TEST_CASE("clients converge on the log order when they edit the same property") {
+    Pair p;
+    p.a.edit(moveTo(2, 5));
+    p.b.edit(moveTo(2, 9));
+    // b reaches the server first, so a's edit lands on top of it.
+    std::vector<vc::Op> log = p.b.takeOutbox();
+    for (vc::Op& op : p.a.takeOutbox()) log.push_back(op);
+
+    p.a.receive(log);
+    p.b.receive(log);
+    REQUIRE(p.a.document().find(idOf(2))->x == 5);
+    REQUIRE(p.b.document().find(idOf(2))->x == 5);
+    REQUIRE(p.a.isSettled());
+    REQUIRE(p.b.isSettled());
+}
+
+TEST_CASE("local edits stay on top of remote ops until the log confirms them") {
+    Pair p;
+    p.a.edit(moveTo(2, 5));
+    const auto mine = p.a.takeOutbox();
+    p.b.edit(moveTo(2, 9));
+
+    p.a.receive(p.b.takeOutbox());
+    REQUIRE(p.a.document().find(idOf(2))->x == 5);
+    REQUIRE_FALSE(p.a.isSettled());
+
+    p.a.receive(mine);
+    REQUIRE(p.a.isSettled());
+    REQUIRE(p.a.document().find(idOf(2))->x == 5);
+}
+
+TEST_CASE("a local edit that no longer applies after remote ops is dropped and never sent") {
+    Pair p;
+    p.a.edit(CreateNode{node(3, NodeType::Rect, 1, "a")});
+    p.b.deleteTree(idOf(1));
+
+    p.a.receive(p.b.takeOutbox());
+    REQUIRE(p.a.document().size() == 0);
+    REQUIRE(p.a.isSettled());
+    REQUIRE(p.a.takeOutbox().empty());
+}
+
+TEST_CASE("a preview survives remote ops arriving beneath it") {
+    Pair p;
+    REQUIRE(p.a.preview(moveTo(2, 40)));
+    REQUIRE_FALSE(p.a.isSettled());
+    vc::NodePatch rename;
+    rename.name = "Card";
+    p.b.edit(SetProps{idOf(1), rename});
+
+    p.a.receive(p.b.takeOutbox());
+    REQUIRE(p.a.hasPreview());
+    REQUIRE(p.a.document().find(idOf(2))->x == 40);
+    REQUIRE(p.a.document().find(idOf(1))->name == "Card");
+
+    p.a.cancelPreview();
+    REQUIRE(p.a.document().find(idOf(2))->x == 0);
+    REQUIRE(p.a.isSettled());
+}
+
+TEST_CASE("undone edits travel and confirm like any other edit") {
+    Pair p;
+    p.a.edit(moveTo(2, 5));
+    p.a.undo();
+    const auto log = p.a.takeOutbox();
+    REQUIRE(log.size() == 2);
+
+    p.b.receive(log);
+    REQUIRE(p.b.document().find(idOf(2))->x == 0);
+    p.a.receive(log);
+    REQUIRE(p.a.isSettled());
+}

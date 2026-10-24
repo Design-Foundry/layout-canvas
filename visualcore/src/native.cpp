@@ -136,7 +136,7 @@ char* vc_document_apply(vc_document* document, const char* ops) {
         for (std::size_t i = 0; i < parsed->size(); ++i) {
             if (out.size() > 1) out += ',';
             vc::clearDiagnostic();
-            if (document->document.apply((*parsed)[i])) {
+            if (document->document.apply((*parsed)[i].body)) {
                 out += "true";
                 continue;
             }
