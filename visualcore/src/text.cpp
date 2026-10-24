@@ -37,6 +37,7 @@ constexpr KernPair kBoldObliqueKerning[] = {
 };
 constexpr std::uint32_t kPunctuation[] = {0x2013, 0x2014, 0x2018, 0x2019, 0x201a, 0x201c, 0x201d,
                                         0x201e, 0x2022, 0x2026, 0x2039, 0x203a, 0x20ac, 0x2122};
+constexpr int align(int size) { return (size + kTextAtlasPadding - 1) / kTextAtlasPadding * kTextAtlasPadding; }
 struct Glyph {
     Rect ink;
     Rect uv;
@@ -86,14 +87,17 @@ public:
             if (!stbtt_FindGlyphIndex(&info, cp)) throw std::runtime_error("Bundled font lacks a declared glyph");
             int width, height, left, upper, advance, bearing;
             unsigned char* bitmap = stbtt_GetCodepointBitmap(&info, scale, scale, cp, &width, &height, &left, &upper);
-            if (x + width + 1 > kTextAtlasSize) { x = 1; y += rowHeight + 2; rowHeight = 0; }
-            if (y + height + 1 > kTextAtlasSize) { stbtt_FreeBitmap(bitmap, nullptr); throw std::runtime_error("Font atlas overflow"); }
-            for (int j = 0; j < height; ++j) std::copy_n(bitmap + j * width, width, pixels.begin() + (y + j) * kTextAtlasSize + x);
+            const int cellWidth = align(width + 2 * kTextAtlasPadding), cellHeight = align(height + 2 * kTextAtlasPadding);
+            if (x + cellWidth > kTextAtlasSize) { x = 0; y += rowHeight; rowHeight = 0; }
+            if (y + cellHeight > kTextAtlasSize) { stbtt_FreeBitmap(bitmap, nullptr); throw std::runtime_error("Font atlas overflow"); }
+            for (int j = 0; j < height; ++j)
+                std::copy_n(bitmap + j * width, width, pixels.begin() + (y + kTextAtlasPadding + j) * kTextAtlasSize + x + kTextAtlasPadding);
             stbtt_FreeBitmap(bitmap, nullptr);
             stbtt_GetCodepointHMetrics(&info, cp, &advance, &bearing);
             glyphs.emplace(cp, Glyph{{double(left), double(upper), double(width), double(height)},
-                {double(x) / kTextAtlasSize, double(y) / kTextAtlasSize, double(width) / kTextAtlasSize, double(height) / kTextAtlasSize}, advance * scale});
-            x += width + 2; rowHeight = std::max(rowHeight, height);
+                {double(x + kTextAtlasPadding) / kTextAtlasSize, double(y + kTextAtlasPadding) / kTextAtlasSize,
+                 double(width) / kTextAtlasSize, double(height) / kTextAtlasSize}, advance * scale});
+            x += cellWidth; rowHeight = std::max(rowHeight, cellHeight);
         }
     }
     double kern(std::uint32_t a, std::uint32_t b) const {
@@ -110,7 +114,7 @@ private:
 };
 struct FontSet {
     std::vector<std::uint8_t> pixels = std::vector<std::uint8_t>(kTextAtlasSize * kTextAtlasSize, 0);
-    int x = 1, y = 1, rowHeight = 0;
+    int x = 0, y = 0, rowHeight = 0;
     Font regular{kFont, kKerning, pixels, x, y, rowHeight};
     Font bold{kBoldFont, kBoldKerning, pixels, x, y, rowHeight};
     Font oblique{kObliqueFont, kObliqueKerning, pixels, x, y, rowHeight};
