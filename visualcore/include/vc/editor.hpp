@@ -11,7 +11,7 @@
 
 namespace vc {
 
-enum class Tool { Select, Frame, Rect, Ellipse, Hand };
+enum class Tool { Select, Frame, Rect, Ellipse, Hand, Text, Line, Pen, Pencil, Polygon, Star };
 
 enum class PointerButton { Primary = 0, Middle = 1, Secondary = 2 };
 
@@ -29,8 +29,11 @@ struct Modifiers {
 struct Handle {
     int x = 0;
     int y = 0;
+    int point = -1;
+    /// 0 anchor, 1 incoming control, 2 outgoing control.
+    int control = 0;
 
-    [[nodiscard]] bool isNone() const { return x == 0 && y == 0; }
+    [[nodiscard]] bool isNone() const { return x == 0 && y == 0 && point < 0; }
     friend bool operator==(const Handle&, const Handle&) = default;
 };
 
@@ -53,9 +56,17 @@ public:
     void doubleClick(Vec2 screen);
     /// Ends the gesture without applying it, for example when the pointer leaves the canvas.
     void pointerCancel();
+    /// Pen points remain a preview until explicitly finished. Leaving the canvas never commits.
+    bool finishPath();
+    void cancelPath();
+    bool popPathPoint();
+    [[nodiscard]] bool drawingPath() const { return !penPoints_.empty(); }
     void wheel(Vec2 screen, double deltaY);
     /// Applies `patch` to `id` as one undo step, for edits made outside the canvas.
     bool setProps(const Id& id, const NodePatch& patch);
+    bool setComponentDefinition(const Id& component, const ComponentDefinition& definition);
+    /// Imports validated local RGBA pixels as one undo step, into a selected source frame or canvas.
+    std::optional<Id> importImage(const Raster& image, std::string_view name);
     /// Shows `patch` on `id` without recording it, replacing the previous props preview. For live
     /// controls such as a color picker; finish with `commitPropsPreview` or `cancelPropsPreview`.
     /// Anything else that edits the document commits a pending preview first.
@@ -90,7 +101,7 @@ public:
     std::optional<Id> createInstance(const Id& component);
     /// Replaces an instance with ordinary nodes that look the same, as one undo step.
     std::optional<Id> detachInstance(const Id& instance);
-    /// Drops every override of an instance.
+    /// Drops every override of an instance, or only the selected copied layer's local override.
     bool resetOverrides(const Id& instance);
     /// Selects `id` and, if it isn't fully visible in a `viewport` of that screen size, pans to
     /// center it.
@@ -133,7 +144,7 @@ public:
     static constexpr double kLabelGapPx = 4.0;
 
 private:
-    enum class Gesture { None, Pan, Draw, Move, Resize, Marquee };
+    enum class Gesture { None, Pan, Draw, Move, Resize, Marquee, PenCurve, Pencil };
 
     /// A node being moved and where it started, in world space.
     struct Moving {
@@ -145,6 +156,12 @@ private:
     void startDraw(Vec2 world);
     void updateDraw(Vec2 world, Vec2 screen);
     void previewDraw(Vec2 from, Vec2 to);
+    void addPathPoint(Vec2 world);
+    void previewPath(bool cursorPoint);
+    void updatePenCurve(Vec2 world);
+    void updatePencil(Vec2 world);
+    void previewPencil();
+    [[nodiscard]] Vec2 pathCursor(Vec2 world) const;
     void startMove(Vec2 world);
     void beginMoving();
     void updateMove(Vec2 world);
@@ -193,6 +210,13 @@ private:
 
     /// Absolute bounds of the resized node when the gesture started.
     Rect resizeStart_{};
+    bool resizeLineReverse_ = false;
+    Path resizePath_;
+    std::vector<Vec2> penPoints_;
+    std::vector<Vec2> penInHandles_;
+    std::vector<Vec2> penOutHandles_;
+    bool penClosed_ = false;
+    std::vector<Vec2> pencilPoints_;
 };
 
 [[nodiscard]] std::optional<Tool> toolFromName(std::string_view name);

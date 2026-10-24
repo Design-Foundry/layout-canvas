@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -12,16 +13,29 @@
 namespace vc {
 namespace {
 
-constexpr std::array<std::pair<Tool, std::string_view>, 5> kToolNames{{
+constexpr std::array<std::pair<Tool, std::string_view>, 11> kToolNames{{
     {Tool::Select, "select"},
     {Tool::Frame, "frame"},
     {Tool::Rect, "rectangle"},
     {Tool::Ellipse, "ellipse"},
     {Tool::Hand, "hand"},
+    {Tool::Text, "text"},
+    {Tool::Line, "line"},
+    {Tool::Pen, "pen"},
+    {Tool::Pencil, "pencil"},
+    {Tool::Polygon, "polygon"},
+    {Tool::Star, "star"},
 }};
 
 bool isDrawTool(Tool tool) {
-    return tool == Tool::Frame || tool == Tool::Rect || tool == Tool::Ellipse;
+    return tool == Tool::Frame || tool == Tool::Rect || tool == Tool::Ellipse || tool == Tool::Text || tool == Tool::Line || tool == Tool::Polygon || tool == Tool::Star;
+}
+
+Vec2 constrainedLine(Vec2 d) {
+    constexpr double step=3.14159265358979323846/4;
+    const double angle=std::round(std::atan2(d.y,d.x)/step)*step;
+    const double length=std::hypot(d.x,d.y);
+    return {length*std::cos(angle),length*std::sin(angle)};
 }
 
 double distance(Vec2 a, Vec2 b) {
@@ -31,6 +45,29 @@ double distance(Vec2 a, Vec2 b) {
 Node newShape(Tool tool) {
     Node node;
     switch (tool) {
+    case Tool::Pencil:
+        node.type=NodeType::Path; node.name="Pencil"; node.fill=Oklch{0.95,0,0}; node.absolute=true;
+        break;
+    case Tool::Polygon:
+    case Tool::Star:
+        node.type=NodeType::Path; node.name=tool==Tool::Star ? "Star" : "Polygon";
+        node.fill=Oklch{0.89,0,0}; node.absolute=true;
+        break;
+    case Tool::Pen:
+        node.type=NodeType::Path; node.name="Path"; node.fill=Oklch{0.95,0,0}; node.absolute=true;
+        break;
+    case Tool::Line:
+        node.type=NodeType::Line; node.name="Line"; node.fill=Oklch{0.95,0,0}; node.absolute=true;
+        break;
+    case Tool::Text:
+        node.type = NodeType::Text;
+        node.name = "Text";
+        node.text.content = "Texto";
+        node.text.fontSize = 24;
+        node.fill = Oklch{0.95, 0.0, 0.0};
+        node.widthSizing = Sizing::Hug;
+        node.heightSizing = Sizing::Hug;
+        break;
     case Tool::Frame:
         node.type = NodeType::Frame;
         node.name = "Frame";
@@ -89,6 +126,9 @@ std::optional<Id> Editor::addToken(TokenType type) {
         token.identifier = std::string(tokenTypeName(type)) + "-" + std::to_string(n);
     }
     switch (type) {
+    case TokenType::Typography:
+        token.value = TextStyle{16.0, 1.4, 0.0, TextAlign::Left, std::string("inter-regular-v1")};
+        break;
     case TokenType::Color:
         token.value = Oklch{0.6, 0.0, 0.0};
         break;
@@ -147,6 +187,7 @@ bool Editor::deleteMode(const Id& mode) {
 
 void Editor::setActiveMode(const Id& mode) {
     if (mode != activeMode_ && session_.document().findMode(mode)) {
+        cancelPath();
         activeMode_ = mode;
         touch();
     }
@@ -154,6 +195,8 @@ void Editor::setActiveMode(const Id& mode) {
 
 void Editor::setTool(Tool tool) {
     if (tool != tool_) {
+        if (drawingPath()) cancelPath();
+        if (gesture_ != Gesture::None) pointerCancel();
         tool_ = tool;
         touch();
     }
@@ -163,7 +206,7 @@ void Editor::pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers)
     if (gesture_ != Gesture::None) {
         return;
     }
-    settlePropsPreview();
+    if (!drawingPath()) settlePropsPreview();
     modifiers_ = modifiers;
     lastScreen_ = screen;
     downScreen_ = screen;
@@ -174,6 +217,15 @@ void Editor::pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers)
         viewport_.pointerDown(screen);
     } else if (button != PointerButton::Primary) {
         return;
+    } else if (tool_ == Tool::Pen) {
+        addPathPoint(downWorld_);
+    } else if (tool_ == Tool::Pencil) {
+        clearSelection();
+        target_ = session_.newId();
+        drawParent_ = frameAt(session_.document(), downWorld_, activeMode_, {});
+        parentOrigin_ = originOf(drawParent_);
+        pencilPoints_ = {{snap(downWorld_.x),snap(downWorld_.y)}};
+        gesture_ = Gesture::Pencil;
     } else if (isDrawTool(tool_)) {
         startDraw(downWorld_);
     } else if (const Id label = frameLabelAt(screen); !label.isNil()) {
@@ -191,11 +243,15 @@ void Editor::pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers)
 }
 
 void Editor::doubleClick(Vec2 screen) {
+    if (tool_ == Tool::Pen && drawingPath()) {
+        finishPath();
+        return;
+    }
     if (gesture_ != Gesture::None || tool_ != Tool::Select || selection_.size() != 1) {
         return;
     }
     const Document& document = session_.document();
-    for (Id id = hitTest(document, camera_.toWorld(screen), false, activeMode_); !id.isNil();
+    for (Id id = hitTest(document, camera_.toWorld(screen), false, activeMode_,4/camera_.zoom()); !id.isNil();
          id = document.view(id)->parent) {
         if (document.view(id)->parent == selection_[0]) {
             select(id);
@@ -207,6 +263,10 @@ void Editor::doubleClick(Vec2 screen) {
 void Editor::pointerMove(Vec2 screen, Modifiers modifiers) {
     modifiers_ = modifiers;
     lastScreen_ = screen;
+    if (drawingPath() && gesture_ == Gesture::None) {
+        previewPath(true);
+        return;
+    }
     update();
 }
 
@@ -215,7 +275,8 @@ void Editor::setModifiers(Modifiers modifiers) {
         return;
     }
     modifiers_ = modifiers;
-    if (gesture_ == Gesture::Draw || gesture_ == Gesture::Move || gesture_ == Gesture::Resize) {
+    if (drawingPath() && gesture_ == Gesture::None) previewPath(true);
+    if (gesture_ == Gesture::Draw || gesture_ == Gesture::Move || gesture_ == Gesture::Resize || gesture_ == Gesture::PenCurve) {
         update();
     }
 }
@@ -224,6 +285,12 @@ void Editor::update() {
     const Vec2 screen = lastScreen_;
     const Vec2 world = camera_.toWorld(screen);
     switch (gesture_) {
+    case Gesture::PenCurve:
+        updatePenCurve(world);
+        break;
+    case Gesture::Pencil:
+        updatePencil(world);
+        break;
     case Gesture::Pan:
         viewport_.pointerMove(screen);
         break;
@@ -251,12 +318,14 @@ void Editor::pointerUp() {
 }
 
 void Editor::pointerCancel() {
+    cancelPath();
     if (gesture_ == Gesture::Pan) {
         viewport_.pointerUp();
     }
     session_.cancelPreview();
     marquee_.reset();
     gesture_ = Gesture::None;
+    pencilPoints_.clear();
 }
 
 void Editor::wheel(Vec2 screen, double deltaY) {
@@ -264,7 +333,18 @@ void Editor::wheel(Vec2 screen, double deltaY) {
 }
 
 std::vector<OpBody> Editor::propsOps(const Id& id, const NodePatch& patch) const {
+    if (patch.text && patch.textStyle) return {};
+    if (patch.textStyle && *patch.textStyle == TextStyle{}) return {};
     const Document& document = session_.document();
+    const auto textChanges = [](const TextRun& before, const TextRun& after) {
+        TextStyle out;
+        if (before.font != after.font) out.font = after.font;
+        if (before.fontSize != after.fontSize) out.fontSize = after.fontSize;
+        if (before.lineHeight != after.lineHeight) out.lineHeight = after.lineHeight;
+        if (before.letterSpacing != after.letterSpacing) out.letterSpacing = after.letterSpacing;
+        if (before.align != after.align) out.align = after.align;
+        return out;
+    };
     const auto existing = [](const Node& instance, const Id& key) {
         for (const Override& o : instance.overrides) {
             if (o.node == key) return o.patch;
@@ -272,16 +352,37 @@ std::vector<OpBody> Editor::propsOps(const Id& id, const NodePatch& patch) const
         return NodePatch{};
     };
     if (isCopy(id)) {
+        if (patch.typography) return {};
         const Node* instance = document.find(document.ownerOf(id));
         const Id key = document.overrideKeyOf(id);
         NodePatch style = patch;
+        if (patch.text && (document.isTextTarget(document.sourceOf(id)) ||
+                          (!document.view(id)->typography.isNil() && patch.text->content == document.view(id)->text.content))) {
+            if (document.isTextTarget(document.sourceOf(id)) && patch.text->content != document.view(id)->text.content) return {};
+            style.text.reset();
+            const auto changed = textChanges(document.view(id)->text, *patch.text);
+            if (changed != TextStyle{}) style.textStyle = changed;
+        }
         style.type.reset();
         style.component.reset();
         if (!instance || key.isNil() || style == NodePatch{}) return {};
         return {SetOverride{instance->id, key, mergePatch(existing(*instance, key), style)}};
     }
     const Node* node = document.find(id);
+    if (node && patch.text && !node->typography.isNil() && !patch.typography) {
+        if (textChanges(document.view(id)->text, *patch.text) != TextStyle{}) return {};
+        NodePatch adjusted=patch; adjusted.text=node->text; adjusted.text->content=patch.text->content;
+        return {SetProps{id,adjusted}};
+    }
     if (!node || node->type != NodeType::Instance) {
+        if (node && patch.text && document.isTextTarget(id)) {
+            if (patch.text->content != document.view(id)->text.content) return {};
+            NodePatch adjusted = patch; adjusted.text.reset();
+            const auto changed = textChanges(document.view(id)->text, *patch.text);
+            if (changed != TextStyle{}) adjusted.textStyle = changed;
+            if (adjusted == NodePatch{}) return {};
+            return {SetProps{id, adjusted}};
+        }
         return {SetProps{id, patch}};
     }
     NodePatch own;
@@ -297,6 +398,7 @@ std::vector<OpBody> Editor::propsOps(const Id& id, const NodePatch& patch) const
     own.visible = patch.visible;
     own.locked = patch.locked;
     own.component = patch.component;
+    own.componentValues = patch.componentValues;
 
     NodePatch style = patch;
     for (auto* field : {&style.x, &style.y, &style.w, &style.h}) field->reset();
@@ -308,12 +410,14 @@ std::vector<OpBody> Editor::propsOps(const Id& id, const NodePatch& patch) const
     style.visible.reset();
     style.locked.reset();
     style.component.reset();
+    style.componentValues.reset();
     style.type.reset();
 
     std::vector<OpBody> ops;
     if (own != NodePatch{}) ops.push_back(SetProps{id, own});
     if (style != NodePatch{}) {
-        ops.push_back(SetOverride{id, node->component, mergePatch(existing(*node, node->component), style)});
+        const Id root = patch.component.value_or(node->component);
+        ops.push_back(SetOverride{id, root, mergePatch(existing(*node, root), style)});
     }
     return ops;
 }
@@ -330,20 +434,59 @@ bool Editor::setProps(const Id& id, const NodePatch& patch) {
     if (ops.size() == 1) {
         return session_.edit(ops[0]);
     }
-    session_.begin();
-    bool applied = true;
-    for (const OpBody& op : ops) applied = session_.edit(op) && applied;
-    session_.commit();
-    return applied;
+    // Geometry and appearance edits must succeed together (especially when changing a main).
+    if (!session_.preview(ops)) return false;
+    return session_.commitPreview();
 }
 
 bool Editor::previewProps(const Id& id, const NodePatch& patch) {
     if (gesture_ != Gesture::None || patch == NodePatch{}) {
         return false;
     }
+    cancelPath();
     const auto ops = propsOps(id, patch);
     propsPreview_ = !ops.empty() && session_.preview(ops);
     return propsPreview_;
+}
+
+bool Editor::setComponentDefinition(const Id& component, const ComponentDefinition& definition) {
+    if (gesture_ != Gesture::None) return false;
+    settlePropsPreview();
+    return session_.edit(SetComponentDefinition{component, definition});
+}
+
+std::optional<Id> Editor::importImage(const Raster& image, std::string_view name) {
+    if(!validRaster(image)) return std::nullopt;
+    pointerCancel();
+    cancelPropsPreview();
+    Node node;
+    node.id=session_.newId();
+    node.type=NodeType::Image;
+    node.name=name.empty()?"Image":std::string(name);
+    node.image=image;
+    node.absolute=true;
+    node.w=image.width;
+    node.h=image.height;
+    const auto origin=camera_.position();
+    node.x=origin.x+40;
+    node.y=origin.y+40;
+    if(selection_.size()==1) {
+        const auto* parent=session_.document().find(selection_.front());
+        if(parent && (parent->type==NodeType::Frame || parent->type==NodeType::Component)) {
+            if(parent->locked) return std::nullopt;
+            node.parent=parent->id;
+            node.x=20;
+            node.y=20;
+        }
+    }
+    const auto& siblings=session_.document().children(node.parent);
+    const auto last=siblings.empty()?"":session_.document().find(siblings.back())->order;
+    node.order=keyBetween(last,std::nullopt);
+    const auto id=node.id;
+    if(!session_.edit(CreateNode{std::move(node)})) return std::nullopt;
+    select(id);
+    setTool(Tool::Select);
+    return id;
 }
 
 std::optional<Id> Editor::createComponent() {
@@ -457,8 +600,19 @@ std::optional<Id> Editor::detachInstance(const Id& instanceId) {
     std::vector<Node> copies;
     const auto copy = [&](const Id& key, const Id& parent, auto&& self) -> void {
         Node node = *document.view(key);
+        if (!node.typography.isNil()) {
+            const auto value=document.resolveToken(node.typography,activeMode_);
+            if (value) if (const auto* style=std::get_if<TextStyle>(&*value)) {
+                Node inherited=node; NodePatch patch; patch.textStyle=*style; applyPatch(inherited,patch);
+                // A detached source has no component override layer. Bake any
+                // differing typography so detaching cannot change its appearance.
+                if (inherited.text != node.text) node.typography={};
+            }
+        }
         node.id = session_.newId();
         node.parent = parent;
+        node.definition = {};
+        node.componentValues.clear();
         if (node.type == NodeType::Instance) {
             node.type = NodeType::Frame;
             node.component = {};
@@ -471,14 +625,9 @@ std::optional<Id> Editor::detachInstance(const Id& instanceId) {
     copy(instanceId, instance->parent, copy);
     copies.front().order = instance->order;
 
-    session_.begin();
-    bool ok = session_.edit(DeleteNode{instanceId});
-    for (const Node& node : copies) ok = ok && session_.edit(CreateNode{node});
-    session_.commit();
-    if (!ok) {
-        session_.undo();
-        return std::nullopt;
-    }
+    std::vector<OpBody> ops{DeleteNode{instanceId}};
+    for (const Node& node : copies) ops.push_back(CreateNode{node});
+    if (!session_.preview(ops) || !session_.commitPreview()) return std::nullopt;
     select(copies.front().id);
     return copies.front().id;
 }
@@ -499,12 +648,20 @@ void Editor::reveal(const Id& id, Vec2 viewport) {
 }
 
 bool Editor::resetOverrides(const Id& instanceId) {
-    const Node* instance = session_.document().find(instanceId);
+    const Document& document = session_.document();
+    const Id owner = document.ownerOf(instanceId);
+    const bool copy = owner != instanceId;
+    const Node* instance = document.find(copy ? owner : instanceId);
     if (gesture_ != Gesture::None || !instance || instance->type != NodeType::Instance || instance->overrides.empty()) {
         return false;
     }
     settlePropsPreview();
     const std::vector<Override> overrides = instance->overrides;
+    if (copy) {
+        const Id key = document.overrideKeyOf(instanceId);
+        const bool changed = std::any_of(overrides.begin(), overrides.end(), [&](const Override& o) { return o.node == key; });
+        return changed && session_.edit(SetOverride{owner, key, {}});
+    }
     session_.begin();
     for (const Override& o : overrides) session_.edit(SetOverride{instanceId, o.node, {}});
     session_.commit();
@@ -527,6 +684,7 @@ void Editor::cancelPropsPreview() {
 }
 
 void Editor::settlePropsPreview() {
+    cancelPath();
     commitPropsPreview();
 }
 
@@ -550,6 +708,7 @@ bool Editor::nudge(Vec2 delta) {
 }
 
 void Editor::select(const Id& id) {
+    cancelPath();
     if (!exists(id)) {
         return;
     }
@@ -560,6 +719,7 @@ void Editor::select(const Id& id) {
 }
 
 void Editor::clearSelection() {
+    cancelPath();
     if (!selection_.empty()) {
         selection_.clear();
         touch();
@@ -614,6 +774,155 @@ Vec2 Editor::originOf(const Id& parent) const {
     return bounds ? Vec2{bounds->x, bounds->y} : Vec2{};
 }
 
+Vec2 Editor::pathCursor(Vec2 world) const {
+    if (!penPoints_.empty() && modifiers_.shift) {
+        world = penPoints_.back() + constrainedLine(world - penPoints_.back());
+    }
+    return {snap(world.x), snap(world.y)};
+}
+
+void Editor::addPathPoint(Vec2 world) {
+    if (penPoints_.empty()) {
+        clearSelection();
+        target_ = session_.newId();
+        drawParent_ = frameAt(session_.document(), world, activeMode_, {});
+        parentOrigin_ = originOf(drawParent_);
+        penClosed_ = false;
+    } else {
+        // Browser double clicks deliver two pointer-downs before dblclick. Keep one vertex.
+        if (distance(camera_.toScreen(world), camera_.toScreen(penPoints_.back())) < kClickSlopPx) return;
+        if (penPoints_.size() >= 3 &&
+            distance(camera_.toScreen(world), camera_.toScreen(penPoints_.front())) <= kHandleSizePx / 2) {
+            penClosed_ = true;
+            finishPath();
+            return;
+        }
+    }
+    if (penPoints_.size() >= 64) return;
+    const auto point=pathCursor(world);
+    penPoints_.push_back(point);
+    if(!penInHandles_.empty()) {
+        penInHandles_.push_back(point);
+        penOutHandles_.push_back(point);
+    }
+    gesture_ = Gesture::PenCurve;
+    previewPath(false);
+    touch();
+}
+
+void Editor::updatePenCurve(Vec2 world) {
+    if(!drawingPath() || distance(lastScreen_,downScreen_)<kClickSlopPx) return;
+    const auto anchor=penPoints_.back();
+    auto extent=world-anchor;
+    if(modifiers_.shift) extent=constrainedLine(extent);
+    const auto outgoing=Vec2{snap(anchor.x+extent.x),snap(anchor.y+extent.y)};
+    if(penInHandles_.empty()) {penInHandles_=penPoints_;penOutHandles_=penPoints_;}
+    penOutHandles_.back()=outgoing;
+    penInHandles_.back()=anchor-(outgoing-anchor);
+    previewPath(false);
+}
+
+void Editor::previewPath(bool cursorPoint) {
+    if (!drawingPath()) return;
+    Path path;path.points=penPoints_;path.closed=penClosed_;
+    path.inHandles=penInHandles_;path.outHandles=penOutHandles_;
+    if (cursorPoint && path.points.size() < 64) {
+        const auto cursor = pathCursor(camera_.toWorld(lastScreen_));
+        if (distance(cursor, path.points.back()) > 0) {
+            path.points.push_back(cursor);
+            if(!path.inHandles.empty()) {path.inHandles.push_back(cursor);path.outHandles.push_back(cursor);}
+        }
+    }
+    // A first point has a zero-length preview, never a committed singleton path.
+    if (path.points.size() == 1) {path.points.push_back(path.points.front());path.inHandles.clear();path.outHandles.clear();}
+    for (auto* points:{&path.points,&path.inHandles,&path.outHandles})
+        for (auto& point : *points) point = point - parentOrigin_;
+    session_.cancelPreview();
+    const auto& siblings = session_.document().children(drawParent_);
+    const auto last = siblings.empty() ? "" : session_.document().find(siblings.back())->order;
+    Node node = newShape(Tool::Pen);
+    node.id = target_;
+    node.parent = drawParent_;
+    node.order = keyBetween(last, std::nullopt);
+    applyPatch(node, pathGeometry(path));
+    session_.preview(CreateNode{std::move(node)});
+}
+
+bool Editor::finishPath() {
+    if (!drawingPath()) return false;
+    if (penPoints_.size() < 2) {
+        cancelPath();
+        return false;
+    }
+    previewPath(false);
+    const bool committed = session_.commitPreview();
+    const auto id = target_;
+    penPoints_.clear();
+    penInHandles_.clear();
+    penOutHandles_.clear();
+    penClosed_ = false;
+    if(gesture_==Gesture::PenCurve) gesture_=Gesture::None;
+    if (committed) select(id);
+    setTool(Tool::Select);
+    touch();
+    return committed;
+}
+
+void Editor::cancelPath() {
+    if (!drawingPath()) return;
+    penPoints_.clear();
+    penInHandles_.clear();
+    penOutHandles_.clear();
+    penClosed_ = false;
+    if(gesture_==Gesture::PenCurve) gesture_=Gesture::None;
+    session_.cancelPreview();
+    touch();
+}
+
+bool Editor::popPathPoint() {
+    if (!drawingPath()) return false;
+    penPoints_.pop_back();
+    if(!penInHandles_.empty()) {penInHandles_.pop_back();penOutHandles_.pop_back();}
+    if(gesture_==Gesture::PenCurve) gesture_=Gesture::None;
+    if (penPoints_.empty()) session_.cancelPreview();
+    else previewPath(true);
+    touch();
+    return true;
+}
+
+void Editor::updatePencil(Vec2 world) {
+    const Vec2 point{snap(world.x),snap(world.y)};
+    if(pencilPoints_.empty() || distance(point,pencilPoints_.back())==0) return;
+    pencilPoints_.push_back(point);
+    if(pencilPoints_.size()>64) {
+        // Drop the least significant interior sample. Stable ties and fixed input give identical output.
+        std::size_t remove=1;
+        double best=std::numeric_limits<double>::infinity();
+        for(std::size_t i=1;i+1<pencilPoints_.size();++i) {
+            const auto a=pencilPoints_[i-1],b=pencilPoints_[i+1],p=pencilPoints_[i];
+            const auto d=b-a,v=p-a;
+            const double length=d.x*d.x+d.y*d.y;
+            const double t=length>0?std::clamp((v.x*d.x+v.y*d.y)/length,0.0,1.0):0;
+            const double dx=v.x-t*d.x,dy=v.y-t*d.y,error=dx*dx+dy*dy;
+            if(error<best) {best=error;remove=i;}
+        }
+        pencilPoints_.erase(pencilPoints_.begin()+static_cast<std::ptrdiff_t>(remove));
+    }
+    previewPencil();
+}
+
+void Editor::previewPencil() {
+    if(pencilPoints_.size()<2) return;
+    auto points=pencilPoints_;
+    for(auto& point:points) point=point-parentOrigin_;
+    session_.cancelPreview();
+    const auto& siblings=session_.document().children(drawParent_);
+    const auto last=siblings.empty()?"":session_.document().find(siblings.back())->order;
+    auto node=newShape(Tool::Pencil);node.id=target_;node.parent=drawParent_;node.order=keyBetween(last,std::nullopt);
+    applyPatch(node,pathGeometry(points,false));
+    session_.preview(CreateNode{std::move(node)});
+}
+
 void Editor::startDraw(Vec2 world) {
     gesture_ = Gesture::Draw;
     target_ = session_.newId();
@@ -626,7 +935,8 @@ void Editor::updateDraw(Vec2 world, Vec2 screen) {
         return;
     }
     Vec2 extent = world - downWorld_;
-    if (modifiers_.shift) {
+    if (modifiers_.shift && tool_ == Tool::Line) extent=constrainedLine(extent);
+    else if (modifiers_.shift) {
         const double side = std::max(std::abs(extent.x), std::abs(extent.y));
         extent = {std::copysign(side, extent.x), std::copysign(side, extent.y)};
     }
@@ -642,6 +952,11 @@ void Editor::previewDraw(Vec2 from, Vec2 to) {
     node.id = target_;
     node.parent = drawParent_;
     node.order = keyBetween(lastOrder, std::nullopt);
+    if (tool_ == Tool::Line) {
+        applyPatch(node,lineGeometry({snap(from.x)-parentOrigin_.x,snap(from.y)-parentOrigin_.y},
+                                    {snap(to.x)-parentOrigin_.x,snap(to.y)-parentOrigin_.y}));
+        session_.preview(CreateNode{std::move(node)}); return;
+    }
     const double x0 = snap(std::min(from.x, to.x));
     const double y0 = snap(std::min(from.y, to.y));
     const double minSize = pixelSnap_ ? 1.0 : 0.0;
@@ -649,6 +964,17 @@ void Editor::previewDraw(Vec2 from, Vec2 to) {
     node.y = y0 - parentOrigin_.y;
     node.w = std::max(snap(std::max(from.x, to.x)) - x0, minSize);
     node.h = std::max(snap(std::max(from.y, to.y)) - y0, minSize);
+    if(tool_==Tool::Polygon || tool_==Tool::Star) {
+        std::vector<Vec2> points;
+        const int count=tool_==Tool::Star?10:5;
+        for(int i=0;i<count;++i) {
+            const double angle=-3.14159265358979323846/2+2*3.14159265358979323846*i/count;
+            const double radius=(tool_==Tool::Star && i%2)?0.5:1;
+            points.push_back({std::cos(angle)*radius,std::sin(angle)*radius});
+        }
+        node.path=*pathGeometry(points,true).path;
+        node.path.filled=true;
+    }
     session_.preview(CreateNode{std::move(node)});
 }
 
@@ -670,7 +996,7 @@ Id Editor::pickAt(const Id& deepest) const {
 }
 
 void Editor::startMove(Vec2 world) {
-    const Id hit = pickAt(hitTest(session_.document(), world, false, activeMode_));
+    const Id hit = pickAt(hitTest(session_.document(), world, false, activeMode_,4/camera_.zoom()));
     if (hit.isNil()) {
         startMarquee();
         return;
@@ -808,7 +1134,9 @@ void Editor::updateMarquee(Vec2 world) {
     for (const Id& id : document.children(Id{})) {
         const Node& node = *document.find(id);
         if (!node.visible || node.locked) continue;
-        if (worldBounds(document, id, activeMode_)->intersects(area) &&
+        auto bounds=*worldBounds(document,id,activeMode_);
+        if (node.type == NodeType::Line || node.type == NodeType::Path) {const double r=node.lineWidth/2; bounds={bounds.x-r,bounds.y-r,bounds.w+2*r,bounds.h+2*r};}
+        if (bounds.intersects(area) &&
             std::find(picked.begin(), picked.end(), id) == picked.end()) {
             picked.push_back(id);
         }
@@ -822,6 +1150,7 @@ bool Editor::isSelected(const Id& id) const {
 }
 
 void Editor::toggleSelection(const Id& id) {
+    cancelPath();
     if (!exists(id)) {
         return;
     }
@@ -834,6 +1163,7 @@ void Editor::toggleSelection(const Id& id) {
 }
 
 void Editor::setSelection(std::vector<Id> ids) {
+    cancelPath();
     std::erase_if(ids, [this](const Id& id) { return !exists(id); });
     if (ids != selection_) {
         selection_ = std::move(ids);
@@ -861,12 +1191,22 @@ Id Editor::frameLabelAt(Vec2 screen) const {
 void Editor::finish() {
     const Gesture gesture = std::exchange(gesture_, Gesture::None);
     switch (gesture) {
+    case Gesture::PenCurve:
+        break;
+    case Gesture::Pencil:
+        if(pencilPoints_.size()>=2) {
+            previewPencil();
+            if(session_.commitPreview()) select(target_);
+        } else session_.cancelPreview();
+        pencilPoints_.clear();
+        setTool(Tool::Select);
+        break;
     case Gesture::Pan:
         viewport_.pointerUp();
         break;
     case Gesture::Draw:
         if (!session_.hasPreview()) {
-            previewDraw(downWorld_, {downWorld_.x + kDefaultShapeSize, downWorld_.y + kDefaultShapeSize});
+            previewDraw(downWorld_, {downWorld_.x + kDefaultShapeSize, downWorld_.y + (tool_==Tool::Line?0:kDefaultShapeSize)});
         }
         if (session_.commitPreview()) {
             select(target_);
@@ -894,12 +1234,35 @@ std::optional<Rect> Editor::handleBounds() const {
     if (!node || node->locked) {
         return std::nullopt;
     }
+    if ((node->type==NodeType::Line || node->type==NodeType::Path) && !node->absolute) {
+        const auto* parent=session_.document().view(node->parent);
+        if(parent && parent->layout.type!=LayoutType::None) return std::nullopt;
+    }
     return worldBounds(session_.document(), selection_[0], activeMode_);
 }
 
 Handle Editor::handleAt(Vec2 screen) const {
     const auto bounds = handleBounds();
     if (tool_ != Tool::Select || !bounds) {
+        return {};
+    }
+    const Node* selected=session_.document().view(selection_[0]);
+    if (selected && selected->type==NodeType::Path) {
+        const auto path=pathWorldGeometry(*selected,*bounds);
+        for(std::size_t i=0;i<path.points.size();++i) {
+            if(distance(camera_.toScreen(path.points[i]),screen)<=kHandleSizePx/2) return {0,0,static_cast<int>(i),0};
+        }
+        if(!path.inHandles.empty()) for(std::size_t i=0;i<path.points.size();++i) {
+            if(distance(camera_.toScreen(path.inHandles[i]),screen)<=kHandleSizePx/2) return {0,0,static_cast<int>(i),1};
+            if(distance(camera_.toScreen(path.outHandles[i]),screen)<=kHandleSizePx/2) return {0,0,static_cast<int>(i),2};
+        }
+        return {};
+    }
+    if (selected && selected->type==NodeType::Line) {
+        const auto points=lineEndpoints(*selected,*bounds);
+        for(std::size_t i=0;i<2;++i) {
+            if(distance(camera_.toScreen(points[i]),screen)<=kHandleSizePx/2) return {i==0?-1:1,i==0?(selected->lineReverse?1:-1):(selected->lineReverse?-1:1)};
+        }
         return {};
     }
     const Vec2 topLeft = camera_.toScreen({bounds->x, bounds->y});
@@ -926,6 +1289,7 @@ Handle Editor::handleAt(Vec2 screen) const {
 
 std::string_view Editor::cursor() const {
     const auto resizeCursor = [](Handle h) -> std::string_view {
+        if (h.point >= 0) return "move";
         if (h.x * h.y > 0) return "nwse-resize";
         if (h.x * h.y < 0) return "nesw-resize";
         if (h.x != 0) return "ew-resize";
@@ -933,6 +1297,9 @@ std::string_view Editor::cursor() const {
         return "default";
     };
     switch (gesture_) {
+    case Gesture::PenCurve:
+    case Gesture::Pencil:
+        return "crosshair";
     case Gesture::Pan:
         return "grabbing";
     case Gesture::Draw:
@@ -946,7 +1313,7 @@ std::string_view Editor::cursor() const {
         break;
     }
     if (tool_ == Tool::Hand) return "grab";
-    if (isDrawTool(tool_)) return "crosshair";
+    if (isDrawTool(tool_) || tool_ == Tool::Pen || tool_ == Tool::Pencil) return "crosshair";
     return resizeCursor(handleAt(lastScreen_));
 }
 
@@ -955,12 +1322,61 @@ void Editor::startResize(Handle handle) {
     handle_ = handle;
     target_ = selection_[0];
     resizeStart_ = *worldBounds(session_.document(), target_, activeMode_);
+    resizeLineReverse_=session_.document().find(target_)->lineReverse;
+    const auto* node=session_.document().find(target_);
+    resizePath_ = node->type==NodeType::Path ? pathWorldGeometry(*node,resizeStart_) : Path{};
     parentOrigin_ = originOf(session_.document().find(target_)->parent);
 }
 
 void Editor::updateResize(Vec2 world) {
     const Vec2 delta = world - downWorld_;
     const Rect& start = resizeStart_;
+    if (handle_.point >= 0) {
+        auto path=resizePath_;
+        const auto index=static_cast<std::size_t>(handle_.point);
+        if (index>=path.points.size()) return;
+        if(handle_.control==0) {
+            auto moving=path.points[index]+delta;
+            if(modifiers_.shift && path.points.size()>1) {
+                const auto anchor=path.points[index==0 ? 1 : index-1];
+                moving=anchor+constrainedLine(moving-anchor);
+            }
+            moving={snap(moving.x),snap(moving.y)};
+            const auto displacement=moving-path.points[index];
+            path.points[index]=moving;
+            if(!path.inHandles.empty()) {
+                path.inHandles[index]=path.inHandles[index]+displacement;
+                path.outHandles[index]=path.outHandles[index]+displacement;
+            }
+        } else {
+            if(path.inHandles.empty()) return;
+            auto& controls=handle_.control==1?path.inHandles:path.outHandles;
+            auto& opposite=handle_.control==1?path.outHandles:path.inHandles;
+            const auto anchor=path.points[index];
+            auto moving=controls[index]+delta;
+            if(modifiers_.shift) moving=anchor+constrainedLine(moving-anchor);
+            moving={snap(moving.x),snap(moving.y)};
+            controls[index]=moving;
+            if(!modifiers_.alt) opposite[index]=anchor-(moving-anchor);
+        }
+        for(auto* points:{&path.points,&path.inHandles,&path.outHandles})
+            for(auto& point:*points) point=point-parentOrigin_;
+        session_.preview(SetProps{target_,pathGeometry(path)});
+        return;
+    }
+    if (session_.document().find(target_)->type==NodeType::Line) {
+        Node initial; initial.lineReverse=resizeLineReverse_;
+        auto points=lineEndpoints(initial,start);
+        const int moving=handle_.x<0?0:1, fixed=1-moving;
+        const auto center=Vec2{(points[0].x+points[1].x)/2,(points[0].y+points[1].y)/2};
+        const auto anchor=modifiers_.alt?center:points[fixed];
+        auto extent=points[moving]+delta-anchor;
+        if(modifiers_.shift) extent=constrainedLine(extent);
+        points[moving]=anchor+extent;
+        if(modifiers_.alt) points[fixed]=anchor-extent;
+        for(auto& p:points) p={snap(p.x)-parentOrigin_.x,snap(p.y)-parentOrigin_.y};
+        session_.preview(SetProps{target_,lineGeometry(points[0],points[1])}); return;
+    }
     const double startX1 = start.x + start.w;
     const double startY1 = start.y + start.h;
     double x0 = start.x;

@@ -6,7 +6,7 @@
 namespace vc {
 namespace {
 
-constexpr std::array<std::pair<TokenType, std::string_view>, 7> kTypeNames{{
+constexpr std::array<std::pair<TokenType, std::string_view>, 8> kTypeNames{{
     {TokenType::Color, "color"},
     {TokenType::Dimension, "dimension"},
     {TokenType::Duration, "duration"},
@@ -14,6 +14,7 @@ constexpr std::array<std::pair<TokenType, std::string_view>, 7> kTypeNames{{
     {TokenType::Opacity, "opacity"},
     {TokenType::Border, "border"},
     {TokenType::Shadow, "shadow"},
+    {TokenType::Typography, "typography"},
 }};
 
 constexpr std::array<std::pair<Unit, std::string_view>, 7> kUnitNames{{
@@ -107,6 +108,7 @@ std::vector<Unit> unitsFor(TokenType type) {
     case TokenType::Color:
     case TokenType::Border:
     case TokenType::Shadow:
+    case TokenType::Typography:
         break;
     }
     return {};

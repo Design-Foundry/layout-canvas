@@ -56,8 +56,16 @@ private:
     }
 
     /// The size a node wants before its parent stretches or fills it.
-    Size measure(const Node& node) {
+    Size measure(const Node& node, double availableWidth = -1) {
         Size size{node.w, node.h};
+        if (availableWidth >= 0) size.w = availableWidth;
+        if (node.type == NodeType::Text) {
+            const auto text = layoutText(node.text);
+            if (node.widthSizing == Sizing::Hug) size.w = text.width;
+            if (availableWidth >= 0) size.w = availableWidth;
+            size.w = clampWidth(node, size.w);
+            if (node.heightSizing == Sizing::Hug) size.h = node.textWrap ? layoutText(node.text, size.w, true).height : text.height;
+        }
         if (hasAutoLayout(node) && (node.widthSizing == Sizing::Hug || node.heightSizing == Sizing::Hug)) {
             const bool row = node.layout.type == LayoutType::Row;
             const auto& pad = node.layout.padding;
@@ -65,15 +73,32 @@ private:
             double main = 0.0;
             double cross = 0.0;
             const auto children = flowChildren(node);
+            const double innerWidth = std::max(0.0, clampWidth(node, size.w) - length(pad[kStart]) - length(pad[kEnd]));
+            double fillWidth = -1;
+            const bool constrainedWidth = availableWidth >= 0 || node.widthSizing != Sizing::Hug;
+            if (row && constrainedWidth) {
+                double occupied = children.size() > 1 ? gap * (children.size() - 1) : 0;
+                std::size_t fills = 0;
+                for (const Node* child : children) {
+                    if (child->widthSizing == Sizing::Fill) ++fills;
+                    else occupied += measure(*child).w;
+                }
+                if (fills) fillWidth = std::max(0.0, (innerWidth - occupied) / fills);
+            }
             for (const Node* child : children) {
-                const Size childSize = measure(*child);
+                const bool constrained = constrainedWidth &&
+                    (row ? child->widthSizing == Sizing::Fill : child->widthSizing == Sizing::Fill || node.layout.align == Align::Stretch);
+                const Size childSize = measure(*child, constrained ? (row ? fillWidth : innerWidth) : -1);
                 main += row ? childSize.w : childSize.h;
                 cross = std::max(cross, row ? childSize.h : childSize.w);
             }
             if (children.size() > 1) main += gap * static_cast<double>(children.size() - 1);
             const double hugW = (row ? main : cross) + length(pad[kStart]) + length(pad[kEnd]);
             const double hugH = (row ? cross : main) + length(pad[kTop]) + length(pad[kBottom]);
-            if (node.widthSizing == Sizing::Hug) size.w = hugW;
+            if (node.widthSizing == Sizing::Hug && availableWidth < 0) {
+                size.w = hugW;
+                if (clampWidth(node, hugW) != hugW) return measure(node, clampWidth(node, hugW));
+            }
             if (node.heightSizing == Sizing::Hug) size.h = hugH;
         }
         return {clampWidth(node, size.w), clampHeight(node, size.h)};
@@ -116,9 +141,9 @@ private:
         double fixedMain = 0.0;
         int fills = 0;
         for (const Node* child : children) {
-            const Size size = measure(*child);
             const Sizing mainSizing = row ? child->widthSizing : child->heightSizing;
             const Sizing crossSizing = row ? child->heightSizing : child->widthSizing;
+            const Size size = measure(*child, !row && (crossSizing == Sizing::Fill || node.layout.align == Align::Stretch) ? clampWidth(*child, innerW) : -1);
             Item item{child, row ? size.w : size.h, row ? size.h : size.w};
             if (mainSizing == Sizing::Fill) {
                 ++fills;
@@ -144,6 +169,10 @@ private:
             }
         }
 
+        if (row) for (Item& item : items) {
+            if (item.node->type == NodeType::Text && item.node->textWrap && item.node->heightSizing == Sizing::Hug && node.layout.align != Align::Stretch)
+                item.cross = measure(*item.node, item.main).h;
+        }
         const double free = innerMain - fixedMain - gaps;
         double offset = 0.0;
         double spacing = gap;

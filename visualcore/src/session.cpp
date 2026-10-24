@@ -1,6 +1,7 @@
 #include "vc/session.hpp"
 
 #include <utility>
+#include <set>
 
 namespace vc {
 
@@ -22,16 +23,32 @@ namespace {
 
 bool changesStructure(const OpBody& op) {
     if (const auto* set = std::get_if<SetProps>(&op)) {
-        return set->patch.name || set->patch.visible || set->patch.locked || set->patch.type;
+        return set->patch.name || set->patch.visible || set->patch.locked || set->patch.type || set->patch.component || set->patch.componentValues;
     }
     return std::holds_alternative<CreateNode>(op) || std::holds_alternative<DeleteNode>(op) ||
-           std::holds_alternative<MoveNode>(op) || std::holds_alternative<SetOverride>(op);
+           std::holds_alternative<MoveNode>(op) || std::holds_alternative<SetOverride>(op) || std::holds_alternative<SetComponentDefinition>(op);
 }
 
 bool changesTokens(const OpBody& op) {
     return std::holds_alternative<CreateToken>(op) || std::holds_alternative<DeleteToken>(op) ||
            std::holds_alternative<ReplaceToken>(op) || std::holds_alternative<CreateMode>(op) ||
            std::holds_alternative<DeleteMode>(op) || std::holds_alternative<ReplaceMode>(op);
+}
+
+// Token rows also expose whether a resource is referenced by scene data. Refresh
+// that state when bindings change, without rebuilding the token panel on a drag.
+std::set<Id> sceneReferences(const OpBody& op) {
+    std::set<Id> refs;
+    const auto patch=[&](const NodePatch& p) { forEachPatchTokenRef(p,[&](const Id& id,TokenFamilyHint){refs.insert(id);}); };
+    const auto definition=[&](const ComponentDefinition& d) { for(const auto& rule:d.rules) patch(rule.patch); };
+    if (const auto* set=std::get_if<SetProps>(&op)) patch(set->patch);
+    if (const auto* set=std::get_if<SetOverride>(&op)) patch(set->patch);
+    if (const auto* set=std::get_if<SetComponentDefinition>(&op)) definition(set->definition);
+    if (const auto* create=std::get_if<CreateNode>(&op)) {
+        patch(fullPatch(create->node)); definition(create->node.definition);
+        for(const auto& override:create->node.overrides) patch(override.patch);
+    }
+    return refs;
 }
 
 } // namespace
@@ -43,7 +60,7 @@ std::optional<OpBody> Session::apply(const OpBody& op) {
         if (changesStructure(op)) {
             ++structureRevision_;
         }
-        if (changesTokens(op)) {
+        if (changesTokens(op) || sceneReferences(op) != sceneReferences(*inverse)) {
             ++tokenRevision_;
         }
     }
@@ -72,12 +89,15 @@ bool Session::deleteTree(const Id& id) {
     std::vector<Id> ids;
     collectPostOrder(id, ids);
 
-    begin();
-    for (const Id& node : ids) {
-        edit(DeleteNode{node});
+    std::vector<OpBody> ops;
+    for (const Id& node : ids) for (const auto& o : document_.find(node)->overrides)
+        ops.push_back(SetOverride{node, o.node, {}});
+    for (const Id& node : ids) if (!document_.find(node)->componentValues.empty()) {
+        NodePatch p; p.componentValues = ComponentValues{}; ops.push_back(SetProps{node, p});
     }
-    commit();
-    return true;
+    for (const Id& node : ids) if (!document_.find(node)->definition.empty()) ops.push_back(SetComponentDefinition{node, {}});
+    for (const Id& node : ids) ops.push_back(DeleteNode{node});
+    return preview(ops) && commitPreview();
 }
 
 bool Session::deleteMode(const Id& mode) {

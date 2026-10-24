@@ -72,8 +72,14 @@ struct SetOverride {
     friend bool operator==(const SetOverride&, const SetOverride&) = default;
 };
 
+struct SetComponentDefinition {
+    Id component;
+    ComponentDefinition definition;
+    friend bool operator==(const SetComponentDefinition&, const SetComponentDefinition&) = default;
+};
+
 using OpBody = std::variant<CreateNode, DeleteNode, SetProps, MoveNode, CreateToken, DeleteToken, ReplaceToken,
-                            CreateMode, DeleteMode, ReplaceMode, SetOverride>;
+                            CreateMode, DeleteMode, ReplaceMode, SetOverride, SetComponentDefinition>;
 
 /// An edit as it travels to the server: a client-generated id plus the change.
 struct Op {

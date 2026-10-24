@@ -1,4 +1,5 @@
 #include "vc/draw_list.hpp"
+#include "vc/geometry.hpp"
 
 #include <algorithm>
 
@@ -65,6 +66,61 @@ private:
             const Rect local = document_.box(id, mode_);
             const Rect box{origin.x + local.x, origin.y + local.y, local.w, local.h};
             const double alpha = opacity * document_.resolveOpacity(node.opacity, mode_);
+            if(node.type==NodeType::Image) {
+                if(node.fillVisible && box.w>0 && box.h>0 && box.intersects(visibleArea)) {
+                    auto uv=Rect{node.imageCrop.x,node.imageCrop.y,node.imageCrop.w,node.imageCrop.h};auto quad=box;
+                    const double sourceW=uv.w*node.image.width,sourceH=uv.h*node.image.height;
+                    if(node.imageFit=="contain") {
+                        const auto scale=std::min(box.w/sourceW,box.h/sourceH);
+                        quad={box.x+(box.w-sourceW*scale)/2,box.y+(box.h-sourceH*scale)/2,sourceW*scale,sourceH*scale};
+                    } else if(node.imageFit=="cover") {
+                        const auto scale=std::max(box.w/sourceW,box.h/sourceH);
+                        const double width=box.w/scale/node.image.width,height=box.h/scale/node.image.height;
+                        uv={uv.x+(uv.w-width)/2,uv.y+(uv.h-height)/2,width,height};
+                    }
+                    DrawItem item;item.kind=DrawKind::Image;item.quad=quad;item.a.rect=uv;item.color={1,1,1,float(alpha)};item.clip=intersect(clip,box);item.image=&node.image;
+                    out_.push_back(std::move(item));++drawn_;
+                }
+                continue;
+            }
+            if (node.type == NodeType::Path) {
+                const auto quad=grow(box,node.lineWidth/2);
+                if (node.fillVisible && (node.lineWidth>0 || node.path.filled) && quad.intersects(visibleArea)) {
+                    const auto fill=document_.resolveColor(node.fill,mode_);
+                    auto color=fill?withAlpha(*fill,alpha):kUnresolvedColor; if(!fill) color.a=float(alpha);
+                    DrawItem item; item.kind=DrawKind::Path;item.quad=quad;item.color=color;item.clip=clip;
+                    item.strokeWidth=node.lineWidth;item.points=flattenPath(node,box);item.closed=node.path.closed;item.filled=node.path.filled;
+                    out_.push_back(std::move(item));++drawn_;
+                }
+                continue;
+            }
+            if (node.type == NodeType::Line) {
+                const auto quad=grow(box,node.lineWidth/2);
+                if (node.fillVisible && (node.lineWidth>0 || node.path.filled) && quad.intersects(visibleArea)) {
+                    const auto points=lineEndpoints(node,box);
+                    const auto fill=document_.resolveColor(node.fill,mode_);
+                    auto color=fill?withAlpha(*fill,alpha):kUnresolvedColor; if(!fill) color.a=float(alpha);
+                    out_.push_back({DrawKind::Segment,false,quad,{{points[0].x,points[0].y,0,0},{}},{{points[1].x,points[1].y,0,0},{}},color,clip,0,StrokeStyle::Solid,node.lineWidth});
+                    ++drawn_;
+                }
+                continue;
+            }
+            if (node.type == NodeType::Text) {
+                const auto text = layoutText(node.text, box.w, node.textWrap);
+                const auto fill = document_.resolveColor(node.fill, mode_);
+                const Color color = fill ? withAlpha(*fill, alpha) : kUnresolvedColor;
+                const auto textClip = intersect(clip, box);
+                bool visible = false;
+                if (node.fillVisible) for (const auto& glyph : text.glyphs) {
+                    const Rect quad = offset(glyph.box, box.x, box.y);
+                    if (!quad.intersects(intersect(view_, textClip))) continue;
+                    // Glyph items use a.rect for normalized atlas coordinates.
+                    out_.push_back({DrawKind::Glyph, false, quad, {glyph.uv, {}}, {}, color, textClip});
+                    visible = true;
+                }
+                if (visible) ++drawn_;
+                continue;
+            }
             const bool ellipse = node.type == NodeType::Ellipse;
             auto radii = ellipse ? std::array<double, 4>{} : document_.resolveCorners(node, mode_);
             const double maxRadius = std::min(box.w, box.h) / 2.0;

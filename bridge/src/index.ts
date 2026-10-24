@@ -1,11 +1,50 @@
 import type createModule from '../wasm/visualcore.js';
-import type { Camera as CameraHandle, FrameStats, MainModule, Rect, Vec2 } from '../wasm/visualcore.js';
+import type {
+  Camera as CameraHandle,
+  FrameStats,
+  MainModule,
+  Rect,
+  Vec2,
+} from '../wasm/visualcore.js';
 
 export type { FrameStats, Rect, Vec2 };
 
-export type Tool = 'select' | 'frame' | 'rectangle' | 'ellipse' | 'hand';
+export type Tool =
+  | 'select'
+  | 'frame'
+  | 'rectangle'
+  | 'ellipse'
+  | 'hand'
+  | 'text'
+  | 'line'
+  | 'pen'
+  | 'pencil'
+  | 'polygon'
+  | 'star';
 
-export type NodeType = 'frame' | 'rect' | 'ellipse' | 'component' | 'instance';
+export type NodeType =
+  | 'frame'
+  | 'rect'
+  | 'ellipse'
+  | 'component'
+  | 'instance'
+  | 'text'
+  | 'line'
+  | 'path'
+  | 'image';
+
+export interface TextRun {
+  readonly content: string;
+  readonly font:
+    | 'inter-regular-v1'
+    | 'inter-bold-v1'
+    | 'inter-oblique-v1'
+    | 'inter-bold-oblique-v1';
+  readonly fontSize: number;
+  readonly lineHeight: number;
+  readonly letterSpacing: number;
+  readonly align: 'left' | 'center' | 'right';
+}
 
 /** One row of the layers panel. Rows come topmost first, each followed by its children. */
 export interface Layer {
@@ -92,8 +131,75 @@ export interface SizeLimits {
   readonly maxHeight?: Length;
 }
 
+export type ComponentValues = Readonly<Record<string, boolean | string>>;
+export interface BooleanProperty {
+  readonly name: string;
+  readonly target: string;
+  readonly default: boolean;
+}
+export interface VariantAxis {
+  readonly name: string;
+  readonly values: readonly string[];
+  readonly default: string;
+}
+export interface VariantRule {
+  readonly when: Readonly<Record<string, string>>;
+  readonly target: string;
+  readonly patch: NodePatch;
+}
+export interface ComponentDefinition {
+  readonly texts?: readonly TextProperty[];
+  readonly swaps?: readonly InstanceSwapProperty[];
+  readonly properties: readonly BooleanProperty[];
+  readonly axes: readonly VariantAxis[];
+  readonly rules: readonly VariantRule[];
+}
+
+export interface TextProperty {
+  readonly name: string;
+  readonly target: string;
+  readonly default: string;
+}
+
+export interface InstanceSwapProperty {
+  readonly name: string;
+  readonly target: string;
+  readonly default: string;
+  readonly choices: readonly string[];
+}
+
+export interface RasterImage {
+  readonly id: string;
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: string;
+}
+export type ImageFit = 'cover' | 'contain' | 'stretch';
+export interface ImageCrop {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
 /** The properties a node stores. */
 export interface NodeFields {
+  readonly image?: RasterImage;
+  readonly imageFit?: ImageFit;
+  readonly imageCrop?: ImageCrop;
+  readonly path?: {
+    readonly points: readonly { readonly x: number; readonly y: number }[];
+    readonly closed: boolean;
+    readonly inHandles?: readonly { readonly x: number; readonly y: number }[];
+    readonly outHandles?: readonly { readonly x: number; readonly y: number }[];
+    readonly filled?: boolean;
+  };
+  readonly lineWidth?: number;
+  readonly lineReverse?: boolean;
+  readonly typography?: string;
+  readonly textWrap?: boolean;
+  readonly text?: TextRun;
+  readonly componentValues?: ComponentValues;
   readonly name: string;
   readonly x: number;
   readonly y: number;
@@ -118,6 +224,9 @@ export interface NodeFields {
 
 /** A node as the inspector sees it: every field, plus its laid-out box and how its parent places it. */
 export interface NodeProps extends Omit<NodeFields, 'fill'> {
+  readonly textBound?: boolean;
+  readonly swapBound?: boolean;
+  readonly definition?: ComponentDefinition;
   readonly id: string;
   readonly type: NodeType;
   readonly parent?: string;
@@ -131,7 +240,7 @@ export interface NodeProps extends Omit<NodeFields, 'fill'> {
   /** On an instance: the component it copies. */
   readonly component?: string;
   readonly componentName?: string;
-  /** On an instance: how many nodes it overrides. */
+  /** On an instance: overridden-node count. On a copied layer: whether it has its own local override (0/1). */
   readonly overrides?: number;
   /** On a component: true when instances of it exist. */
   readonly inUse?: boolean;
@@ -140,9 +249,22 @@ export interface NodeProps extends Omit<NodeFields, 'fill'> {
 }
 
 /** The properties a `setProps` call may change. Grouped properties are replaced whole. */
-export type NodePatch = Partial<NodeFields>;
+export type NodePatch = Partial<NodeFields> & {
+  readonly component?: string;
+  readonly textStyle?: Partial<Omit<TextRun, 'content'>>;
+};
 
-export type TokenType = 'color' | 'dimension' | 'duration' | 'ratio' | 'opacity' | 'border' | 'shadow';
+export type TokenType =
+  | 'color'
+  | 'dimension'
+  | 'duration'
+  | 'ratio'
+  | 'opacity'
+  | 'border'
+  | 'shadow'
+  | 'typography';
+
+export type TypographyValue = Omit<TextRun, 'content'>;
 
 export type TokenUnit = 'px' | 'rem' | 'em' | 'pt' | 'ms' | 's';
 
@@ -199,6 +321,7 @@ export interface MagnitudeModifier {
 /**
  * A design token as Design Foundry defines it: a primitive `value`, or an alias `source` mapping each
  * mode id to a token id of the same family (the default mode is required). Modifiers apply after.
+ * Local typography composites currently accept complete literal values only.
  */
 export interface TokenDef {
   readonly id: string;
@@ -208,7 +331,7 @@ export interface TokenDef {
   readonly displayName?: string;
   readonly description?: string;
   readonly deprecated?: boolean;
-  readonly value?: TokenColor | TokenMagnitude | TokenBorder | TokenShadow;
+  readonly value?: TokenColor | TokenMagnitude | TokenBorder | TokenShadow | TypographyValue;
   readonly source?: Readonly<Record<string, string>>;
   readonly modifiers?: readonly (ColorModifier | MagnitudeModifier)[];
 }
@@ -239,7 +362,12 @@ export interface ResolvedShadow {
 
 /** A token as the tokens panel shows it: its definition, its value in the active mode, and whether it is in use. */
 export interface TokenRow extends TokenDef {
-  readonly resolved?: ResolvedColor | TokenMagnitude | ResolvedBorder | ResolvedShadow;
+  readonly resolved?:
+    | ResolvedColor
+    | TokenMagnitude
+    | ResolvedBorder
+    | ResolvedShadow
+    | TypographyValue;
   readonly referenced: boolean;
 }
 
@@ -278,7 +406,9 @@ export class VisualCore {
 
   static async load({ baseUrl }: LoadOptions): Promise<VisualCore> {
     const base = new URL(baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`, document.baseURI);
-    const glue: { default: typeof createModule } = await import(/* @vite-ignore */ new URL('visualcore.js', base).href);
+    const glue: { default: typeof createModule } = await import(
+      /* @vite-ignore */ new URL('visualcore.js', base).href
+    );
     const module = await glue.default({
       locateFile: (path: string) => new URL(path, base).href,
     });
@@ -318,6 +448,11 @@ export class VisualCore {
   /** The whole document, to store as a server snapshot. */
   snapshot(): unknown {
     return JSON.parse(this.module.snapshot());
+  }
+
+  /** Laid-out node bounds in the attached canvas's CSS pixels, including camera pan/zoom. */
+  screenBounds(id: string): Rect | null {
+    return JSON.parse(this.module.screenBounds(id));
   }
 
   /** Changes whenever the document, the selection or the tool changes. Cheap to poll every frame. */
@@ -368,6 +503,29 @@ export class VisualCore {
     this.module.setTool(tool);
   }
 
+  importImage(image: RasterImage, name: string): string {
+    return this.module.importImage(JSON.stringify(image), name);
+  }
+
+  /** Ends a Pen gesture as one edit. */
+  finishPath(): boolean {
+    return this.module.finishPath();
+  }
+  /** Cancels the active pointer gesture, preserving the saved document. */
+  cancelGesture(): void {
+    this.module.cancelGesture();
+  }
+
+  cancelPath(): void {
+    this.module.cancelPath();
+  }
+  popPathPoint(): boolean {
+    return this.module.popPathPoint();
+  }
+  drawingPath(): boolean {
+    return this.module.drawingPath();
+  }
+
   node(id: string): NodeProps | null {
     return JSON.parse(this.module.node(id));
   }
@@ -375,6 +533,10 @@ export class VisualCore {
   /** Changes `id` as one undo step. Returns false if the patch was rejected. */
   setProps(id: string, patch: NodePatch): boolean {
     return this.module.setProps(id, JSON.stringify(patch));
+  }
+
+  setComponentDefinition(id: string, definition: ComponentDefinition): boolean {
+    return this.module.setComponentDefinition(id, JSON.stringify(definition));
   }
 
   /**

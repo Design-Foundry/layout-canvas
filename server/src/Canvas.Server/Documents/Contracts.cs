@@ -22,6 +22,8 @@ public sealed record DocumentDetail(
 
 public sealed record CreateDocumentRequest([Required, StringLength(200)] string Name);
 
+public sealed record ImportDocumentRequest([Required, StringLength(200)] string Name, JsonElement Snapshot);
+
 public sealed record RenameDocumentRequest([Required, StringLength(200)] string Name);
 
 /// <summary>An edit produced by the client.</summary>

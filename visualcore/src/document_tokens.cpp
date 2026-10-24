@@ -71,12 +71,14 @@ TokenType familyOf(TokenFamilyHint hint) {
         return TokenType::Border;
     case TokenFamilyHint::Shadow:
         return TokenType::Shadow;
+    case TokenFamilyHint::Typography:
+        return TokenType::Typography;
     }
     return TokenType::Color;
 }
 
 bool isComposite(TokenType type) {
-    return type == TokenType::Border || type == TokenType::Shadow;
+    return type == TokenType::Border || type == TokenType::Shadow || type == TokenType::Typography;
 }
 
 } // namespace
@@ -126,6 +128,10 @@ bool Document::isTokenReferenced(const Id& token) const {
         forEachPatchTokenRef(fullPatch(node), [&](const Id& target, TokenFamilyHint) {
             found = found || target == token;
         });
+        if (found) return true;
+        for (const auto& rule : node.definition.rules) {
+            forEachPatchTokenRef(rule.patch, [&](const Id& target, TokenFamilyHint) { found = found || target == token; });
+        }
         if (found) return true;
     }
     for (const auto& [id, other] : tokens_) {
@@ -370,6 +376,13 @@ bool Document::isValidToken(const Token& token) const {
 
     if (isComposite(token.type)) {
         if (token.isAlias() || !token.modifiers.empty()) return false;
+        if (token.type == TokenType::Typography) {
+            const auto* style = std::get_if<TextStyle>(&*token.value);
+            if (!style || !style->complete() || !style->font) return false;
+            TextRun run; Node node; node.text=run; NodePatch patch; patch.textStyle=*style;
+            applyPatch(node,patch);
+            return validText(node.text);
+        }
         if (token.type == TokenType::Border) {
             const auto* border = std::get_if<BorderValue>(&*token.value);
             return border && refersTo(border->width, TokenType::Dimension) &&

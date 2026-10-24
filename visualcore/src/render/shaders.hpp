@@ -56,6 +56,10 @@ struct Item {
 }
 
 @group(0) @binding(1) var<storage, read> items: array<Item>;
+@group(0) @binding(2) var glyphAtlas: texture_2d<f32>;
+@group(0) @binding(3) var glyphSampler: sampler;
+@group(0) @binding(4) var<storage,read> pathVertices: array<vec4f>;
+@group(0) @binding(5) var imageAtlas: texture_2d_array<f32>;
 
 const kFill = 0u;
 const kStroke = 1u;
@@ -156,6 +160,52 @@ fn fs(in: VertexOut) -> @location(0) vec4f {
     let kind = u32(item.params.x);
     let ellipse = item.params.y > 0.5;
     let sigma = item.params.z;
+    if(kind==8u) {
+        let local=(p-item.quad.xy)/item.quad.zw;
+        if(any(local<vec2f(0.0)) || any(local>vec2f(1.0))) {discard;}
+        let uv=(item.aRect.xy+local*item.aRect.zw)*item.extra.xy;
+        let sampled=textureSampleLevel(imageAtlas,glyphSampler,clamp(uv,vec2f(0.5/512.0),item.extra.xy-vec2f(0.5/512.0)),i32(item.extra.w),0.0);
+        // Uploads are premultiplied so filtering weights colors by their actual coverage.
+        // The shared shape blend uses SrcAlpha, so recover straight RGB after filtering.
+        let rgb=sampled.rgb/max(sampled.a,1e-6);
+        return vec4f(rgb,sampled.a*item.color.a);
+    }
+    if (kind == 7u) {
+        let count=u32(item.extra.y);
+        let flags=u32(item.extra.z);
+        let offset=u32(item.extra.w);
+        if(count<2u) {discard;}
+        var distance=1e30;
+        var inside=false;
+        let segments=count-1u+(flags&1u);
+        for(var i=0u;i<segments;i++) {
+            let a=pathVertices[offset+i].xy;
+            let b=pathVertices[offset+(i+1u)%count].xy;
+            let direction=b-a;
+            let t=clamp(dot(p-a,direction)/max(dot(direction,direction),1e-12),0.0,1.0);
+            distance=min(distance,length(p-a-t*direction));
+            if((a.y>p.y)!=(b.y>p.y)) {
+                if(p.x<a.x+(p.y-a.y)*(b.x-a.x)/(b.y-a.y)) {inside=!inside;}
+            }
+        }
+        var edge=1e30;
+        if(item.params.w>0.0) {edge=distance-item.params.w*0.5;}
+        if((flags&2u)!=0u) {edge=min(edge,select(distance,-distance,inside));}
+        return vec4f(item.color.rgb,item.color.a*coverage(edge));
+    }
+    if (kind == 6u) {
+        let direction = item.bRect.xy - item.aRect.xy;
+        let t = clamp(dot(p-item.aRect.xy,direction)/max(dot(direction,direction),1e-12),0.0,1.0);
+        let segmentDistance = length(p-item.aRect.xy-t*direction)-item.params.w*0.5;
+        return vec4f(item.color.rgb,item.color.a*coverage(segmentDistance));
+    }
+    if (kind == 5u) {
+        let local = (p - item.quad.xy) / item.quad.zw;
+        if (any(local < vec2f(0.0)) || any(local > vec2f(1.0))) { discard; }
+        let uv = item.aRect.xy + local * item.aRect.zw;
+        let mask = textureSampleLevel(glyphAtlas, glyphSampler, uv, 0.0).r;
+        return vec4f(item.color.rgb, item.color.a * mask);
+    }
     let dA = shapeDistance(p, item.aRect, item.aRadii, ellipse);
 
     var alpha = 0.0;

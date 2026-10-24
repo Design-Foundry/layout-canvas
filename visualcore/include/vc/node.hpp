@@ -1,5 +1,9 @@
 #pragma once
+#include "vc/text.hpp"
+#include "vc/math.hpp"
+#include "vc/raster.hpp"
 #include <array>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -17,6 +21,10 @@ enum class NodeType {
     Component,
     /// A copy of a component that follows it, with its own size and overrides.
     Instance,
+    Text,
+    Line,
+    Path,
+    Image,
 };
 
 /// Sides and corners are listed in this order everywhere: top, end, bottom, start (DF's logical
@@ -78,9 +86,46 @@ struct SizeLimits {
     friend bool operator==(const SizeLimits&, const SizeLimits&) = default;
 };
 
+using ComponentValue = std::variant<bool, std::string>;
+using ComponentValues = std::map<std::string, ComponentValue>;
+
 /// A partial update of a node's properties. Unset fields stay as they are. Grouped properties
 /// (stroke, shadows, layout, limits, corner radii) are replaced whole.
+struct Path {
+    std::vector<Vec2> points;
+    bool closed = false;
+    // Empty on straight paths. Otherwise both lists match points, with absolute normalized controls.
+    std::vector<Vec2> inHandles{};
+    std::vector<Vec2> outHandles{};
+    bool filled = false;
+    friend bool operator==(const Path& a, const Path& b) {
+        const auto equal = [](const auto& x,const auto& y) {
+            if(x.size()!=y.size()) return false;
+            for(std::size_t i=0;i<x.size();++i) if(x[i].x!=y[i].x || x[i].y!=y[i].y) return false;
+            return true;
+        };
+        return a.closed==b.closed && a.filled==b.filled && equal(a.points,b.points) && equal(a.inHandles,b.inHandles) && equal(a.outHandles,b.outHandles);
+    }
+};
+[[nodiscard]] bool validPath(const Path& path);
+
+struct ImageCrop : Rect {
+    ImageCrop() : Rect{0,0,1,1} {}
+    ImageCrop(double x,double y,double w,double h) : Rect{x,y,w,h} {}
+    friend bool operator==(const ImageCrop& a,const ImageCrop& b){return a.x==b.x&&a.y==b.y&&a.w==b.w&&a.h==b.h;}
+};
 struct NodePatch {
+    std::optional<Raster> image;
+    std::optional<std::string> imageFit;
+    std::optional<ImageCrop> imageCrop;
+    std::optional<Path> path;
+    std::optional<double> lineWidth;
+    std::optional<bool> lineReverse;
+    /// Source text style binding. Nil clears the binding; copied-layer binding changes are refused.
+    std::optional<Id> typography;
+    std::optional<TextRun> text;
+    std::optional<bool> textWrap;
+    std::optional<TextStyle> textStyle;
     std::optional<std::string> name;
     std::optional<double> x;
     std::optional<double> y;
@@ -105,8 +150,55 @@ struct NodePatch {
     std::optional<NodeType> type;
     /// For instances: swaps the component they copy.
     std::optional<Id> component;
+    /// Explicit declared property/axis values on an instance; empty restores defaults.
+    std::optional<ComponentValues> componentValues;
 
     friend bool operator==(const NodePatch&, const NodePatch&) = default;
+};
+
+struct BooleanProperty {
+    std::string name;
+    Id target;
+    bool defaultValue = true;
+    friend bool operator==(const BooleanProperty&, const BooleanProperty&) = default;
+};
+
+struct VariantAxis {
+    std::string name;
+    std::vector<std::string> values;
+    std::string defaultValue;
+    friend bool operator==(const VariantAxis&, const VariantAxis&) = default;
+};
+
+struct InstanceSwapProperty {
+    std::string name;
+    Id target;
+    Id defaultComponent;
+    std::vector<Id> choices;
+    friend bool operator==(const InstanceSwapProperty&, const InstanceSwapProperty&) = default;
+};
+
+struct VariantRule {
+    std::map<std::string, std::string> when;
+    Id target;
+    NodePatch patch;
+    friend bool operator==(const VariantRule&, const VariantRule&) = default;
+};
+
+struct ComponentDefinition {
+    std::vector<BooleanProperty> properties;
+    std::vector<VariantAxis> axes;
+    std::vector<VariantRule> rules;
+    std::vector<InstanceSwapProperty> swaps;
+    struct TextProperty {
+        std::string name;
+        Id target;
+        std::string defaultValue;
+        friend bool operator==(const TextProperty&, const TextProperty&) = default;
+    };
+    std::vector<TextProperty> texts;
+    [[nodiscard]] bool empty() const { return properties.empty() && axes.empty() && rules.empty() && swaps.empty() && texts.empty(); }
+    friend bool operator==(const ComponentDefinition&, const ComponentDefinition&) = default;
 };
 
 /// An instance's changes to one node of its component.
@@ -118,6 +210,15 @@ struct Override {
 };
 
 struct Node {
+    Raster image;
+    std::string imageFit = "cover";
+    ImageCrop imageCrop;
+    Path path;
+    double lineWidth = 2.0;
+    bool lineReverse = false;
+    Id typography;
+    TextRun text;
+    bool textWrap = false;
     Id id;
     NodeType type = NodeType::Rect;
     /// Nil for top-level nodes.
@@ -158,6 +259,8 @@ struct Node {
     Id component;
     /// For instances: property changes to the component's nodes, sorted by node id.
     std::vector<Override> overrides;
+    ComponentDefinition definition;
+    ComponentValues componentValues;
 
     friend bool operator==(const Node&, const Node&) = default;
 };
@@ -178,11 +281,12 @@ NodePatch applyPatch(Node& node, const NodePatch& patch);
 /// instances (whose children are copies of their component's).
 [[nodiscard]] bool isContainer(NodeType type);
 
-enum class TokenFamilyHint { Color, Dimension, Opacity, Border, Shadow };
+enum class TokenFamilyHint { Color, Dimension, Opacity, Border, Shadow, Typography };
 
 /// Calls `fn(tokenId, expectedFamily)` for every token a patch refers to.
 template <typename Fn>
 void forEachPatchTokenRef(const NodePatch& patch, Fn&& fn) {
+    if (patch.typography && !patch.typography->isNil()) fn(*patch.typography, TokenFamilyHint::Typography);
     const auto visit = [&](const auto& value, TokenFamilyHint family) {
         if (const auto* ref = std::get_if<TokenRef>(&value)) fn(ref->token, family);
     };

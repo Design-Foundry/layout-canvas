@@ -63,6 +63,8 @@ public:
     [[nodiscard]] Id overrideKeyOf(const Id& key) const;
     /// True if an instance uses `component`.
     [[nodiscard]] bool isComponentUsed(const Id& component) const;
+    [[nodiscard]] bool isSwapTarget(const Id& id) const;
+    [[nodiscard]] bool isTextTarget(const Id& id) const;
 
     /// The node's box relative to its parent after auto layout, in `mode`. Cached until the next
     /// edit or a different mode.
@@ -107,6 +109,12 @@ private:
     std::optional<OpBody> deleteMode(const DeleteMode& op);
     std::optional<OpBody> replaceMode(const ReplaceMode& op);
     std::optional<OpBody> setOverride(const SetOverride& op);
+    std::optional<OpBody> setComponentDefinition(const SetComponentDefinition& op);
+    [[nodiscard]] bool validDefinition(const Id& component, const ComponentDefinition& definition) const;
+    [[nodiscard]] bool validComponentValues(const ComponentDefinition& definition, const ComponentValues& values) const;
+    [[nodiscard]] bool definitionTargets(const Id& id) const;
+    [[nodiscard]] bool hasDependentOverrides(const Id& component) const;
+    [[nodiscard]] bool swapValuesWouldStrandOverrides(const Node& instance, const ComponentValues& values) const;
 
     /// The component `id` sits in (itself if it is one), or nil.
     [[nodiscard]] Id enclosingComponent(const Id& id) const;
@@ -122,6 +130,8 @@ private:
     struct OverrideLayer {
         const std::vector<Override>* overrides = nullptr;
         Id prefix;
+        const ComponentDefinition* definition = nullptr;
+        const ComponentValues* values = nullptr;
     };
     void expand(const Id& source, const Id& key, const Id& parent, const Id& owner,
                 const std::vector<OverrideLayer>& layers, int depth) const;

@@ -41,20 +41,22 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
         return documents;
     }
 
-    public async Task<DocumentSummary> CreateAsync(string name, CancellationToken ct)
+    public async Task<DocumentSummary> CreateAsync(string name, CancellationToken ct, string? snapshot = null)
     {
         var now = clock.GetUtcNow();
-        var document = new DocumentSummary(Guid.CreateVersion7(now), name.Trim(), now, now, 0);
+        var document = new DocumentSummary(Guid.CreateVersion7(now), name.Trim(), now, now, snapshot is null ? 0 : 1);
 
         await using var connection = await database.OpenAsync(ct);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO documents (id, name, created_at, updated_at)
-            VALUES ($id, $name, $now, $now)
+            INSERT INTO documents (id, name, created_at, updated_at, head_seq, snapshot_seq, snapshot)
+            VALUES ($id, $name, $now, $now, $seq, $seq, $snapshot)
             """;
         command.Parameters.AddWithValue("$id", Key(document.Id));
         command.Parameters.AddWithValue("$name", document.Name);
         command.Parameters.AddWithValue("$now", Timestamp(now));
+        command.Parameters.AddWithValue("$seq", document.HeadSeq);
+        command.Parameters.AddWithValue("$snapshot", (object?)snapshot ?? DBNull.Value);
         await command.ExecuteNonQueryAsync(ct);
 
         return document;

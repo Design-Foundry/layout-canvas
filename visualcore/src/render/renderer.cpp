@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,6 +45,7 @@ struct GpuItem {
     /// stroke style, unused.
     float extra[4];
 };
+static_assert(sizeof(GpuItem) == 144, "GpuItem must match the WGSL Item storage stride");
 
 constexpr double kUnbounded = 1e30;
 constexpr Oklch kSelectionColor{0.62, 0.19, 255.0};
@@ -101,11 +103,20 @@ struct Renderer::State {
     wgpu::RenderPipeline shapesPipeline;
     wgpu::Buffer frameBuffer;
     wgpu::Buffer shapesBuffer;
+    wgpu::Buffer pointsBuffer;
+    std::size_t pointsCapacity = 0;
     std::size_t shapesCapacity = 0;
     wgpu::BindGroup bindGroup;
+    wgpu::Texture glyphTexture;
+    wgpu::TextureView glyphView;
+    wgpu::Texture imageTexture;
+    wgpu::TextureView imageView;
+    std::vector<std::string> cachedImages;
+    wgpu::Sampler glyphSampler;
 
     std::vector<DrawItem> drawItems;
     std::vector<GpuItem> instances;
+    std::vector<std::array<float,4>> pathVertices;
     Rect view;
     Vec2 origin;
 
@@ -121,11 +132,12 @@ struct Renderer::State {
     void requestDevice();
     void onDevice();
     void createPipelines();
-    void ensureShapesCapacity(std::size_t count);
+    void ensureShapesCapacity(std::size_t count,std::size_t pointCount = 1);
     void startLoop();
     bool resizeIfNeeded();
     void writeFrameUniform();
     void buildInstances();
+    void uploadImages();
     void addSelectionOutlines();
     void applyCursor();
     bool frame(double time);
@@ -215,16 +227,49 @@ void Renderer::State::onDevice() {
 }
 
 void Renderer::State::createPipelines() {
-    wgpu::BindGroupLayoutEntry entries[2]{};
+    wgpu::TextureDescriptor textureDesc{};
+    textureDesc.size = {kTextAtlasSize, kTextAtlasSize, 1};
+    textureDesc.format = wgpu::TextureFormat::R8Unorm;
+    textureDesc.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+    glyphTexture = device.CreateTexture(&textureDesc);
+    glyphView = glyphTexture.CreateView();
+    wgpu::SamplerDescriptor samplerDesc{};
+    samplerDesc.magFilter = wgpu::FilterMode::Linear;
+    samplerDesc.minFilter = wgpu::FilterMode::Linear;
+    glyphSampler = device.CreateSampler(&samplerDesc);
+    wgpu::TexelCopyTextureInfo destination{}; destination.texture = glyphTexture;
+    wgpu::TexelCopyBufferLayout dataLayout{}; dataLayout.bytesPerRow = kTextAtlasSize; dataLayout.rowsPerImage = kTextAtlasSize;
+    const wgpu::Extent3D atlasSize{kTextAtlasSize, kTextAtlasSize, 1};
+    const auto pixels = textAtlas();
+    device.GetQueue().WriteTexture(&destination, pixels.data(), pixels.size(), &dataLayout, &atlasSize);
+
+    wgpu::TextureDescriptor imageDesc{};imageDesc.size={512,512,8};imageDesc.format=wgpu::TextureFormat::RGBA8Unorm;
+    imageDesc.usage=wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+    imageTexture=device.CreateTexture(&imageDesc);
+    wgpu::TextureViewDescriptor imageViewDesc{};imageViewDesc.dimension=wgpu::TextureViewDimension::e2DArray;
+    imageView=imageTexture.CreateView(&imageViewDesc);
+    wgpu::BindGroupLayoutEntry entries[6]{};
     entries[0].binding = 0;
     entries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
     entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
     entries[1].binding = 1;
     entries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
     entries[1].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+    entries[2].binding = 2;
+    entries[2].visibility = wgpu::ShaderStage::Fragment;
+    entries[2].texture.sampleType = wgpu::TextureSampleType::Float;
+    entries[2].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+    entries[3].binding = 3;
+    entries[3].visibility = wgpu::ShaderStage::Fragment;
+    entries[3].sampler.type = wgpu::SamplerBindingType::Filtering;
+    entries[4].binding = 4;
+    entries[4].visibility = wgpu::ShaderStage::Fragment;
+    entries[4].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+    entries[5].binding=5;entries[5].visibility=wgpu::ShaderStage::Fragment;
+    entries[5].texture.sampleType=wgpu::TextureSampleType::Float;entries[5].texture.viewDimension=wgpu::TextureViewDimension::e2DArray;
 
     wgpu::BindGroupLayoutDescriptor layoutDesc{};
-    layoutDesc.entryCount = 2;
+    layoutDesc.entryCount = 6;
     layoutDesc.entries = entries;
     bindGroupLayout = device.CreateBindGroupLayout(&layoutDesc);
 
@@ -270,28 +315,27 @@ void Renderer::State::createPipelines() {
     frameBuffer = device.CreateBuffer(&frameDesc);
 }
 
-void Renderer::State::ensureShapesCapacity(std::size_t count) {
-    if (count <= shapesCapacity) {
-        return;
+void Renderer::State::ensureShapesCapacity(std::size_t count,std::size_t pointCount) {
+    count=std::max(count,std::size_t{1});pointCount=std::max(pointCount,std::size_t{1});
+    if(count<=shapesCapacity && pointCount<=pointsCapacity) return;
+    wgpu::BufferDescriptor desc{};desc.usage=wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    if(count>shapesCapacity) {
+        shapesCapacity=std::max(count,shapesCapacity*2);
+        desc.size=shapesCapacity*sizeof(GpuItem);shapesBuffer=device.CreateBuffer(&desc);
     }
-    shapesCapacity = std::max(count, shapesCapacity * 2);
-
-    wgpu::BufferDescriptor desc{};
-    desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
-    desc.size = shapesCapacity * sizeof(GpuItem);
-    shapesBuffer = device.CreateBuffer(&desc);
-
-    wgpu::BindGroupEntry entries[2]{};
-    entries[0].binding = 0;
-    entries[0].buffer = frameBuffer;
-    entries[1].binding = 1;
-    entries[1].buffer = shapesBuffer;
-
-    wgpu::BindGroupDescriptor groupDesc{};
-    groupDesc.layout = bindGroupLayout;
-    groupDesc.entryCount = 2;
-    groupDesc.entries = entries;
-    bindGroup = device.CreateBindGroup(&groupDesc);
+    if(pointCount>pointsCapacity) {
+        pointsCapacity=std::max(pointCount,pointsCapacity*2);
+        desc.size=pointsCapacity*sizeof(std::array<float,4>);pointsBuffer=device.CreateBuffer(&desc);
+    }
+    wgpu::BindGroupEntry entries[6]{};
+    entries[0].binding=0;entries[0].buffer=frameBuffer;
+    entries[1].binding=1;entries[1].buffer=shapesBuffer;
+    entries[2].binding=2;entries[2].textureView=glyphView;
+    entries[3].binding=3;entries[3].sampler=glyphSampler;
+    entries[4].binding=4;entries[4].buffer=pointsBuffer;
+    entries[5].binding=5;entries[5].textureView=imageView;
+    wgpu::BindGroupDescriptor groupDesc{};groupDesc.layout=bindGroupLayout;groupDesc.entryCount=6;groupDesc.entries=entries;
+    bindGroup=device.CreateBindGroup(&groupDesc);
 }
 
 void Renderer::State::startLoop() {
@@ -350,13 +394,39 @@ void Renderer::State::writeFrameUniform() {
     device.GetQueue().WriteBuffer(frameBuffer, 0, &uniform, sizeof(uniform));
 }
 
+void Renderer::State::uploadImages() {
+    // Content hashes make immutable pixel assets share one layer across instances and crops.
+    std::map<std::string,const Raster*> used;
+    for(const auto& item:drawItems) if(item.image) used.emplace(item.image->id,item.image);
+    std::vector<std::string> ids;for(const auto& [id,image]:used) ids.push_back(id);
+    if(ids==cachedImages) return;
+    std::size_t layer=0;
+    for(const auto& [id,image]:used) {
+        if(layer>=8) break; // Document validation enforces the same limit before rendering.
+        const auto pixels=decodeRaster(*image);
+        std::vector<std::uint8_t> padded(512*512*4,0);
+        if(pixels) {
+            const auto upload=premultiplyRasterPixels(*pixels);
+            for(int row=0;row<image->height;++row)
+                std::copy_n(upload.data()+std::size_t(row)*image->width*4,image->width*4,padded.data()+std::size_t(row)*512*4);
+        }
+        wgpu::TexelCopyTextureInfo destination{};destination.texture=imageTexture;destination.origin={0,0,uint32_t(layer)};
+        wgpu::TexelCopyBufferLayout layout{};layout.bytesPerRow=512*4;layout.rowsPerImage=512;
+        const wgpu::Extent3D size{512,512,1};device.GetQueue().WriteTexture(&destination,padded.data(),padded.size(),&layout,&size);
+        ++layer;
+    }
+    cachedImages=std::move(ids);
+}
+
 void Renderer::State::buildInstances() {
     view = camera.visibleWorld({cssWidth, cssHeight});
     origin = camera.position();
     stats.visible = buildDrawList(document, view, editor.activeMode(), drawItems);
     addSelectionOutlines();
+    uploadImages();
 
     instances.clear();
+    pathVertices.clear();
     instances.reserve(drawItems.size());
     const auto box = [this](const Rect& r, float out[4]) {
         out[0] = float(r.x + r.w / 2.0 - origin.x);
@@ -382,6 +452,10 @@ void Renderer::State::buildInstances() {
         gpu.clip[2] = float(item.clip.x + item.clip.w - origin.x);
         gpu.clip[3] = float(item.clip.y + item.clip.h - origin.y);
         box(item.a.rect, gpu.aRect);
+        if (item.kind == DrawKind::Glyph || item.kind == DrawKind::Image) {
+            gpu.aRect[0] = float(item.a.rect.x); gpu.aRect[1] = float(item.a.rect.y);
+            gpu.aRect[2] = float(item.a.rect.w); gpu.aRect[3] = float(item.a.rect.h);
+        }
         radii(item.a.radii, gpu.aRadii);
         box(item.b.rect, gpu.bRect);
         radii(item.b.radii, gpu.bRadii);
@@ -390,10 +464,19 @@ void Renderer::State::buildInstances() {
         gpu.params[2] = float(item.sigma);
         gpu.params[3] = float(item.strokeWidth);
         gpu.extra[0] = float(static_cast<int>(item.style));
+        gpu.extra[1]=float(item.points.size());
+        gpu.extra[2]=float((item.closed?1:0)+(item.filled?2:0));
+        gpu.extra[3]=float(pathVertices.size());
+        for(const auto p:item.points) pathVertices.push_back({float(p.x-origin.x),float(p.y-origin.y),0,0});
+        if(item.image) {
+            gpu.extra[0]=float(item.image->width)/512.f;gpu.extra[1]=float(item.image->height)/512.f;
+            gpu.extra[3]=float(std::find(cachedImages.begin(),cachedImages.end(),item.image->id)-cachedImages.begin());
+        }
         instances.push_back(gpu);
     }
 
-    ensureShapesCapacity(instances.size());
+    ensureShapesCapacity(instances.size(),pathVertices.size());
+    if(!pathVertices.empty()) device.GetQueue().WriteBuffer(pointsBuffer,0,pathVertices.data(),pathVertices.size()*sizeof(std::array<float,4>));
     if (!instances.empty()) {
         device.GetQueue().WriteBuffer(shapesBuffer, 0, instances.data(), instances.size() * sizeof(GpuItem));
     }
@@ -427,7 +510,17 @@ void Renderer::State::addSelectionOutlines() {
     };
     for (const Id& id : editor.selection()) {
         if (const auto bounds = worldBounds(document, id, mode)) {
-            drawItems.push_back({DrawKind::Outline, false, *bounds, {*bounds, {}}, {}, colorOf(id), kNoClip});
+            const auto* node=document.view(id);
+            if(node && node->type==NodeType::Line) {
+                const auto p=lineEndpoints(*node,*bounds); const double width=1/camera.zoom(),r=width/2;
+                const Rect quad{bounds->x-r,bounds->y-r,bounds->w+width,bounds->h+width};
+                drawItems.push_back({DrawKind::Segment,false,quad,{{p[0].x,p[0].y,0,0},{}},{{p[1].x,p[1].y,0,0},{}},colorOf(id),kNoClip,0,StrokeStyle::Solid,width});
+            } else if(node && node->type==NodeType::Path) {
+                const double width=1/camera.zoom(),r=width/2;
+                DrawItem item;item.kind=DrawKind::Path;item.quad={bounds->x-r,bounds->y-r,bounds->w+width,bounds->h+width};
+                item.color=colorOf(id);item.clip=kNoClip;item.strokeWidth=width;item.points=flattenPath(*node,*bounds);item.closed=node->path.closed;
+                drawItems.push_back(std::move(item));
+            } else drawItems.push_back({DrawKind::Outline, false, *bounds, {*bounds, {}}, {}, colorOf(id), kNoClip});
         }
     }
 
@@ -439,13 +532,29 @@ void Renderer::State::addSelectionOutlines() {
     const double inner = outer - 2.0 / camera.zoom();
     const Color white{1.0f, 1.0f, 1.0f, 1.0f};
     const Color handle = editor.selection().size() == 1 ? colorOf(editor.selection()[0]) : color;
-    for (double x : {bounds->x, bounds->x + bounds->w}) {
-        for (double y : {bounds->y, bounds->y + bounds->h}) {
+    std::vector<Vec2> points;
+    const auto* node=document.view(editor.selection()[0]);
+    if(node && node->type==NodeType::Line) {const auto ends=lineEndpoints(*node,*bounds);points.assign(ends.begin(),ends.end());}
+    else if(node && node->type==NodeType::Path) {
+        const auto path=pathWorldGeometry(*node,*bounds);points=path.points;
+        for(std::size_t i=0;i<path.inHandles.size();++i) for(const auto p:{path.inHandles[i],path.outHandles[i]}) {
+            const auto anchor=points[i];
+            if(std::hypot(p.x-anchor.x,p.y-anchor.y)<1e-12) continue;
+            const double width=1/camera.zoom(),radius=width/2;
+            const Rect quad{std::min(p.x,anchor.x)-radius,std::min(p.y,anchor.y)-radius,std::abs(p.x-anchor.x)+width,std::abs(p.y-anchor.y)+width};
+            drawItems.push_back({DrawKind::Segment,false,quad,{{anchor.x,anchor.y,0,0},{}},{{p.x,p.y,0,0},{}},handle,kNoClip,0,StrokeStyle::Solid,width});
+            const Rect border{p.x-outer/2,p.y-outer/2,outer,outer},fill{p.x-inner/2,p.y-inner/2,inner,inner};
+            drawItems.push_back({DrawKind::Fill,true,border,{border,{}},{},handle,kNoClip});
+            drawItems.push_back({DrawKind::Fill,true,fill,{fill,{}},{},white,kNoClip});
+        }
+    }
+    else for(double x:{bounds->x,bounds->x+bounds->w}) for(double y:{bounds->y,bounds->y+bounds->h}) points.push_back({x,y});
+    for (const auto& point:points) {
+            const auto [x,y]=point;
             const Rect border{x - outer / 2, y - outer / 2, outer, outer};
             const Rect fill{x - inner / 2, y - inner / 2, inner, inner};
             drawItems.push_back({DrawKind::Fill, false, border, {border, {}}, {}, handle, kNoClip});
             drawItems.push_back({DrawKind::Fill, false, fill, {fill, {}}, {}, white, kNoClip});
-        }
     }
 }
 
