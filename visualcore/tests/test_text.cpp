@@ -288,6 +288,27 @@ TEST_CASE("Wrapped Fill text remeasures before column placement and row Hug heig
     }
 }
 
+TEST_CASE("A Fill-width Hug-height container in a row remeasures its wrapped text at the assigned width") {
+    Session session{IdGenerator{89}};
+    Node row; row.id=session.newId(); row.type=NodeType::Frame; row.order="a0";
+    row.w=160; row.heightSizing=Sizing::Hug; row.layout.type=LayoutType::Row; row.layout.gap=10.;
+    REQUIRE(session.edit(CreateNode{row}));
+    Node fixed; fixed.id=session.newId(); fixed.parent=row.id; fixed.order="a0"; fixed.w=50; fixed.h=10;
+    REQUIRE(session.edit(CreateNode{fixed}));
+    Node box; box.id=session.newId(); box.parent=row.id; box.type=NodeType::Frame; box.order="a1";
+    box.w=400; box.widthSizing=Sizing::Fill; box.heightSizing=Sizing::Hug; box.layout.type=LayoutType::Column;
+    REQUIRE(session.edit(CreateNode{box}));
+    Node text; text.id=session.newId(); text.parent=box.id; text.type=NodeType::Text; text.order="a0";
+    text.text.content="Uno dos tres cuatro cinco seis siete"; text.textWrap=true;
+    text.w=400; text.widthSizing=Sizing::Fill; text.heightSizing=Sizing::Hug;
+    REQUIRE(session.edit(CreateNode{text}));
+    const auto expected=layoutText(text.text,100,true).height;
+    REQUIRE(expected > layoutText(text.text,400,true).height);
+    REQUIRE_THAT(session.document().box(box.id).w, WithinAbs(100,1e-8));
+    REQUIRE_THAT(session.document().box(box.id).h, WithinAbs(expected,1e-8));
+    REQUIRE_THAT(session.document().box(row.id).h, WithinAbs(expected,1e-8));
+}
+
 TEST_CASE("Bundled bold uses a distinct trusted face with its own metrics, glyphs and kerning") {
     TextRun regular; regular.content="Continuar: José";
     auto bold=regular; bold.font="inter-bold-v1";

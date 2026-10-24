@@ -1,6 +1,7 @@
 #include "vc/layout.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <vector>
 #include "vc/document.hpp"
 
@@ -76,19 +77,22 @@ private:
             const double innerWidth = std::max(0.0, clampWidth(node, size.w) - length(pad[kStart]) - length(pad[kEnd]));
             double fillWidth = -1;
             const bool constrainedWidth = availableWidth >= 0 || node.widthSizing != Sizing::Hug;
+            std::vector<std::optional<Size>> measured(children.size());
             if (row && constrainedWidth) {
                 double occupied = children.size() > 1 ? gap * (children.size() - 1) : 0;
                 std::size_t fills = 0;
-                for (const Node* child : children) {
-                    if (child->widthSizing == Sizing::Fill) ++fills;
-                    else occupied += measure(*child).w;
+                for (std::size_t i = 0; i < children.size(); ++i) {
+                    if (children[i]->widthSizing == Sizing::Fill) ++fills;
+                    else occupied += (measured[i] = measure(*children[i]))->w;
                 }
                 if (fills) fillWidth = std::max(0.0, (innerWidth - occupied) / fills);
             }
-            for (const Node* child : children) {
+            for (std::size_t i = 0; i < children.size(); ++i) {
+                const Node* child = children[i];
                 const bool constrained = constrainedWidth &&
                     (row ? child->widthSizing == Sizing::Fill : child->widthSizing == Sizing::Fill || node.layout.align == Align::Stretch);
-                const Size childSize = measure(*child, constrained ? (row ? fillWidth : innerWidth) : -1);
+                const Size childSize = constrained ? measure(*child, row ? fillWidth : innerWidth)
+                    : measured[i] ? *measured[i] : measure(*child);
                 main += row ? childSize.w : childSize.h;
                 cross = std::max(cross, row ? childSize.h : childSize.w);
             }
@@ -170,7 +174,7 @@ private:
         }
 
         if (row) for (Item& item : items) {
-            if (item.node->type == NodeType::Text && item.node->textWrap && item.node->heightSizing == Sizing::Hug && node.layout.align != Align::Stretch)
+            if (item.node->widthSizing == Sizing::Fill && item.node->heightSizing == Sizing::Hug && node.layout.align != Align::Stretch)
                 item.cross = measure(*item.node, item.main).h;
         }
         const double free = innerMain - fixedMain - gaps;
