@@ -1,4 +1,4 @@
-# canvas
+# layout-canvas
 
 Design canvas in the spirit of Figma, with native editable components, typography,
 vectors, drawing tools and local raster images. See [editor capabilities and limits](docs/editor-features.md).
