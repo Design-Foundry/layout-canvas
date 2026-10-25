@@ -28,7 +28,8 @@ namespace vc {
 /// The topmost visible, unlocked node under `world`, honoring frame clipping. With `framesOnly`, only
 /// frames are considered. Returns a nil id when nothing is hit.
 [[nodiscard]] Id hitTest(const Document& document, Vec2 world, bool framesOnly = false,
-                         const Id& mode = kDefaultModeId, double tolerance = 4.0);
+                         const Id& mode = kDefaultModeId, double tolerance = 4.0,
+                         const Id& root = {}, bool includeLocked = false);
 
 /// The deepest visible, unlocked frame under `world`, skipping `excluded` nodes and everything inside
 /// them. Returns a nil id for the canvas itself.

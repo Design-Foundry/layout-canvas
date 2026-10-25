@@ -2,6 +2,37 @@
 #include <cmath>
 
 namespace vc {
+bool validInteractionSettings(const Interaction& i) {
+    const bool destination=i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay;
+    switch(i.action) {
+        case PrototypeAction::None: case PrototypeAction::Back: case PrototypeAction::CloseOverlay:
+            if(!i.target.isNil()) return false;
+            break;
+        case PrototypeAction::Navigate: case PrototypeAction::OpenOverlay:
+            if(i.target.isNil()) return false;
+            break;
+        default: return false;
+    }
+    if(i.action!=PrototypeAction::OpenOverlay && !i.dismissOutside) return false;
+    switch(i.placement) {
+        case OverlayPlacement::Center: case OverlayPlacement::TopLeft: case OverlayPlacement::TopCenter: case OverlayPlacement::TopRight:
+        case OverlayPlacement::CenterLeft: case OverlayPlacement::CenterRight: case OverlayPlacement::BottomLeft:
+        case OverlayPlacement::BottomCenter: case OverlayPlacement::BottomRight: case OverlayPlacement::Manual: break;
+        default: return false;
+    }
+    if(i.action!=PrototypeAction::OpenOverlay && i.placement!=OverlayPlacement::Center) return false;
+    if(!std::isfinite(i.overlayOffset.x) || !std::isfinite(i.overlayOffset.y) || std::abs(i.overlayOffset.x)>100000 || std::abs(i.overlayOffset.y)>100000) return false;
+    if(i.placement!=OverlayPlacement::Manual && i.overlayOffset!=OverlayOffset{}) return false;
+    if(i.transition==PrototypeTransition::Instant) return i.durationMs==300;
+    if(!destination || i.durationMs<1 || i.durationMs>2000) return false;
+    switch(i.transition) {
+        case PrototypeTransition::Dissolve: case PrototypeTransition::SlideLeft: case PrototypeTransition::SlideRight:
+        case PrototypeTransition::SlideUp: case PrototypeTransition::SlideDown: return true;
+        case PrototypeTransition::PushLeft: case PrototypeTransition::PushRight: case PrototypeTransition::PushUp:
+        case PrototypeTransition::PushDown: return i.action==PrototypeAction::Navigate;
+        default: return false;
+    }
+}
 namespace {
 
 template <typename T>
@@ -32,6 +63,8 @@ bool validPath(const Path& path) {
 
 NodePatch applyPatch(Node& node, const NodePatch& patch) {
     NodePatch inverse;
+    swapIn(inverse.interaction,patch.interaction,node.interaction);
+    swapIn(inverse.prototypeStart,patch.prototypeStart,node.prototypeStart);
     swapIn(inverse.image,patch.image,node.image);
     swapIn(inverse.imageFit,patch.imageFit,node.imageFit);
     swapIn(inverse.imageCrop,patch.imageCrop,node.imageCrop);
@@ -77,6 +110,8 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
 
 NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
     NodePatch out = base;
+    if(top.interaction) out.interaction=top.interaction;
+    if(top.prototypeStart) out.prototypeStart=top.prototypeStart;
     if(top.image) out.image=top.image;
     if(top.imageFit) out.imageFit=top.imageFit;
     if(top.imageCrop) out.imageCrop=top.imageCrop;
@@ -132,6 +167,8 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
 
 NodePatch fullPatch(const Node& n) {
     NodePatch p;
+    if(n.interaction!=Interaction{}) p.interaction=n.interaction;
+    if(n.prototypeStart) p.prototypeStart=true;
     if(n.type==NodeType::Image){p.image=n.image;p.imageFit=n.imageFit;p.imageCrop=n.imageCrop;}
     if (n.type == NodeType::Line || n.type == NodeType::Path) p.lineWidth=n.lineWidth;
     if (n.type == NodeType::Line) p.lineReverse=n.lineReverse;

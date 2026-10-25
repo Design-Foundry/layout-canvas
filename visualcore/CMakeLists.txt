@@ -136,6 +136,8 @@ else()
             tests/test_text.cpp
             tests/test_line.cpp
             tests/test_path.cpp
+            tests/test_prototype_model.cpp
+            tests/test_prototype_editor.cpp
             tests/test_image.cpp
             tests/test_image_editor.cpp
             tests/test_path_editor.cpp

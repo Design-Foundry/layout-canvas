@@ -84,7 +84,7 @@ struct Renderer::State {
     std::string selector;
     const Camera& camera;
     const Document& document;
-    const Editor& editor;
+    Editor& editor;
     std::string cursor;
 
     wgpu::Instance instance;
@@ -125,7 +125,7 @@ struct Renderer::State {
     double lastTime = 0.0;
     FrameStats stats;
 
-    State(std::string selector, const Camera& camera, const Document& document, const Editor& editor)
+    State(std::string selector, const Camera& camera, const Document& document, Editor& editor)
         : selector(std::move(selector)), camera(camera), document(document), editor(editor) {}
 
     void requestAdapter();
@@ -143,7 +143,7 @@ struct Renderer::State {
     bool frame(double time);
 };
 
-Renderer::Renderer(std::string canvasSelector, const Camera& camera, const Document& document, const Editor& editor)
+Renderer::Renderer(std::string canvasSelector, const Camera& camera, const Document& document, Editor& editor)
     : state_(std::make_unique<State>(std::move(canvasSelector), camera, document, editor)) {}
 
 Renderer::~Renderer() = default;
@@ -362,6 +362,7 @@ void Renderer::State::startLoop() {
 
 bool Renderer::State::resizeIfNeeded() {
     emscripten_get_element_css_size(selector.c_str(), &cssWidth, &cssHeight);
+    editor.resizePrototype({cssWidth,cssHeight});
     dpr = emscripten_get_device_pixel_ratio();
 
     const auto newWidth = static_cast<uint32_t>(std::lround(cssWidth * dpr));
@@ -433,8 +434,27 @@ void Renderer::State::uploadImages() {
 void Renderer::State::buildInstances() {
     view = camera.visibleWorld({cssWidth, cssHeight});
     origin = camera.position();
-    stats.visible = buildDrawList(document, view, editor.activeMode(), drawItems);
-    addSelectionOutlines();
+    stats.visible = 0;
+    if(editor.presenting()) {
+        drawItems.clear();
+        const auto stage=worldBounds(document,editor.prototypeScreen(),editor.activeMode());
+        std::vector<DrawItem> layerItems;
+        for(const auto& layer:editor.prototypeLayers()) {
+            if(layer.opacity<=0) continue;
+            if(layer.overlay) {
+                DrawItem scrim; scrim.quad=stage.value_or(view);scrim.a.rect=scrim.quad;scrim.clip=scrim.quad;
+                scrim.color={0,0,0,static_cast<float>(.35*layer.opacity)};
+                drawItems.push_back(std::move(scrim));
+            }
+            const Rect sourceView{view.x-layer.offset.x,view.y-layer.offset.y,view.w,view.h};
+            stats.visible+=buildDrawList(document,sourceView,editor.activeMode(),layerItems,layer.screen);
+            for(auto& item:layerItems) {
+                transformDrawItem(item,layer.offset,layer.opacity,stage);
+                drawItems.push_back(std::move(item));
+            }
+        }
+    } else stats.visible = buildDrawList(document,view,editor.activeMode(),drawItems);
+    if(!editor.presenting()) addSelectionOutlines();
     uploadImages();
 
     instances.clear();
@@ -585,6 +605,7 @@ bool Renderer::State::frame(double time) {
         return false;
     }
 
+    const double deltaMs=lastTime>0.0?std::max(0.,time-lastTime):0.;
     if (lastTime > 0.0) {
         stats.frameMs += (time - lastTime - stats.frameMs) * kStatsSmoothing;
     }
@@ -596,6 +617,7 @@ bool Renderer::State::frame(double time) {
     if (!resizeIfNeeded()) {
         return true;
     }
+    editor.advancePrototype(deltaMs);
 
     wgpu::SurfaceTexture surfaceTexture;
     surface.GetCurrentTexture(&surfaceTexture);
@@ -620,8 +642,10 @@ bool Renderer::State::frame(double time) {
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
     wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
     pass.SetBindGroup(0, bindGroup);
-    pass.SetPipeline(gridPipeline);
-    pass.Draw(3);
+    if(!editor.presenting()) {
+        pass.SetPipeline(gridPipeline);
+        pass.Draw(3);
+    }
     if (!instances.empty()) {
         pass.SetPipeline(shapesPipeline);
         pass.Draw(4, static_cast<uint32_t>(instances.size()));

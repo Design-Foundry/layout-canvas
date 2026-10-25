@@ -6,6 +6,20 @@
 
 using Catch::Matchers::ContainsSubstring;
 
+TEST_CASE("prototype options retain structured diagnostics after the upstream merge", "[diagnostics][prototype]") {
+    vc::clearDiagnostic();
+    REQUIRE_FALSE(vc::patchFromJson(R"({"interaction":{"trigger":"click","action":"navigate","target":"0192a4b1-7c3d-4e5f-8a6b-000000000002","transition":"dissolve","durationMs":0}})").has_value());
+    REQUIRE(vc::lastDiagnostic()->path == "interaction.durationMs");
+    REQUIRE_THAT(vc::lastDiagnostic()->message,ContainsSubstring("1 to 2000"));
+    vc::clearDiagnostic();
+    REQUIRE_FALSE(vc::patchFromJson(R"({"interaction":{"trigger":"hover","action":"back"}})").has_value());
+    REQUIRE(vc::lastDiagnostic()->path == "interaction.trigger");
+    vc::clearDiagnostic();
+    REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":16,"modes":[],"tokens":[],"nodes":[{"id":"0192a4b1-7c3d-4e5f-8a6b-000000000002","type":"frame","order":"a0","interaction":{"trigger":"click","action":"close-overlay"}}]})").has_value());
+    REQUIRE(vc::lastDiagnostic()->path == "nodes[0]");
+    REQUIRE_THAT(vc::lastDiagnostic()->message,ContainsSubstring("17"));
+}
+
 namespace {
 
 constexpr const char* kId = "0192a4b1-7c3d-4e5f-8a6b-000000000002";
@@ -102,7 +116,7 @@ TEST_CASE("snapshot version gates name the feature and the version", "[diagnosti
 
     vc::clearDiagnostic();
     REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":99,"nodes":[]})").has_value());
-    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"version", "version must be from 1 to 15"});
+    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"version", "version must be from 1 to 18"});
 }
 
 TEST_CASE("snapshot top level shape is explained", "[diagnostics][json]") {

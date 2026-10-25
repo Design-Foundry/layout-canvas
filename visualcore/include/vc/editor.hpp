@@ -24,6 +24,14 @@ struct Modifiers {
     bool deep = false;
 };
 
+/// A scoped screen translated in world units before presentation. Layers are back to front.
+struct PrototypeLayer {
+    Id screen;
+    Vec2 offset;
+    double opacity = 1;
+    bool overlay = false;
+};
+
 /// A resize handle: which vertical edge (-1 left, 1 right, 0 none) and which horizontal edge
 /// (-1 top, 1 bottom, 0 none) it moves. Corners move both.
 struct Handle {
@@ -45,6 +53,22 @@ public:
 
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const { return tool_; }
+    /// Presentation is ephemeral: no document operations, selection changes or undo entries.
+    bool startPrototype(const Id& screen, Vec2 viewport);
+    void stopPrototype();
+    bool prototypeBack();
+    bool restartPrototype();
+    void resizePrototype(Vec2 viewport);
+    void advancePrototype(double deltaMs);
+    bool closePrototypeOverlay();
+    [[nodiscard]] std::vector<PrototypeLayer> prototypeLayers() const;
+    [[nodiscard]] Id prototypeOverlay() const;
+    [[nodiscard]] bool prototypeTransitioning() const { return prototypeDuration_>0; }
+    [[nodiscard]] bool presenting() const { return presenting_; }
+    [[nodiscard]] Id prototypeScreen() const { return prototypeScreen_; }
+    [[nodiscard]] Id prototypeStart() const { return prototypeStart_; }
+    [[nodiscard]] bool canPrototypeBack() const { return presenting_ && (!prototypeHistory_.empty() || !prototypeOverlays_.empty()); }
+    [[nodiscard]] bool prototypeEligible(const Id& id) const;
 
     void pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers = {});
     void pointerMove(Vec2 screen, Modifiers modifiers = {});
@@ -183,6 +207,12 @@ private:
     [[nodiscard]] double snap(double world) const;
     [[nodiscard]] Vec2 originOf(const Id& parent) const;
     void touch() { ++revision_; }
+    void fitPrototype();
+    [[nodiscard]] Id prototypeHotspot(Vec2 screen) const;
+    bool activatePrototype(Vec2 screen);
+    [[nodiscard]] Vec2 prototypeOffset(const Id& screen) const;
+    [[nodiscard]] bool prototypeOutsideOverlay(Vec2 screen) const;
+    void cancelPrototypeTransition();
 
     Session& session_;
     Camera& camera_;
@@ -217,6 +247,27 @@ private:
     std::vector<Vec2> penOutHandles_;
     bool penClosed_ = false;
     std::vector<Vec2> pencilPoints_;
+    bool presenting_ = false;
+    Camera prototypeSavedCamera_;
+    Id prototypeScreen_;
+    Id prototypeStart_;
+    Vec2 prototypeViewport_{};
+    std::vector<Id> prototypeHistory_;
+    bool prototypeClick_ = false;
+    Id prototypePressed_;
+    struct PrototypeOverlay {
+        Id screen;
+        bool dismissOutside = true;
+        OverlayPlacement placement = OverlayPlacement::Center;
+        OverlayOffset offset{};
+    };
+    std::vector<PrototypeOverlay> prototypeOverlays_;
+    bool prototypeOutsidePressed_ = false;
+    std::vector<PrototypeLayer> prototypeOutgoing_;
+    double prototypeDuration_ = 0;
+    double prototypeElapsed_ = 0;
+    bool prototypeOverlayTransition_ = false;
+    PrototypeTransition prototypeTransition_ = PrototypeTransition::Instant;
 };
 
 [[nodiscard]] std::optional<Tool> toolFromName(std::string_view name);

@@ -4,6 +4,19 @@
 #include <algorithm>
 
 namespace vc {
+void transformDrawItem(DrawItem& item, Vec2 offset, double opacity, std::optional<Rect> viewport) {
+    const auto translate=[&](Rect& r) {r.x+=offset.x;r.y+=offset.y;};
+    translate(item.quad);translate(item.clip);
+    if(viewport) {
+        const auto x=std::max(item.clip.x,viewport->x),y=std::max(item.clip.y,viewport->y);
+        item.clip={x,y,std::max(0.,std::min(item.clip.x+item.clip.w,viewport->x+viewport->w)-x),
+                       std::max(0.,std::min(item.clip.y+item.clip.h,viewport->y+viewport->h)-y)};
+    }
+    if(item.kind!=DrawKind::Glyph && item.kind!=DrawKind::Image) translate(item.a.rect);
+    translate(item.b.rect);
+    for(auto& point:item.points) {point.x+=offset.x;point.y+=offset.y;}
+    item.color.a*=static_cast<float>(std::clamp(opacity,0.,1.));
+}
 namespace {
 
 constexpr double kUnbounded = 1e30;
@@ -46,12 +59,19 @@ Color withAlpha(const Oklch& color, double opacity) {
 
 class Builder {
 public:
-    Builder(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out)
-        : document_(document), view_(view), mode_(mode), out_(out) {}
+    Builder(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root)
+        : document_(document), view_(view), mode_(mode), out_(out),root_(root) {}
 
     std::size_t run() {
         out_.clear();
-        collect(Id{}, {}, {-kUnbounded, -kUnbounded, 2 * kUnbounded, 2 * kUnbounded}, 1.0);
+        Rect clip{-kUnbounded,-kUnbounded,2*kUnbounded,2*kUnbounded};
+        if(!root_.isNil()) {
+            const auto* node=document_.find(root_);
+            const auto bounds=worldBounds(document_,root_,mode_);
+            if(!node || !node->parent.isNil() || !node->visible || !bounds) return 0;
+            clip=*bounds;
+        }
+        collect(Id{}, {}, clip, 1.0);
         return drawn_;
     }
 
@@ -59,6 +79,7 @@ private:
     void collect(const Id& parent, Vec2 origin, const Rect& clip, double opacity) {
         const Rect visibleArea = intersect(view_, clip);
         for (const Id& id : document_.viewChildren(parent)) {
+            if(parent.isNil() && !root_.isNil() && id!=root_) continue;
             const Node& node = *document_.view(id);
             if (!node.visible) {
                 continue;
@@ -216,12 +237,13 @@ private:
     Id mode_;
     std::vector<DrawItem>& out_;
     std::size_t drawn_ = 0;
+    Id root_;
 };
 
 } // namespace
 
-std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out) {
-    return Builder{document, view, mode, out}.run();
+std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root) {
+    return Builder{document, view, mode, out,root}.run();
 }
 
 } // namespace vc

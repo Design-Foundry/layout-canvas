@@ -48,7 +48,7 @@ namespace vc {
 [[nodiscard]] std::string snapshotToJson(const Document& document);
 
 /// The ops that rebuild a snapshot (modes, then tokens, then nodes), in an order `Document::apply`
-/// accepts. Reads supported versions 1 through 15, rejecting semantic downgrades.
+/// accepts. Reads supported versions 1 through 18, rejecting semantic downgrades.
 [[nodiscard]] std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data);
 
 /// Tokens for the tokens panel, in family order, each with its value `resolved` in `mode` (colors with

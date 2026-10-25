@@ -6,8 +6,9 @@ namespace vc {
 namespace {
 
 void hitChildren(const Document& document, const Id& parent, Vec2 offset, Vec2 world, bool framesOnly,
-                 const Id& mode, Id& hit, double tolerance) {
+                 const Id& mode, Id& hit, double tolerance, const Id& root, bool includeLocked) {
     for (const Id& id : document.viewChildren(parent)) {
+        if(parent.isNil() && !root.isNil() && id!=root) continue;
         const Node& node = *document.view(id);
         if (!node.visible) {
             continue;
@@ -34,11 +35,11 @@ void hitChildren(const Document& document, const Id& parent, Vec2 offset, Vec2 w
             }
             inside=inside || (node.fillVisible && node.path.filled && interior);
         }
-        if (inside && !node.locked && (!framesOnly || node.type == NodeType::Frame || node.type == NodeType::Component)) {
+        if (inside && (includeLocked || !node.locked) && (!framesOnly || node.type == NodeType::Frame || node.type == NodeType::Component)) {
             hit = id;
         }
         if (isContainer(node.type) && (inside || !node.clipContent)) {
-            hitChildren(document, id, {bounds.x, bounds.y}, world, framesOnly, mode, hit, tolerance);
+            hitChildren(document, id, {bounds.x, bounds.y}, world, framesOnly, mode, hit, tolerance,root,includeLocked);
         }
     }
 }
@@ -150,9 +151,14 @@ std::optional<Rect> worldBounds(const Document& document, const Id& id, const Id
     return bounds;
 }
 
-Id hitTest(const Document& document, Vec2 world, bool framesOnly, const Id& mode,double tolerance) {
+Id hitTest(const Document& document, Vec2 world, bool framesOnly, const Id& mode,double tolerance,const Id& root,bool includeLocked) {
     Id hit;
-    hitChildren(document, Id{}, {}, world, framesOnly, mode, hit, tolerance);
+    if(!root.isNil()) {
+        const auto* node=document.find(root);
+        const auto box=worldBounds(document,root,mode);
+        if(!node || !node->parent.isNil() || !node->visible || !box || !box->contains(world)) return {};
+    }
+    hitChildren(document, Id{}, {}, world, framesOnly, mode, hit, tolerance,root,includeLocked);
     return hit;
 }
 

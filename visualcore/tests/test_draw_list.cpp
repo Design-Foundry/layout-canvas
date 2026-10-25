@@ -10,6 +10,29 @@ using vc::DrawKind;
 using vc::Id;
 using vc::Node;
 using vc::NodeType;
+
+TEST_CASE("Moving presentation layers stay clipped to their stationary viewport", "[draw][prototype]") {
+    DrawItem item;item.kind=DrawKind::Image;item.quad={10,20,30,40};
+    item.clip={0,0,100,80};item.a.rect={.1,.2,.3,.4};item.color={1,1,1,1};
+    vc::transformDrawItem(item,{50,0},1,vc::Rect{0,0,100,80});
+    REQUIRE(item.clip.x==50);REQUIRE(item.clip.w==50);
+    REQUIRE(item.quad.x==60);REQUIRE_THAT(item.a.rect.x,WithinAbs(.1,.00001));
+    vc::transformDrawItem(item,{200,0},1,vc::Rect{0,0,100,80});
+    REQUIRE(item.clip.w==0);
+}
+
+TEST_CASE("Presentation translations preserve texture UVs and move paths and clipping", "[draw][prototype]") {
+    for(const auto kind:{DrawKind::Glyph,DrawKind::Image,DrawKind::Path,DrawKind::Segment}) {
+        DrawItem item;item.kind=kind;item.quad={10,20,30,40};item.clip={1,2,90,80};
+        item.a.rect={.1,.2,.3,.4};item.b.rect={8,9,0,0};item.points={{4,5},{6,7}};
+        item.color={1,1,1,.8f};vc::transformDrawItem(item,{100,200},.5);
+        REQUIRE(item.quad.x==110);REQUIRE(item.quad.y==220);
+        REQUIRE(item.clip.x==101);REQUIRE(item.clip.y==202);
+        REQUIRE(item.b.rect.x==108);REQUIRE(item.points[0].x==104);
+        REQUIRE_THAT(item.color.a,WithinAbs(.4,.00001));
+        REQUIRE_THAT(item.a.rect.x,WithinAbs(kind==DrawKind::Glyph || kind==DrawKind::Image?.1:100.1,.00001));
+    }
+}
 using vc::Rect;
 
 namespace {

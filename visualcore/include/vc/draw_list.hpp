@@ -47,7 +47,12 @@ struct DrawItem {
 
 /// Fills `out` with what's visible inside `view`, in paint order, resolving tokens in `mode`.
 /// Returns how many nodes contributed at least one item.
-std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out);
+std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,
+                          const Id& root = {});
+
+/// Translate native presentation geometry, keeping glyph/image UV coordinates unchanged.
+void transformDrawItem(DrawItem& item, Vec2 offset, double opacity,
+                       std::optional<Rect> viewport = std::nullopt);
 
 /// The color drawn for a token reference that can't be resolved.
 inline constexpr Color kUnresolvedColor{1.0f, 0.0f, 1.0f, 1.0f};

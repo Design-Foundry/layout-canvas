@@ -111,12 +111,34 @@ struct Path {
 /// Why `validPath` refuses `path`, or null when it accepts it.
 [[nodiscard]] const char* pathProblem(const Path& path);
 
+enum class PrototypeAction { None, Navigate, Back, OpenOverlay, CloseOverlay };
+enum class PrototypeTransition { Instant, Dissolve, SlideLeft, SlideRight, SlideUp, SlideDown, PushLeft, PushRight, PushUp, PushDown };
+enum class OverlayPlacement { Center, TopLeft, TopCenter, TopRight, CenterLeft, CenterRight, BottomLeft, BottomCenter, BottomRight, Manual };
+struct OverlayOffset {
+    double x = 0;
+    double y = 0;
+    friend bool operator==(const OverlayOffset&,const OverlayOffset&) = default;
+};
+struct Interaction {
+    PrototypeAction action = PrototypeAction::None;
+    Id target;
+    PrototypeTransition transition = PrototypeTransition::Instant;
+    int durationMs = 300;
+    bool dismissOutside = true;
+    OverlayPlacement placement = OverlayPlacement::Center;
+    OverlayOffset overlayOffset;
+    friend bool operator==(const Interaction&,const Interaction&) = default;
+};
+[[nodiscard]] bool validInteractionSettings(const Interaction& interaction);
+
 struct ImageCrop : Rect {
     ImageCrop() : Rect{0,0,1,1} {}
     ImageCrop(double x,double y,double w,double h) : Rect{x,y,w,h} {}
     friend bool operator==(const ImageCrop& a,const ImageCrop& b){return a.x==b.x&&a.y==b.y&&a.w==b.w&&a.h==b.h;}
 };
 struct NodePatch {
+    std::optional<Interaction> interaction;
+    std::optional<bool> prototypeStart;
     std::optional<Raster> image;
     std::optional<std::string> imageFit;
     std::optional<ImageCrop> imageCrop;
@@ -212,6 +234,8 @@ struct Override {
 };
 
 struct Node {
+    Interaction interaction;
+    bool prototypeStart = false;
     Raster image;
     std::string imageFit = "cover";
     ImageCrop imageCrop;

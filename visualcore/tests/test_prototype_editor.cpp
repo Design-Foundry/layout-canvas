@@ -1,0 +1,389 @@
+#include <catch2/catch_test_macros.hpp>
+#include <array>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include "vc/editor.hpp"
+#include "vc/draw_list.hpp"
+#include "vc/geometry.hpp"
+#include "vc/json.hpp"
+
+using namespace vc;
+using Catch::Matchers::WithinAbs;
+
+namespace {
+struct Prototype {
+    Session session{IdGenerator{199}};
+    Camera camera;
+    Editor editor{session,camera};
+    Id a,b,button;
+    Prototype() {
+        a=add(NodeType::Frame,{},100,200,200,100);
+        b=add(NodeType::Frame,{},700,200,200,100);
+        button=add(NodeType::Rect,a,10,10,60,40);
+        navigate(button,b);
+    }
+    Id add(NodeType type,Id parent={},double x=0,double y=0,double w=50,double h=40) {
+        Node node;node.id=session.newId();node.type=type;node.parent=parent;node.order="a0";
+        node.x=x;node.y=y;node.w=w;node.h=h;node.name="Prototype";
+        REQUIRE(session.applyRemote(CreateNode{node}));return node.id;
+    }
+    void patch(Id id,const NodePatch& value) {REQUIRE(session.applyRemote(SetProps{id,value}));}
+    void navigate(Id source,Id target) {NodePatch p;p.interaction=Interaction{PrototypeAction::Navigate,target};patch(source,p);}
+    void click(Vec2 world,PointerButton button=PointerButton::Primary) {
+        const auto screen=camera.toScreen(world);editor.pointerDown(screen,button);editor.pointerUp();
+    }
+    Vec2 center(Id id) const {const auto box=*worldBounds(session.document(),id);return {box.x+box.w/2,box.y+box.h/2};}
+};
+}
+
+TEST_CASE("Prototype entry validates screens and restores camera and selection without document history") {
+    Prototype f;f.camera.pan({-43,27});f.camera.zoomAt({20,50},1.75);f.editor.select(f.button);
+    const auto old=f.camera;
+    const auto selection=f.editor.selection();
+    const auto before=snapshotToJson(f.session.document());
+    REQUIRE_FALSE(f.editor.startPrototype(f.button,{448,248}));
+    REQUIRE_FALSE(f.editor.startPrototype(f.a,{0,248}));
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    REQUIRE(f.editor.presenting());REQUIRE(f.editor.prototypeScreen()==f.a);
+    REQUIRE_FALSE(f.editor.canPrototypeBack());
+    REQUIRE(f.editor.selection()==selection);
+    REQUIRE_THAT(f.camera.toScreen({100,200}).x,WithinAbs(24,1e-9));
+    REQUIRE_THAT(f.camera.toScreen({100,200}).y,WithinAbs(24,1e-9));
+    f.editor.stopPrototype();
+    REQUIRE_FALSE(f.editor.presenting());REQUIRE(f.editor.prototypeScreen().isNil());
+    REQUIRE(f.camera.zoom()==old.zoom());REQUIRE(f.camera.position().x==old.position().x);REQUIRE(f.camera.position().y==old.position().y);
+    REQUIRE(f.editor.selection()==selection);REQUIRE(snapshotToJson(f.session.document())==before);
+    REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+}
+
+TEST_CASE("Prototype scoped picking ignores overlapping screens and bubbles deepest children to hotspots") {
+    Prototype f;NodePatch overlap;overlap.x=100;f.patch(f.b,overlap);
+    const auto hotspot=f.add(NodeType::Frame,f.a,90,10,60,40);f.navigate(hotspot,f.b);
+    const auto child=f.add(NodeType::Rect,hotspot,5,5,15,15);
+    REQUIRE(hitTest(f.session.document(),f.center(child),false,kDefaultModeId,4,f.a)==child);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    f.click(f.center(child));REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.editor.canPrototypeBack());
+    REQUIRE(f.editor.prototypeBack());REQUIRE(f.editor.prototypeScreen()==f.a);
+    REQUIRE_FALSE(f.editor.prototypeBack());
+    f.click(f.center(child));REQUIRE(f.editor.restartPrototype());
+    REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE_FALSE(f.editor.canPrototypeBack());
+    REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Prototype clicks honor cancellation, drag slop, pointer buttons and design-locked hotspots") {
+    Prototype f;NodePatch locked;locked.locked=true;f.patch(f.button,locked);
+    REQUIRE(hitTest(f.session.document(),f.center(f.button),false,kDefaultModeId,4,f.a)!=f.button);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    auto point=f.camera.toScreen(f.center(f.button));
+    f.editor.pointerDown(point,PointerButton::Primary);f.editor.pointerCancel();f.editor.pointerUp();
+    REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.pointerDown(point,PointerButton::Primary);f.editor.pointerMove({point.x+10,point.y});f.editor.pointerMove(point);f.editor.pointerUp();
+    REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.click(f.center(f.button),PointerButton::Secondary);f.click(f.center(f.button),PointerButton::Middle);
+    REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.pointerMove(point);REQUIRE(f.editor.cursor()=="pointer");
+    f.click(f.center(f.button));REQUIRE(f.editor.prototypeScreen()==f.b);
+}
+
+TEST_CASE("Prototype picking clips nested content and the active screen even when clipContent is off") {
+    Prototype f;NodePatch clear;clear.interaction=Interaction{};f.patch(f.button,clear);
+    const auto nested=f.add(NodeType::Frame,f.a,10,10,30,30);
+    REQUIRE_FALSE(f.editor.startPrototype(nested,{448,248}));
+    const auto clipped=f.add(NodeType::Rect,nested,20,0,40,20);f.navigate(clipped,f.b);
+    NodePatch clipping;clipping.clipContent=true;f.patch(nested,clipping);
+    const auto outside=f.add(NodeType::Rect,f.a,210,20,30,30);f.navigate(outside,f.b);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    f.click({155,215});REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.click(f.center(outside));REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.click({135,215});REQUIRE(f.editor.prototypeScreen()==f.b);
+    REQUIRE(f.editor.prototypeBack());
+    NodePatch hidden;hidden.visible=false;f.patch(nested,hidden);
+    f.click({135,215});REQUIRE(f.editor.prototypeScreen()==f.a);
+}
+
+TEST_CASE("Prototype activation requires pressing and releasing the same hotspot inside the screen") {
+    Prototype f;const auto edge=f.add(NodeType::Rect,f.a,0,0,10,10);f.navigate(edge,f.b);
+    const auto adjacent=f.add(NodeType::Rect,f.a,10,0,10,10);f.navigate(adjacent,f.b);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    f.editor.pointerDown(f.camera.toScreen({99.8,205}),PointerButton::Primary);
+    f.editor.pointerMove(f.camera.toScreen({100.2,205}));f.editor.pointerUp();
+    REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.pointerDown(f.camera.toScreen({109.6,205}),PointerButton::Primary);
+    f.editor.pointerMove(f.camera.toScreen({110.4,205}));f.editor.pointerUp();
+    REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.click({105,205});REQUIRE(f.editor.prototypeScreen()==f.b);
+}
+
+TEST_CASE("Prototype instance hotspots inherit component actions and allow local back overrides") {
+    Prototype f;
+    const auto main=f.add(NodeType::Component,{},1000,1000,60,40);f.navigate(main,f.b);
+    REQUIRE_FALSE(f.editor.startPrototype(main,{448,248}));
+    Node instance;instance.id=f.session.newId();instance.type=NodeType::Instance;instance.parent=f.a;instance.component=main;instance.order="a1";
+    instance.x=90;instance.y=10;instance.w=60;instance.h=40;
+    REQUIRE(f.session.applyRemote(CreateNode{instance}));
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(instance.id));
+    REQUIRE(f.editor.prototypeScreen()==f.b);
+    Node back;back.id=f.session.newId();back.type=NodeType::Instance;back.parent=f.b;back.component=main;back.order="a1";back.w=60;back.h=40;
+    REQUIRE(f.session.applyRemote(CreateNode{back}));
+    NodePatch action;action.interaction=Interaction{PrototypeAction::Back,{}};
+    REQUIRE(f.session.applyRemote(SetOverride{back.id,main,action}));
+    f.click(f.center(back.id));REQUIRE(f.editor.prototypeScreen()==f.a);
+    REQUIRE_FALSE(f.editor.canPrototypeBack());REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Prototype history is bounded and self navigation never consumes a back entry") {
+    Prototype f;f.navigate(f.a,f.b);f.navigate(f.b,f.a);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    for(int i=0;i<260;++i) f.click({f.editor.prototypeScreen()==f.a?280.:880.,280});
+    int count=0;while(f.editor.prototypeBack()) ++count;
+    REQUIRE(count==128);
+    REQUIRE(f.editor.restartPrototype());f.navigate(f.a,f.a);
+    f.click({280,280});REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE_FALSE(f.editor.canPrototypeBack());
+}
+
+TEST_CASE("Prototype refuses every editor mutation and camera gesture while allowing remote updates") {
+    Prototype f;f.editor.select(f.button);const auto before=snapshotToJson(f.session.document());
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto camera=f.camera;
+    NodePatch patch;patch.name="Refused";
+    REQUIRE_FALSE(f.editor.edit(SetProps{f.button,patch}));REQUIRE_FALSE(f.editor.setProps(f.button,patch));
+    REQUIRE_FALSE(f.editor.previewProps(f.button,patch));REQUIRE_FALSE(f.editor.commitPropsPreview());
+    REQUIRE_FALSE(f.editor.addToken(TokenType::Color).has_value());REQUIRE_FALSE(f.editor.addMode().has_value());
+    REQUIRE_FALSE(f.editor.deleteMode(kDefaultModeId));REQUIRE_FALSE(f.editor.setComponentDefinition(f.a,{}));
+    REQUIRE_FALSE(f.editor.createComponent().has_value());REQUIRE_FALSE(f.editor.createInstance(f.a).has_value());
+    REQUIRE_FALSE(f.editor.detachInstance(f.button).has_value());REQUIRE_FALSE(f.editor.resetOverrides(f.button));
+    REQUIRE_FALSE(f.editor.nudge({10,10}));REQUIRE_FALSE(f.editor.deleteSelection());REQUIRE_FALSE(f.editor.undo());REQUIRE_FALSE(f.editor.redo());
+    REQUIRE_FALSE(f.editor.finishPath());REQUIRE_FALSE(f.editor.popPathPoint());
+    REQUIRE_FALSE(f.editor.importImage(Raster{},"Refused").has_value());
+    f.editor.select(f.b);f.editor.toggleSelection(f.b);f.editor.setSelection({f.b});f.editor.clearSelection();
+    REQUIRE(f.editor.selection()==std::vector<Id>{f.button});
+    f.editor.setTool(Tool::Rect);REQUIRE(f.editor.tool()==Tool::Select);
+    f.editor.setPixelSnap(false);REQUIRE(f.editor.pixelSnap());
+    f.editor.reveal(f.b,{300,300});f.editor.wheel({10,10},100);f.editor.doubleClick({10,10});
+    REQUIRE(f.camera.zoom()==camera.zoom());REQUIRE(f.camera.position().x==camera.position().x);
+    REQUIRE(snapshotToJson(f.session.document())==before);REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+    f.patch(f.button,patch);REQUIRE(f.session.document().find(f.button)->name=="Refused");
+}
+
+TEST_CASE("Prototype refits on resize and exits safely when active or start screens become invalid remotely") {
+    for(int invalid=0;invalid<5;++invalid) {
+        Prototype f;f.camera.pan({-45,-12});const auto old=f.camera;
+        REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+        f.editor.resizePrototype({848,448});
+        REQUIRE_THAT(f.camera.toScreen({800,250}).x,WithinAbs(424,1e-9));
+        REQUIRE_THAT(f.camera.toScreen({800,250}).y,WithinAbs(224,1e-9));
+        if(invalid==0) {NodePatch p;p.visible=false;f.patch(f.b,p);}
+        if(invalid==1) {NodePatch p;p.w=0;f.patch(f.b,p);}
+        if(invalid==2) {NodePatch p;p.visible=false;f.patch(f.a,p);}
+        if(invalid==3 || invalid==4) {NodePatch p;p.interaction=Interaction{};f.patch(f.button,p);}
+        if(invalid==3) REQUIRE(f.session.applyRemote(DeleteNode{f.b}));
+        if(invalid==4) {NodePatch p;p.type=NodeType::Component;f.patch(f.b,p);}
+        f.editor.resizePrototype({848,448});REQUIRE_FALSE(f.editor.presenting());
+        REQUIRE(f.camera.zoom()==old.zoom());REQUIRE(f.camera.position().x==old.position().x);REQUIRE(f.camera.position().y==old.position().y);
+    }
+}
+
+TEST_CASE("Scoped presentation draw lists show only one root and clip overflowing content to its bounds") {
+    Prototype f;const auto outside=f.add(NodeType::Rect,f.a,180,80,80,80);
+    static_cast<void>(outside);
+    std::vector<DrawItem> items;
+    const auto count=buildDrawList(f.session.document(),{-1000,-1000,4000,4000},kDefaultModeId,items,f.a);
+    REQUIRE(count==3);REQUIRE(items.size()==3);
+    for(const auto& item:items) {
+        REQUIRE(item.clip.x>=100);REQUIRE(item.clip.y>=200);
+        REQUIRE(item.clip.x+item.clip.w<=300);REQUIRE(item.clip.y+item.clip.h<=300);
+        REQUIRE(item.quad.x<700);
+    }
+    const auto all=buildDrawList(f.session.document(),{-1000,-1000,4000,4000},kDefaultModeId,items);
+    REQUIRE(all==4);
+}
+
+TEST_CASE("Starting presentation cancels drafts and props previews without committing them") {
+    Prototype f;const auto before=snapshotToJson(f.session.document());
+    f.editor.setTool(Tool::Pen);f.editor.pointerDown({1000,1000},PointerButton::Primary);f.editor.pointerUp();
+    f.editor.pointerDown({1100,1100},PointerButton::Primary);f.editor.pointerUp();
+    REQUIRE(f.editor.drawingPath());REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    REQUIRE_FALSE(f.editor.drawingPath());REQUIRE(snapshotToJson(f.session.document())==before);f.editor.stopPrototype();
+    f.editor.select(f.button);NodePatch patch;patch.w=90;REQUIRE(f.editor.previewProps(f.button,patch));
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));REQUIRE_FALSE(f.session.hasPreview());
+    REQUIRE(snapshotToJson(f.session.document())==before);REQUIRE(f.editor.selection()==std::vector<Id>{f.button});
+    REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+}
+
+
+TEST_CASE("Prototype dissolve advances deterministically, blocks clicks and preserves document history") {
+    Prototype f;NodePatch p;p.interaction=Interaction{PrototypeAction::Navigate,f.b,PrototypeTransition::Dissolve,400};f.patch(f.button,p);
+    f.navigate(f.b,f.a);const auto before=snapshotToJson(f.session.document());
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.editor.prototypeTransitioning());
+    auto layers=f.editor.prototypeLayers();REQUIRE(layers.size()==2);
+    REQUIRE(layers[0].screen==f.a);REQUIRE(layers[0].opacity==1);REQUIRE(layers[1].opacity==0);
+    REQUIRE_THAT(layers[0].offset.x,WithinAbs(600,1e-9));
+    f.editor.advancePrototype(100);layers=f.editor.prototypeLayers();
+    REQUIRE_THAT(layers[0].opacity,WithinAbs(.75,1e-9));REQUIRE_THAT(layers[1].opacity,WithinAbs(.25,1e-9));
+    f.click(f.center(f.b));REQUIRE(f.editor.prototypeScreen()==f.b);
+    f.editor.advancePrototype(-5);REQUIRE(f.editor.prototypeTransitioning());
+    f.editor.advancePrototype(300);REQUIRE_FALSE(f.editor.prototypeTransitioning());
+    REQUIRE(f.editor.prototypeLayers().size()==1);REQUIRE(f.editor.prototypeLayers()[0].opacity==1);
+    REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+    REQUIRE(before==snapshotToJson(f.session.document()));
+    REQUIRE(f.editor.prototypeBack());REQUIRE(f.editor.prototypeScreen()==f.a);
+}
+
+TEST_CASE("Prototype overlays are centered, modal, independently dismissible and never refit the camera") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);
+    const auto close=f.add(NodeType::Rect,modal,10,10,30,20);NodePatch p;p.interaction=Interaction{PrototypeAction::CloseOverlay,{}};f.patch(close,p);
+    p.interaction=Interaction{PrototypeAction::OpenOverlay,modal};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto camera=f.camera;f.click(f.center(f.button));
+    REQUIRE(f.editor.prototypeOverlay()==modal);REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE(f.editor.canPrototypeBack());
+    REQUIRE(f.camera.zoom()==camera.zoom());REQUIRE(f.camera.position().x==camera.position().x);
+    const auto layers=f.editor.prototypeLayers();REQUIRE(layers.size()==2);REQUIRE(layers[1].overlay);
+    REQUIRE_THAT(layers[1].offset.x,WithinAbs(-940,1e-9));REQUIRE_THAT(layers[1].offset.y,WithinAbs(-580,1e-9));
+    // Underlying button is blocked; outside clicks dismiss rather than navigate.
+    f.click(f.center(f.button));REQUIRE(f.editor.prototypeOverlay().isNil());REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.click(f.center(f.button));f.click(f.center(close)+f.editor.prototypeLayers().back().offset);
+    REQUIRE(f.editor.prototypeOverlay().isNil());REQUIRE_FALSE(f.editor.canPrototypeBack());
+    REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Prototype overlay outside dismissal requires a complete primary click and respects its setting") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);NodePatch p;
+    p.interaction=Interaction{PrototypeAction::OpenOverlay,modal,PrototypeTransition::Instant,300,false};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    f.click({110,210});REQUIRE(f.editor.prototypeOverlay()==modal);REQUIRE(f.editor.prototypeBack());
+    p.interaction=Interaction{PrototypeAction::OpenOverlay,modal};f.patch(f.button,p);f.click(f.center(f.button));
+    const auto outside=f.camera.toScreen({110,210}),inside=f.camera.toScreen({200,250});
+    f.editor.pointerDown(inside,PointerButton::Primary);f.editor.pointerMove(outside);f.editor.pointerUp();REQUIRE(f.editor.prototypeOverlay()==modal);
+    f.editor.pointerDown(outside,PointerButton::Primary);f.editor.pointerMove({outside.x+5,outside.y});f.editor.pointerMove(outside);f.editor.pointerUp();REQUIRE(f.editor.prototypeOverlay()==modal);
+    f.editor.pointerDown(outside,PointerButton::Primary);f.editor.pointerCancel();f.editor.pointerUp();REQUIRE(f.editor.prototypeOverlay()==modal);
+    f.click({110,210},PointerButton::Secondary);REQUIRE(f.editor.prototypeOverlay()==modal);
+    f.click({110,210});REQUIRE(f.editor.prototypeOverlay().isNil());
+}
+
+TEST_CASE("Prototype overlay stack is bounded and Back closes the top before navigation history") {
+    Prototype f;std::vector<Id> modals;
+    for(int i=0;i<9;++i) modals.push_back(f.add(NodeType::Frame,{},1100+i*100,800,80,60));
+    NodePatch p;p.interaction=Interaction{PrototypeAction::OpenOverlay,modals.front()};f.patch(f.b,p);
+    for(std::size_t i=0;i+1<modals.size();++i) {p.interaction=Interaction{PrototypeAction::OpenOverlay,modals[i+1]};f.patch(modals[i],p);}
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));REQUIRE(f.editor.prototypeScreen()==f.b);
+    f.click(f.center(f.b));
+    for(int i=0;i<9;++i) {
+        auto layers=f.editor.prototypeLayers();f.click(f.center(layers.back().screen)+layers.back().offset);
+    }
+    REQUIRE(f.editor.prototypeLayers().size()==9);REQUIRE(f.editor.prototypeOverlay()==modals[7]);
+    for(int i=0;i<8;++i) REQUIRE(f.editor.prototypeBack());
+    REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.editor.prototypeOverlay().isNil());
+    REQUIRE(f.editor.prototypeBack());REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE_FALSE(f.editor.canPrototypeBack());
+}
+
+TEST_CASE("Prototype dissolve overlays fade only the new modal and Restart clears all temporary state") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);NodePatch p;
+    p.interaction=Interaction{PrototypeAction::OpenOverlay,modal,PrototypeTransition::Dissolve,200};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    f.editor.advancePrototype(100);auto layers=f.editor.prototypeLayers();
+    REQUIRE(layers.size()==2);REQUIRE(layers[0].opacity==1);REQUIRE(layers[1].opacity==.5);
+    REQUIRE(f.editor.restartPrototype());REQUIRE(f.editor.prototypeOverlay().isNil());REQUIRE_FALSE(f.editor.prototypeTransitioning());
+    REQUIRE(f.editor.prototypeLayers().size()==1);REQUIRE_FALSE(f.editor.canPrototypeBack());
+    f.click(f.center(f.button));REQUIRE(f.editor.prototypeBack());REQUIRE_FALSE(f.editor.prototypeTransitioning());
+}
+
+TEST_CASE("Prototype remotely invalid overlays close without ending base presentation") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);NodePatch p;p.interaction=Interaction{PrototypeAction::OpenOverlay,modal};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    p={};p.visible=false;f.patch(modal,p);f.editor.advancePrototype(10);
+    REQUIRE(f.editor.presenting());REQUIRE(f.editor.prototypeOverlay().isNil());REQUIRE(f.editor.prototypeLayers().size()==1);
+    p={};p.visible=true;f.patch(modal,p);f.click(f.center(f.button));f.editor.stopPrototype();
+    REQUIRE(f.editor.prototypeLayers().empty());REQUIRE(f.editor.prototypeOverlay().isNil());
+}
+
+TEST_CASE("Prototype navigation from an overlay to its underlying screen clears modals without duplicate history") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);NodePatch p;
+    p.interaction=Interaction{PrototypeAction::OpenOverlay,modal};f.patch(f.button,p);
+    p.interaction=Interaction{PrototypeAction::Navigate,f.a,PrototypeTransition::Dissolve,300};f.patch(modal,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    f.click(f.center(modal)+f.editor.prototypeLayers().back().offset);
+    REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE(f.editor.prototypeOverlay().isNil());
+    REQUIRE_FALSE(f.editor.canPrototypeBack());REQUIRE_FALSE(f.editor.prototypeTransitioning());
+    REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+}
+
+
+TEST_CASE("Prototype directional slide and push layers have deterministic axis motion and full opacity") {
+    const std::array transitions{PrototypeTransition::SlideLeft,PrototypeTransition::SlideRight,PrototypeTransition::SlideUp,PrototypeTransition::SlideDown,
+        PrototypeTransition::PushLeft,PrototypeTransition::PushRight,PrototypeTransition::PushUp,PrototypeTransition::PushDown};
+    for(std::size_t i=0;i<transitions.size();++i) {
+        Prototype f;NodePatch p;p.interaction=Interaction{PrototypeAction::Navigate,f.b,transitions[i],400};f.patch(f.button,p);
+        const auto snapshot=snapshotToJson(f.session.document());
+        REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+        const double dx=i%4==0?200:i%4==1?-200:0,dy=i%4==2?100:i%4==3?-100:0;
+        auto layers=f.editor.prototypeLayers();REQUIRE(layers.size()==2);
+        REQUIRE(layers[0].opacity==1);REQUIRE(layers[1].opacity==1);
+        REQUIRE_THAT(layers[1].offset.x,WithinAbs(dx,1e-9));REQUIRE_THAT(layers[1].offset.y,WithinAbs(dy,1e-9));
+        f.editor.advancePrototype(200);layers=f.editor.prototypeLayers();
+        REQUIRE_THAT(layers[1].offset.x,WithinAbs(dx/2,1e-9));REQUIRE_THAT(layers[1].offset.y,WithinAbs(dy/2,1e-9));
+        REQUIRE_THAT(layers[0].offset.x,WithinAbs(600-(i>=4?dx/2:0),1e-9));
+        REQUIRE_THAT(layers[0].offset.y,WithinAbs(i>=4?-dy/2:0,1e-9));
+        f.editor.advancePrototype(200);layers=f.editor.prototypeLayers();REQUIRE(layers.size()==1);
+        REQUIRE(layers[0].offset.x==0);REQUIRE(layers[0].offset.y==0);REQUIRE_FALSE(f.editor.prototypeTransitioning());
+        REQUIRE(snapshotToJson(f.session.document())==snapshot);REQUIRE(f.session.takeOutbox().empty());
+    }
+}
+
+TEST_CASE("Prototype overlay anchors and manual offsets share placement-aware rendering and hit testing") {
+    const std::array placements{OverlayPlacement::TopLeft,OverlayPlacement::TopCenter,OverlayPlacement::TopRight,
+        OverlayPlacement::CenterLeft,OverlayPlacement::Center,OverlayPlacement::CenterRight,
+        OverlayPlacement::BottomLeft,OverlayPlacement::BottomCenter,OverlayPlacement::BottomRight,OverlayPlacement::Manual};
+    for(std::size_t i=0;i<placements.size();++i) {
+        Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);NodePatch p;
+        p.interaction=Interaction{PrototypeAction::CloseOverlay,{}};f.patch(modal,p);
+        Interaction action{PrototypeAction::OpenOverlay,modal};action.placement=placements[i];
+        if(i==9) action.overlayOffset={17,23};
+        p.interaction=action;f.patch(f.button,p);REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+        auto layer=f.editor.prototypeLayers().back();
+        const double x=i==9?117:100+(i%3)*60,y=i==9?223:200+(i/3)*20;
+        REQUIRE_THAT(1100+layer.offset.x,WithinAbs(x,1e-9));REQUIRE_THAT(800+layer.offset.y,WithinAbs(y,1e-9));
+        f.click({x+40,y+30});REQUIRE(f.editor.prototypeOverlay().isNil());
+        REQUIRE(f.session.takeOutbox().empty());
+    }
+}
+
+TEST_CASE("Prototype sliding overlay starts fully beyond the stage and keeps its scrim opacity stable") {
+    const std::array transitions{PrototypeTransition::SlideLeft,PrototypeTransition::SlideRight,PrototypeTransition::SlideUp,PrototypeTransition::SlideDown};
+    for(std::size_t i=0;i<transitions.size();++i) {
+        Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);NodePatch p;
+        Interaction action{PrototypeAction::OpenOverlay,modal,transitions[i],400};action.placement=OverlayPlacement::Manual;action.overlayOffset={17,23};
+        p.interaction=action;f.patch(f.button,p);REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+        auto layers=f.editor.prototypeLayers();auto layer=layers.back();
+        const double startX=1100+layer.offset.x,startY=800+layer.offset.y;
+        if(i==0) REQUIRE_THAT(startX,WithinAbs(300,1e-9));
+        if(i==1) REQUIRE_THAT(startX+80,WithinAbs(100,1e-9));
+        if(i==2) REQUIRE_THAT(startY,WithinAbs(300,1e-9));
+        if(i==3) REQUIRE_THAT(startY+60,WithinAbs(200,1e-9));
+        REQUIRE(layer.opacity==1);REQUIRE(layers.front().offset.x==0);REQUIRE(layers.front().opacity==1);
+        f.editor.advancePrototype(200);layer=f.editor.prototypeLayers().back();
+        REQUIRE(layer.opacity==1);REQUIRE_THAT(1100+layer.offset.x,WithinAbs((startX+117)/2,1e-9));
+        REQUIRE_THAT(800+layer.offset.y,WithinAbs((startY+223)/2,1e-9));
+        REQUIRE(f.editor.prototypeBack());REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE(f.editor.prototypeOverlay().isNil());
+    }
+}
+
+TEST_CASE("Prototype manually positioned modal hotspots outside the base stage remain unclickable") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);NodePatch p;
+    p.interaction=Interaction{PrototypeAction::Navigate,f.b};f.patch(modal,p);
+    Interaction action{PrototypeAction::OpenOverlay,modal};action.placement=OverlayPlacement::Manual;action.overlayOffset={180,20};action.dismissOutside=false;
+    p.interaction=action;f.patch(f.button,p);REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    f.click({320,250});REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE(f.editor.prototypeOverlay()==modal);
+    f.click({290,250});REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.editor.prototypeOverlay().isNil());
+    REQUIRE(f.editor.prototypeBack());REQUIRE(f.editor.prototypeScreen()==f.a);
+    action.dismissOutside=true;p.interaction=action;f.patch(f.button,p);f.click(f.center(f.button));
+    f.click({320,250});REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE(f.editor.prototypeOverlay().isNil());
+}
+
+TEST_CASE("Prototype manual overlay placement follows remote base geometry and invalidation clears motion safely") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1100,800,80,60);NodePatch p;
+    Interaction action{PrototypeAction::OpenOverlay,modal,PrototypeTransition::SlideLeft,400};action.placement=OverlayPlacement::Manual;action.overlayOffset={17,23};
+    p.interaction=action;f.patch(f.button,p);REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    f.editor.advancePrototype(100);p={};p.x=200;f.patch(f.a,p);f.editor.advancePrototype(300);
+    auto layer=f.editor.prototypeLayers().back();REQUIRE_THAT(1100+layer.offset.x,WithinAbs(217,1e-9));
+    p={};p.visible=false;f.patch(modal,p);f.editor.advancePrototype(1);
+    REQUIRE(f.editor.prototypeOverlay().isNil());REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE(f.editor.presenting());
+    REQUIRE(f.session.takeOutbox().empty());
+}

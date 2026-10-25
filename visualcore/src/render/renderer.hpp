@@ -20,7 +20,7 @@ class Renderer {
 public:
     /// Draws `document` through `camera`, with the selection and handles from `editor`, and keeps the
     /// canvas cursor in sync with it. All three must outlive the renderer.
-    Renderer(std::string canvasSelector, const Camera& camera, const Document& document, const Editor& editor);
+    Renderer(std::string canvasSelector, const Camera& camera, const Document& document, Editor& editor);
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;

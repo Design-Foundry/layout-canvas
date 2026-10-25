@@ -35,8 +35,13 @@ bool onDoubleClick(int, const EmscriptenMouseEvent* e, void* user) {
     return true;
 }
 
-bool onMouseUp(int, const EmscriptenMouseEvent*, void* user) {
-    editorFrom(user).pointerUp();
+bool onMouseUp(int event, const EmscriptenMouseEvent* e, void* user) {
+    auto& editor=editorFrom(user);
+    if(editor.presenting()) {
+        if(event==EMSCRIPTEN_EVENT_MOUSELEAVE) {editor.pointerCancel();return true;}
+        editor.pointerMove(positionOf(*e),modifiersOf(*e));
+    }
+    editor.pointerUp();
     return true;
 }
 

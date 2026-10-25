@@ -113,6 +113,8 @@ private:
     [[nodiscard]] bool validDefinition(const Id& component, const ComponentDefinition& definition) const;
     [[nodiscard]] bool validComponentValues(const ComponentDefinition& definition, const ComponentValues& values) const;
     [[nodiscard]] bool definitionTargets(const Id& id) const;
+    [[nodiscard]] bool validInteraction(const Interaction& interaction) const;
+    [[nodiscard]] bool prototypeReferences(const Id& target) const;
     [[nodiscard]] bool hasDependentOverrides(const Id& component) const;
     [[nodiscard]] bool swapValuesWouldStrandOverrides(const Node& instance, const ComponentValues& values) const;
 
