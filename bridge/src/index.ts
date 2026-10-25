@@ -553,6 +553,9 @@ export class VisualCore {
   closePrototypeOverlay(): boolean {
     return this.module.closePrototypeOverlay();
   }
+  setPrototypeReducedMotion(reduced: boolean): void {
+    this.module.setPrototypeReducedMotion(reduced);
+  }
   prototypeState(): PrototypeState {
     return JSON.parse(this.module.prototypeState());
   }

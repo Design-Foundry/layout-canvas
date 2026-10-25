@@ -80,7 +80,11 @@
     </p>
   }
   @if (presentation().active) {
-    <nav class="prototype-controls" aria-label="Prototype presentation">
+    <nav
+      class="prototype-controls"
+      aria-label="Prototype presentation"
+      [attr.aria-busy]="presentation().transitioning"
+    >
       <button type="button" [disabled]="!presentation().canBack" (click)="backPrototype()">
         Back
       </button>

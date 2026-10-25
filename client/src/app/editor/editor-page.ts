@@ -36,6 +36,7 @@ import { LucentButton, LucentTab, LucentTabList } from '@designfoundry/lucent-an
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';
+import { watchPrototypeMotion } from './prototype-motion';
 import { ComponentCommand, EditorTool, LayerKind, LayerRow } from './editor-model';
 import { EditorToolbar } from './editor-toolbar';
 import { InspectorPanel } from './inspector-panel';
@@ -479,6 +480,12 @@ export class EditorPage {
         return;
       }
       this.core.set(core);
+      const stopMotionPreference = watchPrototypeMotion(
+        core,
+        typeof window.matchMedia === 'function'
+          ? window.matchMedia('(prefers-reduced-motion: reduce)')
+          : undefined,
+      );
       let revision = -1;
       let structure = -1;
       let tokenRevision = -1;
@@ -549,6 +556,7 @@ export class EditorPage {
       );
 
       this.destroyRef.onDestroy(() => {
+        stopMotionPreference();
         cancelAnimationFrame(frame);
         clearInterval(timer);
         void sync.close();
