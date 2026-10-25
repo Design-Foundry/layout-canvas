@@ -65,6 +65,7 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
     NodePatch inverse;
     swapIn(inverse.interaction,patch.interaction,node.interaction);
     swapIn(inverse.prototypeStart,patch.prototypeStart,node.prototypeStart);
+    swapIn(inverse.prototypeOverflow,patch.prototypeOverflow,node.prototypeOverflow);
     swapIn(inverse.image,patch.image,node.image);
     swapIn(inverse.imageFit,patch.imageFit,node.imageFit);
     swapIn(inverse.imageCrop,patch.imageCrop,node.imageCrop);
@@ -112,6 +113,7 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
     NodePatch out = base;
     if(top.interaction) out.interaction=top.interaction;
     if(top.prototypeStart) out.prototypeStart=top.prototypeStart;
+    if(top.prototypeOverflow) out.prototypeOverflow=top.prototypeOverflow;
     if(top.image) out.image=top.image;
     if(top.imageFit) out.imageFit=top.imageFit;
     if(top.imageCrop) out.imageCrop=top.imageCrop;
@@ -169,6 +171,7 @@ NodePatch fullPatch(const Node& n) {
     NodePatch p;
     if(n.interaction!=Interaction{}) p.interaction=n.interaction;
     if(n.prototypeStart) p.prototypeStart=true;
+    if(n.prototypeOverflow!=PrototypeOverflow::None) p.prototypeOverflow=n.prototypeOverflow;
     if(n.type==NodeType::Image){p.image=n.image;p.imageFit=n.imageFit;p.imageCrop=n.imageCrop;}
     if (n.type == NodeType::Line || n.type == NodeType::Path) p.lineWidth=n.lineWidth;
     if (n.type == NodeType::Line) p.lineReverse=n.lineReverse;

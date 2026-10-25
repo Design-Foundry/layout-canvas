@@ -27,6 +27,7 @@ bool nonNegative(const Value<double>& value) {
 constexpr std::string_view kFrameStyling = "text, lines, paths and images take no stroke, shadows, corner radius or auto layout";
 
 bool isValidPatch(const NodePatch& patch) {
+    if(patch.prototypeOverflow && (*patch.prototypeOverflow<PrototypeOverflow::None || *patch.prototypeOverflow>PrototypeOverflow::Both)) return refuse("prototypeOverflow must be none, vertical, horizontal or both");
     if(patch.interaction && !validInteractionSettings(*patch.interaction)) return refuse("interaction has an invalid action, target, transition, duration or outside-dismiss setting");
     if(patch.image && !validRaster(*patch.image)) return refuse("image pixels do not match its width, height and id");
     if(patch.imageFit && *patch.imageFit!="cover" && *patch.imageFit!="contain" && *patch.imageFit!="stretch") return refuse("imageFit must be cover, contain or stretch");
@@ -193,6 +194,8 @@ bool Document::prototypeReferences(const Id& target) const {
 std::optional<OpBody> Document::create(const CreateNode& op) {
     const Node& node = op.node;
     if(!validInteraction(node.interaction)) return std::nullopt;
+    if(node.prototypeOverflow<PrototypeOverflow::None || node.prototypeOverflow>PrototypeOverflow::Both) return refused("invalid prototypeOverflow");
+    if(node.prototypeOverflow!=PrototypeOverflow::None && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeOverflow applies only to root frames");
     if(node.type==NodeType::Instance && node.interaction!=Interaction{}) return refused("an instance interaction is set as an override on its main component root");
     if(node.prototypeStart && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeStart applies only to root frames");
     if(node.type!=NodeType::Image && (node.image!=Raster{} || node.imageFit!="cover" || node.imageCrop!=ImageCrop{})) return refused("only image nodes take image, imageFit or imageCrop");
@@ -225,6 +228,7 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
     for (const Override& o : node.overrides) {
         if (!isValidPatch(o.patch) || !isValidPatchRefs(o.patch)) return std::nullopt;
         if (o.patch.type || o.patch.component || o.patch.componentValues || o.patch.typography) return refused("overrides cannot change type, component, componentValues or typography");
+        if(o.patch.prototypeOverflow) return refused("overrides cannot set prototypeOverflow");
         if(o.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
     }
     if (!node.overrides.empty()) {
@@ -264,8 +268,9 @@ std::optional<OpBody> Document::setProps(const SetProps& op) {
             if(nextType!=NodeType::Frame || !current.parent.isNil()) return refused("a prototype destination must remain a root frame");
         } else if(!validInteraction(interaction)) return std::nullopt;
     }
+    if(op.patch.prototypeOverflow && (nextType!=NodeType::Frame || !current.parent.isNil())) return refused("prototypeOverflow applies only to root frames");
     if(op.patch.prototypeStart && (nextType!=NodeType::Frame || !current.parent.isNil())) return refused("prototypeStart applies only to root frames");
-    if(nextType!=NodeType::Frame && (current.prototypeStart || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame cannot change its type");
+    if(nextType!=NodeType::Frame && (current.prototypeStart || current.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame cannot change its type");
     if((op.patch.image || op.patch.imageFit || op.patch.imageCrop) && current.type!=NodeType::Image) return refused("only image nodes take image, imageFit or imageCrop");
     if (op.patch.path && current.type != NodeType::Path) return refused("only path nodes take a path");
     if (op.patch.lineReverse && current.type != NodeType::Line) return refused("only line nodes take lineReverse");
@@ -336,7 +341,7 @@ std::optional<OpBody> Document::setProps(const SetProps& op) {
 std::optional<OpBody> Document::move(const MoveNode& op) {
     const auto it = nodes_.find(op.id);
     if (it == nodes_.end()) return refused("no node has this id");
-    if(!op.parent.isNil() && (it->second.prototypeStart || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame must stay at the document root");
+    if(!op.parent.isNil() && (it->second.prototypeStart || it->second.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame must stay at the document root");
     if (!isValidParent(op.parent)) return refused("the parent does not exist or cannot have children");
     if (!op.parent.isNil() && isAncestorOrSelf(op.id, op.parent)) {
         return refused("a node cannot move into itself or its descendants");
@@ -438,6 +443,7 @@ std::optional<OpBody> Document::setOverride(const SetOverride& op) {
     if (op.patch.type || op.patch.component || op.patch.componentValues || op.patch.typography) {
         return refused("overrides cannot change type, component, componentValues or typography");
     }
+    if(op.patch.prototypeOverflow) return refused("overrides cannot set prototypeOverflow");
     if(op.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
     if(op.patch.interaction && !validInteraction(*op.patch.interaction)) return std::nullopt;
     if (isSwapTarget(op.instance) && op.node != it->second.component && op.patch != NodePatch{}) return refused("an instance swap property controls this instance; override its root only");
@@ -606,7 +612,7 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
             if (std::find(axis->values.begin(), axis->values.end(), value) == axis->values.end()) return refuse("when uses a value the axis does not declare: " + value);
         }
         const DiagnosticScope patchScope{"patch"};
-        if(p.interaction || p.prototypeStart) return refuse("variant rules cannot set prototype interactions or starting screens");
+        if(p.interaction || p.prototypeStart || p.prototypeOverflow) return refuse("variant rules cannot set prototype interactions, starting screens or overflow");
         const bool lineTarget = target->type == NodeType::Line;
         const bool pathTarget = target->type == NodeType::Path;
         const bool imageTarget = target->type == NodeType::Image;

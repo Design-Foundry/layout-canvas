@@ -112,6 +112,7 @@ struct Path {
 [[nodiscard]] const char* pathProblem(const Path& path);
 
 enum class PrototypeAction { None, Navigate, Back, OpenOverlay, CloseOverlay };
+enum class PrototypeOverflow { None, Vertical, Horizontal, Both };
 enum class PrototypeTransition { Instant, Dissolve, SlideLeft, SlideRight, SlideUp, SlideDown, PushLeft, PushRight, PushUp, PushDown };
 enum class OverlayPlacement { Center, TopLeft, TopCenter, TopRight, CenterLeft, CenterRight, BottomLeft, BottomCenter, BottomRight, Manual };
 struct OverlayOffset {
@@ -139,6 +140,7 @@ struct ImageCrop : Rect {
 struct NodePatch {
     std::optional<Interaction> interaction;
     std::optional<bool> prototypeStart;
+    std::optional<PrototypeOverflow> prototypeOverflow;
     std::optional<Raster> image;
     std::optional<std::string> imageFit;
     std::optional<ImageCrop> imageCrop;
@@ -236,6 +238,7 @@ struct Override {
 struct Node {
     Interaction interaction;
     bool prototypeStart = false;
+    PrototypeOverflow prototypeOverflow = PrototypeOverflow::None;
     Raster image;
     std::string imageFit = "cover";
     ImageCrop imageCrop;

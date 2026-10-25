@@ -116,7 +116,7 @@ TEST_CASE("snapshot version gates name the feature and the version", "[diagnosti
 
     vc::clearDiagnostic();
     REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":99,"nodes":[]})").has_value());
-    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"version", "version must be from 1 to 18"});
+    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"version", "version must be from 1 to 19"});
 }
 
 TEST_CASE("snapshot top level shape is explained", "[diagnostics][json]") {

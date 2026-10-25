@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 18;
+constexpr int kSnapshotVersion = 19;
 
 bool extendedPrototype(const Interaction& interaction) {
     return interaction.action==PrototypeAction::OpenOverlay || interaction.action==PrototypeAction::CloseOverlay || interaction.transition!=PrototypeTransition::Instant;
@@ -67,6 +67,9 @@ std::optional<E> valueOf(const std::array<std::pair<E, std::string_view>, N>& na
 
 constexpr std::array<std::pair<ColorChannel, std::string_view>, 4> kChannels{{
     {ColorChannel::L, "l"}, {ColorChannel::C, "c"}, {ColorChannel::H, "h"}, {ColorChannel::Alpha, "alpha"}}};
+constexpr std::array<std::pair<PrototypeOverflow, std::string_view>, 4> kPrototypeOverflows{{
+    {PrototypeOverflow::None,"none"}, {PrototypeOverflow::Vertical,"vertical"},
+    {PrototypeOverflow::Horizontal,"horizontal"}, {PrototypeOverflow::Both,"both"}}};
 constexpr std::array<std::pair<PrototypeTransition, std::string_view>, 10> kPrototypeTransitions{{
     {PrototypeTransition::Instant,"instant"}, {PrototypeTransition::Dissolve,"dissolve"},
     {PrototypeTransition::SlideLeft,"slide-left"}, {PrototypeTransition::SlideRight,"slide-right"},
@@ -172,6 +175,7 @@ json writeValues(const ComponentValues& values) {
 
 void writePatch(json& out, const NodePatch& p) {
     if(p.prototypeStart) out["prototypeStart"]=*p.prototypeStart;
+    if(p.prototypeOverflow) out["prototypeOverflow"]=nameOf(kPrototypeOverflows,*p.prototypeOverflow);
     if(p.interaction) {
         switch(p.interaction->action) {
             case PrototypeAction::None: out["interaction"]=nullptr;break;
@@ -566,6 +570,12 @@ std::optional<TextStyle> readTextStyle(const json& v) {
 std::optional<NodePatch> readPatch(const json& j) {
     NodePatch p;
     if(!readField(j,"prototypeStart",p.prototypeStart,readBool)) return std::nullopt;
+    if(j.contains("prototypeOverflow")) {
+        DiagnosticScope field{"prototypeOverflow"};
+        const auto value=valueOf(kPrototypeOverflows,j["prototypeOverflow"]);
+        if(!value) return refused("prototypeOverflow must be none, vertical, horizontal or both");
+        p.prototypeOverflow=*value;
+    }
     if(j.contains("interaction")) {
         DiagnosticScope interactionField{"interaction"};
         const auto& i=j["interaction"];
@@ -879,6 +889,7 @@ std::optional<Node> readNode(const json& j) {
     if (*type != NodeType::Image && patch->imageCrop) return misplaced("imageCrop", "only image nodes take imageCrop");
     if (*type == NodeType::Instance && patch->interaction) return misplaced("interaction", "instance interactions use component-root overrides");
     if (patch->prototypeStart && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeStart", "only root frames take flow starting flags");
+    if (patch->prototypeOverflow && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeOverflow", "only root frames take prototype overflow");
     if (patch->textStyle) return misplaced("textStyle", "nodes store their full text, use text instead of textStyle");
     if (*type == NodeType::Text && !patch->text) return misplaced("text", "text nodes need text");
     if (*type != NodeType::Text && patch->text) return misplaced("text", "only text nodes take text");
@@ -1468,6 +1479,7 @@ std::string snapshotToJson(const Document& document) {
     bool prototype = false;
     bool extended = false;
     bool positioned = false;
+    bool scrolling = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
     document.forEachInPaintOrder([&](const Node& node) {
@@ -1480,6 +1492,7 @@ std::string snapshotToJson(const Document& document) {
         prototype = prototype || node.interaction!=Interaction{} || node.prototypeStart;
         extended = extended || extendedPrototype(node.interaction);
         positioned = positioned || positionedPrototype(node.interaction);
+        scrolling = scrolling || node.prototypeOverflow!=PrototypeOverflow::None;
         swaps = swaps || !node.definition.swaps.empty();
         text = text || node.type == NodeType::Text;
         wrapping = wrapping || node.textWrap;
@@ -1492,6 +1505,7 @@ std::string snapshotToJson(const Document& document) {
             prototype = prototype || patch.interaction.has_value() || patch.prototypeStart.has_value();
             extended = extended || (patch.interaction && extendedPrototype(*patch.interaction));
             positioned = positioned || (patch.interaction && positionedPrototype(*patch.interaction));
+            scrolling = scrolling || patch.prototypeOverflow.has_value();
             curved = curved || (patch.path && (patch.path->filled || !patch.path->inHandles.empty()));
             oblique = oblique || (patch.text && slanted(patch.text->font)) || (patch.textStyle && patch.textStyle->font && slanted(*patch.textStyle->font));
             wrapping = wrapping || patch.textWrap.has_value();
@@ -1503,7 +1517,7 @@ std::string snapshotToJson(const Document& document) {
         for (const auto& o : node.overrides) styleVersion(o.patch);
         for (const auto& r : node.definition.rules) styleVersion(r.patch);
     });
-    return json{{"version", positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
+    return json{{"version", scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
 }
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
@@ -1567,6 +1581,7 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         DiagnosticScope entry{slot(index)};
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
+        if(version<19 && (node->prototypeOverflow!=PrototypeOverflow::None || j["nodes"][index].contains("prototypeOverflow"))) return refused("prototype overflow needs snapshot version 19 or later");
         const auto prototypePatch=[](const NodePatch& p){return p.interaction.has_value() || p.prototypeStart.has_value();};
         const auto extendedPatch=[](const NodePatch& p){return p.interaction && extendedPrototype(*p.interaction);};
         const auto positionedPatch=[](const NodePatch& p){return p.interaction && positionedPrototype(*p.interaction);};

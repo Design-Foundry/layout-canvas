@@ -218,3 +218,46 @@ TEST_CASE("Snapshot18 positions and slide transitions guard source and override-
     p.interaction->placement=OverlayPlacement::Manual;p.interaction->overlayOffset={-12.5,40};REQUIRE(f.session.edit(SetOverride{instance,hotspot.id,p}));refusesDowngrade();
     p.interaction->placement=OverlayPlacement::Center;p.interaction->overlayOffset={};REQUIRE(f.session.edit(SetOverride{instance,hotspot.id,p}));REQUIRE(snapshotToJson(f.session.document()).find("\"version\":17")!=std::string::npos);
 }
+TEST_CASE("Prototype overflow JSON patches are strict and preserve explicit clears") {
+    for(const auto value:{"none","vertical","horizontal","both"}) {
+        const auto patch=patchFromJson(std::string{"{\"prototypeOverflow\":\""}+value+"\"}");REQUIRE(patch);REQUIRE(patch->prototypeOverflow);
+        const auto encoded=opToJson(SetProps{Id{146,1},*patch});REQUIRE(encoded.find(std::string{"\"prototypeOverflow\":\""}+value+"\"")!=std::string::npos);
+        const auto decoded=opFromJson("SetProps",encoded);REQUIRE(decoded);REQUIRE(std::get<SetProps>(*decoded).patch==*patch);
+    }
+    for(const auto json:{R"({"prototypeOverflow":null})",R"({"prototypeOverflow":1})",R"({"prototypeOverflow":true})",R"({"prototypeOverflow":"auto"})",R"({"prototypeOverflow":"Vertical"})"}) REQUIRE_FALSE(patchFromJson(json));
+    const auto invalid=opFromJson("CreateNode",R"({"id":"00000000-0000-0000-0000-000000000001","type":"rect","order":"a0","prototypeOverflow":"none"})");REQUIRE_FALSE(invalid);
+}
+TEST_CASE("Prototype overflow patch inverse merge undo and clear retain independent screen behavior") {
+    Prototypes f;const auto screen=f.create();NodePatch overflow;overflow.prototypeOverflow=PrototypeOverflow::Vertical;NodePatch start;start.prototypeStart=true;
+    const auto combined=mergePatch(overflow,start);REQUIRE(combined.prototypeOverflow==overflow.prototypeOverflow);REQUIRE(combined.prototypeStart==start.prototypeStart);
+    Node node=screen;const auto inverse=applyPatch(node,combined);REQUIRE(node.prototypeOverflow==PrototypeOverflow::Vertical);applyPatch(node,inverse);REQUIRE(node==screen);
+    REQUIRE(f.editor.setProps(screen.id,combined));REQUIRE(f.session.document().find(screen.id)->prototypeOverflow==PrototypeOverflow::Vertical);
+    REQUIRE(f.editor.undo());REQUIRE(f.session.document().find(screen.id)->prototypeOverflow==PrototypeOverflow::None);REQUIRE(f.editor.redo());
+    NodePatch clear;clear.prototypeOverflow=PrototypeOverflow::None;REQUIRE(f.editor.setProps(screen.id,clear));REQUIRE(f.session.document().find(screen.id)->prototypeStart);REQUIRE(f.editor.undo());REQUIRE(f.session.document().find(screen.id)->prototypeOverflow==PrototypeOverflow::Vertical);
+    REQUIRE(mergePatch(combined,clear).prototypeOverflow==PrototypeOverflow::None);
+}
+TEST_CASE("Prototype overflow is restricted to authored root frames and cannot survive nesting or promotion") {
+    Prototypes f;const auto root=f.create(),other=f.create(),child=f.create(NodeType::Frame,root.id),rect=f.create(NodeType::Rect),main=f.create(NodeType::Component);const auto instance=*f.editor.createInstance(main.id);
+    for(const auto id:{child.id,rect.id,main.id,instance}) for(const auto value:{PrototypeOverflow::None,PrototypeOverflow::Vertical}) {NodePatch patch;patch.prototypeOverflow=value;REQUIRE_FALSE(f.session.edit(SetProps{id,patch}));}
+    auto invalid=f.node(NodeType::Rect);invalid.prototypeOverflow=PrototypeOverflow::Both;REQUIRE_FALSE(f.session.edit(CreateNode{invalid}));invalid=f.node();invalid.prototypeOverflow=static_cast<PrototypeOverflow>(99);REQUIRE_FALSE(f.session.edit(CreateNode{invalid}));
+    NodePatch patch;patch.prototypeOverflow=static_cast<PrototypeOverflow>(-1);REQUIRE_FALSE(f.session.edit(SetProps{root.id,patch}));patch.prototypeOverflow=PrototypeOverflow::Horizontal;REQUIRE(f.session.edit(SetProps{root.id,patch}));
+    const auto before=snapshotToJson(f.session.document());REQUIRE_FALSE(f.session.edit(MoveNode{root.id,other.id,"a1"}));NodePatch promotion;promotion.type=NodeType::Component;REQUIRE_FALSE(f.session.edit(SetProps{root.id,promotion}));REQUIRE(snapshotToJson(f.session.document())==before);
+    patch.prototypeOverflow=PrototypeOverflow::None;REQUIRE(f.session.edit(SetProps{root.id,patch}));REQUIRE(f.session.edit(SetProps{root.id,promotion}));
+}
+TEST_CASE("Prototype overflow forbids component overrides and variant rules including explicit none") {
+    Prototypes f;const auto main=f.create(NodeType::Component),child=f.create(NodeType::Frame,main.id);const auto instance=*f.editor.createInstance(main.id);
+    for(const auto value:{PrototypeOverflow::None,PrototypeOverflow::Both}) {
+        NodePatch patch;patch.prototypeOverflow=value;REQUIRE_FALSE(f.session.edit(SetOverride{instance,main.id,patch}));REQUIRE_FALSE(f.session.edit(SetOverride{instance,child.id,patch}));
+        auto raw=f.node(NodeType::Instance);raw.component=main.id;raw.overrides={{child.id,patch}};REQUIRE_FALSE(f.session.edit(CreateNode{raw}));
+        ComponentDefinition definition;definition.axes.push_back({"state",{"a","b"},"a"});definition.rules={{{{"state","b"}},child.id,patch}};REQUIRE_FALSE(f.editor.setComponentDefinition(main.id,definition));
+    }
+}
+TEST_CASE("Prototype overflow snapshot19 preserves each axis refuses downgrades and keeps default snapshots minimal") {
+    for(const auto value:{PrototypeOverflow::Vertical,PrototypeOverflow::Horizontal,PrototypeOverflow::Both}) {
+        Prototypes f;const auto screen=f.create();NodePatch patch;patch.prototypeOverflow=value;REQUIRE(f.editor.setProps(screen.id,patch));const auto snapshot=snapshotToJson(f.session.document());REQUIRE(snapshot.find("\"version\":19")!=std::string::npos);
+        const auto ops=snapshotFromJson(snapshot);REQUIRE(ops.has_value());Document loaded;for(const auto& op:*ops)REQUIRE(loaded.apply(op));REQUIRE(loaded.find(screen.id)->prototypeOverflow==value);
+        auto old=snapshot;old.replace(old.find("\"version\":19"),12,"\"version\":18");REQUIRE_FALSE(snapshotFromJson(old).has_value());
+        patch.prototypeOverflow=PrototypeOverflow::None;REQUIRE(f.editor.setProps(screen.id,patch));const auto plain=snapshotToJson(f.session.document());REQUIRE(plain.find("prototypeOverflow")==std::string::npos);REQUIRE(plain.find("\"version\":2")!=std::string::npos);
+    }
+    REQUIRE_FALSE(snapshotFromJson(R"({"version":18,"modes":[],"tokens":[],"nodes":[{"id":"00000000-0000-0000-0000-000000000001","type":"frame","order":"a0","prototypeOverflow":"none"}]})").has_value());
+}

@@ -94,3 +94,23 @@ test('snapshot18 positioned overlays and directional transitions refuse componen
     assert.throws(() => exportComponent(data.snapshot, id(1)), /document-local/);
   }
 });
+
+test('snapshot19 without document-local overflow remains portable', () => {
+  const data = fixture();
+  data.snapshot.version = 19;
+  assert.equal(readComponent(JSON.stringify(data)).snapshot.version, 19);
+});
+test('prototype overflow refuses portable files on nodes and nested patches including none', () => {
+  for (const value of ['none', 'vertical', 'horizontal', 'both']) {
+    for (const location of ['node', 'overrides', 'rules']) {
+      const data = fixture();
+      data.snapshot.version = 19;
+      const patch = { prototypeOverflow: value };
+      if (location === 'node') Object.assign(data.snapshot.nodes[0], patch);
+      else if (location === 'overrides') data.snapshot.nodes[0].overrides = [{ node: id(2), patch }];
+      else data.snapshot.nodes[0].definition = { rules: [{ target: id(2), when: { tone: 'a' }, patch }] };
+      assert.throws(() => readComponent(JSON.stringify(data)), /document-local/);
+      assert.throws(() => exportComponent(data.snapshot, id(1)), /document-local/);
+    }
+  }
+});
