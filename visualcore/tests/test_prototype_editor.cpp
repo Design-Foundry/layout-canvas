@@ -538,3 +538,121 @@ TEST_CASE("Remote content shrink clamps scroll and cancels in-flight touch; resi
     f.editor.resizePrototype({600,400});REQUIRE(f.editor.prototypeScroll(f.a).y==10);
     f.editor.stopPrototype();REQUIRE(f.editor.startPrototype(f.a,{448,248}));REQUIRE(f.editor.prototypeScroll(f.a).y==0);
 }
+
+TEST_CASE("Ordered click entries dispatch only the first match and leave playback history clean") {
+    Prototype f;const auto c=f.add(NodeType::Frame,{},1000,200,200,100);
+    NodePatch p;p.interactions=std::vector<TriggeredInteraction>{
+        {PrototypeTrigger::Click,{PrototypeAction::Navigate,f.b}},
+        {PrototypeTrigger::Click,{PrototypeAction::Navigate,c}}};f.patch(f.button,p);
+    const auto snapshot=snapshotToJson(f.session.document());
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.editor.prototypeBack());
+    p.interactions=std::vector<TriggeredInteraction>{};f.patch(f.button,p); // Remote changes cancel the captured press.
+    f.click(f.center(f.button));REQUIRE(f.editor.prototypeScreen()==f.a);
+    REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+}
+
+TEST_CASE("Hover entry resolves ancestors by trigger, excludes drag and touch, and never fires on release") {
+    Prototype f;const auto hotspot=f.add(NodeType::Frame,f.a,90,10,60,40);
+    const auto child=f.add(NodeType::Rect,hotspot,5,5,10,10);
+    NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Hover,{PrototypeAction::Navigate,f.b}}};f.patch(hotspot,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto point=f.camera.toScreen(f.center(child));
+    f.editor.pointerDown(point,PointerButton::Primary);f.editor.pointerMove(point);f.editor.pointerUpAt(point);
+    REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.prototypeTouchStart(point);f.editor.prototypeTouchMove(point);f.editor.prototypeTouchEnd();REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.pointerMove(point);REQUIRE(f.editor.prototypeScreen()==f.b);
+    REQUIRE(f.editor.prototypeBack());f.editor.pointerUpAt(point);REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.pointerMove(point);REQUIRE(f.editor.prototypeScreen()==f.b);
+}
+
+TEST_CASE("Primary press consumes its click and ignores secondary buttons or transitioning scenes") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1000,200,100,60);
+    NodePatch p;p.interactions=std::vector<TriggeredInteraction>{
+        {PrototypeTrigger::Press,{PrototypeAction::OpenOverlay,modal}},
+        {PrototypeTrigger::Click,{PrototypeAction::Navigate,f.b}}};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto point=f.camera.toScreen(f.center(f.button));
+    f.editor.pointerDown(point,PointerButton::Secondary);f.editor.pointerUpAt(point);REQUIRE(f.editor.prototypeOverlay().isNil());
+    f.editor.pointerDown(point,PointerButton::Primary);REQUIRE(f.editor.prototypeOverlay()==modal);
+    f.editor.pointerUpAt(point);REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE(f.editor.prototypeOverlay()==modal);
+    REQUIRE(f.editor.closePrototypeOverlay());p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Press,{PrototypeAction::Navigate,f.b,PrototypeTransition::Dissolve,300}}};f.patch(f.button,p);
+    f.editor.pointerDown(point,PointerButton::Primary);REQUIRE(f.editor.prototypeTransitioning());f.editor.pointerDown(point,PointerButton::Primary);
+    REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Delay runs one first-match action per node and at most one automatic action per frame") {
+    Prototype f;NodePatch p;p.interactions=std::vector<TriggeredInteraction>{
+        {PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.a},100}, // Consumed no-op.
+        {PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b},1}};f.patch(f.a,p);
+    p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b},100}};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.a); // Shadowed timer cannot fire.
+    f.editor.advancePrototype(99);REQUIRE(f.editor.prototypeScreen()==f.a); // First frame consumes root's no-op.
+    f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.b); // Next node gets the next frame.
+    REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+}
+
+TEST_CASE("Delay pauses through transitions and cyclic screen timers never recurse in one frame") {
+    Prototype f;NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b,PrototypeTransition::Dissolve,300},100}};f.patch(f.a,p);
+    p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Back},100}};f.patch(f.b,p);
+    const auto snapshot=snapshotToJson(f.session.document());REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    f.editor.advancePrototype(99);REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.editor.prototypeTransitioning());
+    f.editor.advancePrototype(10000);REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE_FALSE(f.editor.prototypeTransitioning());
+    f.editor.advancePrototype(99);REQUIRE(f.editor.prototypeScreen()==f.b);f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.advancePrototype(10000);REQUIRE(f.editor.prototypeScreen()==f.b); // One navigation, not an unbounded cycle.
+    f.editor.stopPrototype();f.editor.advancePrototype(10000);REQUIRE_FALSE(f.editor.presenting());
+    REQUIRE(snapshotToJson(f.session.document())==snapshot);REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Delay eligibility honors hidden and scrolled clipping, while top modals suspend base timers") {
+    Prototype f;NodePatch p;p.interaction=Interaction{};f.patch(f.button,p);
+    const auto offscreen=f.add(NodeType::Rect,f.a,10,250,30,30),hidden=f.add(NodeType::Rect,f.a,10,10,20,20);
+    p={};p.prototypeOverflow=PrototypeOverflow::Vertical;f.patch(f.a,p);
+    p={};p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b},100}};f.patch(offscreen,p);p.visible=false;f.patch(hidden,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.editor.advancePrototype(500);REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.wheel(f.camera.toScreen({150,250}),10000);f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.b);
+    REQUIRE(f.editor.restartPrototype());
+    const auto modal=f.add(NodeType::Frame,{},1000,200,100,60);p={};p.interaction=Interaction{PrototypeAction::OpenOverlay,modal};f.patch(f.button,p);
+    p={};p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b},100}};f.patch(f.a,p);
+    REQUIRE(f.editor.restartPrototype());f.click(f.center(f.button));REQUIRE(f.editor.prototypeOverlay()==modal);
+    f.editor.advancePrototype(1000);REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE(f.editor.closePrototypeOverlay());
+    f.editor.advancePrototype(99);REQUIRE(f.editor.prototypeScreen()==f.a);f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.b);
+}
+
+TEST_CASE("Remote edits and resizing cancel scheduled delays until explicit new entry or Restart") {
+    for(const bool remote:{false,true}) {
+        Prototype f;NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b},100}};f.patch(f.a,p);
+        REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.editor.advancePrototype(50);
+        if(remote) {p={};p.name="Changed";f.patch(f.button,p);} else f.editor.resizePrototype({600,400});
+        f.editor.advancePrototype(10000);REQUIRE(f.editor.prototypeScreen()==f.a);
+        REQUIRE(f.editor.restartPrototype());f.editor.advancePrototype(100);REQUIRE(f.editor.prototypeScreen()==f.b);
+    }
+}
+
+TEST_CASE("Independent copied-layer trigger lists replace inherited actions in playback") {
+    Prototype f;const auto main=f.add(NodeType::Component,{},1000,0,100,60),child=f.add(NodeType::Rect,main,0,0,100,60);
+    NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Click,{PrototypeAction::Navigate,f.b}}};f.patch(child,p);
+    Node instance;instance.id=f.session.newId();instance.type=NodeType::Instance;instance.component=main;instance.parent=f.a;instance.order="a1";instance.x=90;instance.y=10;instance.w=100;instance.h=60;
+    REQUIRE(f.session.applyRemote(CreateNode{instance}));
+    p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Hover,{PrototypeAction::Navigate,f.b}}};REQUIRE(f.session.applyRemote(SetOverride{instance.id,child,p}));
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const Vec2 world{220,240};
+    f.click(world);REQUIRE(f.editor.prototypeScreen()==f.a);f.editor.pointerMove(f.camera.toScreen(world));REQUIRE(f.editor.prototypeScreen()==f.b);
+    REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Initial full-stage layout settles before delay timing without canceling the flow") {
+    Prototype f;NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b},100}};f.patch(f.a,p);
+    REQUIRE(f.editor.startPrototype(f.a,{200,100}));f.editor.resizePrototype({870,668});
+    f.editor.advancePrototype(99);REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.b);
+}
+
+TEST_CASE("Automatic modal entry cancels an active base touch instead of scrolling behind the scrim") {
+    Prototype f;const auto modal=f.add(NodeType::Frame,{},1000,200,100,60);f.add(NodeType::Rect,f.a,0,200,20,100);
+    NodePatch p;p.prototypeOverflow=PrototypeOverflow::Vertical;f.patch(f.a,p);
+    p={};p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::OpenOverlay,modal},100}};f.patch(f.a,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto point=f.camera.toScreen({180,260});
+    f.editor.prototypeTouchStart(point);f.editor.advancePrototype(100);REQUIRE(f.editor.prototypeOverlay()==modal);
+    f.editor.prototypeTouchMove(point-Vec2{0,60});f.editor.prototypeTouchEnd();
+    REQUIRE(f.editor.prototypeScroll(f.a).y==0);REQUIRE(f.editor.prototypeScroll(modal).y==0);
+}

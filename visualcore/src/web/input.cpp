@@ -39,7 +39,7 @@ bool onMouseUp(int event, const EmscriptenMouseEvent* e, void* user) {
     auto& editor=editorFrom(user);
     if(editor.presenting()) {
         if(event==EMSCRIPTEN_EVENT_MOUSELEAVE) {editor.pointerCancel();return true;}
-        editor.pointerMove(positionOf(*e),modifiersOf(*e));
+        editor.pointerUpAt(positionOf(*e));return true;
     }
     editor.pointerUp();
     return true;

@@ -118,9 +118,11 @@ bool Editor::startPrototype(const Id& screen,Vec2 viewport) {
     presenting_=true;
     prototypeScreen_=prototypeStart_=screen;
     prototypeViewport_=viewport;
-    prototypeBaseScroll_={};prototypeTouch_=false;prototypeDocumentRevision_=session_.revision();
+    prototypeBaseScroll_={};prototypeTouch_=false;prototypeMouseDown_=false;prototypeDocumentRevision_=session_.revision();
+    prototypeLayoutPending_=true;
     prototypeHistory_.clear();prototypeOverlays_.clear();cancelPrototypeTransition();
     prototypeClick_=false;prototypeOutsidePressed_=false;
+    resetPrototypeTriggers();
     fitPrototype();
     touch();
     return true;
@@ -129,10 +131,11 @@ bool Editor::startPrototype(const Id& screen,Vec2 viewport) {
 void Editor::stopPrototype() {
     if(!presenting_) return;
     camera_=prototypeSavedCamera_;
-    presenting_=false;prototypeTouch_=false;prototypeBaseScroll_={};
+    presenting_=false;prototypeTouch_=false;prototypeMouseDown_=false;prototypeBaseScroll_={};
     prototypeScreen_={};prototypeStart_={};
     prototypeHistory_.clear();prototypeOverlays_.clear();cancelPrototypeTransition();
     prototypeClick_=false;prototypeOutsidePressed_=false;
+    cancelPrototypeTriggers();
     touch();
 }
 
@@ -155,6 +158,8 @@ void Editor::resizePrototype(Vec2 viewport) {
     if(!std::isfinite(viewport.x) || !std::isfinite(viewport.y) || viewport.x<=0 || viewport.y<=0) {prototypeClick_=false;return;}
     if(prototypeDocumentRevision_!=session_.revision() || viewport.x!=prototypeViewport_.x || viewport.y!=prototypeViewport_.y) {
         pointerCancel();
+        if(prototypeDocumentRevision_==session_.revision() && prototypeLayoutPending_) resetPrototypeTriggers();
+        else cancelPrototypeTriggers();
         if(prototypeDocumentRevision_!=session_.revision()) finishPrototypeTransition();
         prototypeDocumentRevision_=session_.revision();
         setPrototypeScroll(prototypeScreen_,prototypeBaseScroll_);
@@ -190,7 +195,7 @@ bool Editor::prototypeBack() {
     while(!prototypeHistory_.empty()) {
         const auto previous=prototypeHistory_.back();prototypeHistory_.pop_back();
         if(!prototypeEligible(previous.screen)) continue;
-        prototypeScreen_=previous.screen;prototypeBaseScroll_=clampPrototypeScroll(previous.screen,previous.scroll);prototypeClick_=false;fitPrototype();touch();return true;
+        prototypeScreen_=previous.screen;prototypeBaseScroll_=clampPrototypeScroll(previous.screen,previous.scroll);prototypeClick_=false;resetPrototypeTriggers();fitPrototype();touch();return true;
     }
     touch();return false;
 }
@@ -200,6 +205,7 @@ bool Editor::restartPrototype() {
     resizePrototype(prototypeViewport_);
     if(!presenting_) return false;
     prototypeScreen_=prototypeStart_;prototypeBaseScroll_={};prototypeTouch_=false;prototypeHistory_.clear();prototypeOverlays_.clear();cancelPrototypeTransition();prototypeClick_=false;
+    resetPrototypeTriggers();
     fitPrototype();touch();return true;
 }
 
@@ -249,10 +255,14 @@ void Editor::setPrototypeReducedMotion(bool reduced) {
 void Editor::advancePrototype(double deltaMs) {
     if(!presenting_) return;
     resizePrototype(prototypeViewport_);
-    if(!prototypeTransitioning() || !std::isfinite(deltaMs) || deltaMs<=0) return;
-    prototypeElapsed_=std::min(prototypeDuration_,prototypeElapsed_+deltaMs);
-    if(prototypeElapsed_>=prototypeDuration_) cancelPrototypeTransition();
-    touch();
+    if(!presenting_ || !std::isfinite(deltaMs) || deltaMs<=0) return;
+    prototypeLayoutPending_=false;
+    if(prototypeTransitioning()) {
+        prototypeElapsed_=std::min(prototypeDuration_,prototypeElapsed_+deltaMs);
+        if(prototypeElapsed_>=prototypeDuration_) cancelPrototypeTransition();
+        touch();return; // Delay time starts after the destination has settled.
+    }
+    advancePrototypeTriggers(deltaMs);
 }
 
 std::vector<PrototypeLayer> Editor::prototypeLayers() const {
@@ -316,7 +326,7 @@ PrototypeScene Editor::prototypeScene() const {
 bool Editor::closePrototypeOverlay() {
     if(!presenting_ || prototypeOverlays_.empty()) return false;
     pointerCancel();
-    prototypeOverlays_.pop_back();cancelPrototypeTransition();prototypeClick_=false;prototypeOutsidePressed_=false;touch();return true;
+    prototypeOverlays_.pop_back();cancelPrototypeTransition();resetPrototypeTriggers();prototypeClick_=false;prototypeOutsidePressed_=false;touch();return true;
 }
 
 bool Editor::prototypeOutsideOverlay(Vec2 screen) const {
@@ -328,7 +338,7 @@ bool Editor::prototypeOutsideOverlay(Vec2 screen) const {
     return bounds && !bounds->contains(camera_.toWorld(screen)-prototypeOffset(overlay));
 }
 
-Id Editor::prototypeHotspot(Vec2 screen) const {
+Id Editor::prototypeHotspot(Vec2 screen,PrototypeTrigger trigger) const {
     if(prototypeTransitioning()) return {};
     const auto& document=session_.document();
     const auto stage=worldBounds(document,prototypeScreen_,activeMode_);
@@ -338,17 +348,26 @@ Id Editor::prototypeHotspot(Vec2 screen) const {
         !id.isNil();) {
         const auto* node=document.view(id);
         if(!node) return {};
-        if(node->interaction.action!=PrototypeAction::None) return id;
+        if(!node->interactions.empty()) {
+            if(std::any_of(node->interactions.begin(),node->interactions.end(),[&](const auto& entry){return entry.trigger==trigger;})) return id;
+        } else if(trigger==PrototypeTrigger::Click && node->interaction.action!=PrototypeAction::None) return id;
         if(id==root) break;
         id=node->parent;
     }
     return {};
 }
 
-bool Editor::activatePrototype(Vec2 screen) {
-    const auto* node=session_.document().view(prototypeHotspot(screen));
+bool Editor::activatePrototype(Vec2 screen,PrototypeTrigger trigger) {
+    const auto* node=session_.document().view(prototypeHotspot(screen,trigger));
     if(!node) return false;
-    const auto interaction=node->interaction;
+    if(!node->interactions.empty()) {
+        for(const auto& entry:node->interactions) if(entry.trigger==trigger) return runPrototypeInteraction(entry.interaction);
+        return false;
+    }
+    return trigger==PrototypeTrigger::Click && runPrototypeInteraction(node->interaction);
+}
+
+bool Editor::runPrototypeInteraction(const Interaction& interaction) {
     if(interaction.action==PrototypeAction::Back) return prototypeBack();
     if(interaction.action==PrototypeAction::CloseOverlay) return closePrototypeOverlay();
     if(interaction.action==PrototypeAction::Navigate || interaction.action==PrototypeAction::OpenOverlay) {
@@ -358,8 +377,10 @@ bool Editor::activatePrototype(Vec2 screen) {
             std::any_of(prototypeOverlays_.begin(),prototypeOverlays_.end(),[&](const auto& item){return item.screen==interaction.target;}))) return false;
         if(!overlay && interaction.target==prototypeScreen_) {
             if(prototypeOverlays_.empty()) return false;
-            prototypeOverlays_.clear();cancelPrototypeTransition();prototypeClick_=false;prototypeOutsidePressed_=false;touch();return true;
+            pointerCancel();
+            prototypeOverlays_.clear();cancelPrototypeTransition();resetPrototypeTriggers();prototypeClick_=false;prototypeOutsidePressed_=false;touch();return true;
         }
+        pointerCancel();
         const auto old=worldBounds(session_.document(),prototypeScreen_,activeMode_);
         const auto outgoingCamera=camera_;
         cancelPrototypeTransition();
@@ -394,7 +415,7 @@ bool Editor::activatePrototype(Vec2 screen) {
             prototypeTransitionBase_=worldBounds(session_.document(),prototypeScreen_,activeMode_);
             prototypeTransitionTarget_=overlay?worldBounds(session_.document(),prototypeOverlay(),activeMode_):old;
         } else cancelPrototypeTransition();
-        prototypeClick_=false;prototypeOutsidePressed_=false;touch();return true;
+        resetPrototypeTriggers();prototypeClick_=false;prototypeOutsidePressed_=false;touch();return true;
     }
     return false;
 }
@@ -513,6 +534,11 @@ void Editor::pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers)
         resizePrototype(prototypeViewport_);
         if(presenting_) {
             downScreen_=lastScreen_=screen;
+            prototypeMouseDown_=button==PointerButton::Primary;
+            if(button==PointerButton::Primary && !prototypeHotspot(screen,PrototypeTrigger::Press).isNil()) {
+                activatePrototype(screen,PrototypeTrigger::Press);
+                pointerCancel();return; // On-press does not also dispatch a release click.
+            }
             prototypePressed_=button==PointerButton::Primary?prototypeHotspot(screen):Id{};
             prototypeOutsidePressed_=button==PointerButton::Primary && !prototypeTransitioning() && prototypeOutsideOverlay(screen);
             prototypeClick_=!prototypePressed_.isNil() || prototypeOutsidePressed_;
@@ -579,8 +605,17 @@ void Editor::doubleClick(Vec2 screen) {
 
 void Editor::pointerMove(Vec2 screen, Modifiers modifiers) {
     if(presenting_) {
+        resizePrototype(prototypeViewport_);
+        if(!presenting_) return;
         lastScreen_=screen;
         if(distance(screen,downScreen_)>=kClickSlopPx) prototypeClick_=false;
+        if(!prototypeTouch_ && !prototypeMouseDown_) {
+            const auto hover=prototypeHotspot(screen,PrototypeTrigger::Hover);
+            if(hover!=prototypeHovered_) {
+                prototypeHovered_=hover;
+                if(!hover.isNil()) activatePrototype(screen,PrototypeTrigger::Hover);
+            }
+        }
         return;
     }
     modifiers_ = modifiers;
@@ -638,6 +673,7 @@ void Editor::update() {
 
 void Editor::pointerUp() {
     if(presenting_) {
+        prototypeMouseDown_=false;
         const bool click=std::exchange(prototypeClick_,false);
         const auto pressed=std::exchange(prototypePressed_,Id{});
         const bool outside=std::exchange(prototypeOutsidePressed_,false);
@@ -651,8 +687,16 @@ void Editor::pointerUp() {
     finish();
 }
 
+void Editor::pointerUpAt(Vec2 screen) {
+    if(presenting_) {
+        lastScreen_=screen;
+        if(distance(screen,downScreen_)>=kClickSlopPx) prototypeClick_=false;
+    }
+    pointerUp();
+}
+
 void Editor::pointerCancel() {
-    if(presenting_) {prototypeClick_=false;prototypeOutsidePressed_=false;prototypePressed_={};prototypeTouch_=false;prototypeTouchRoot_={};return;}
+    if(presenting_) {prototypeClick_=false;prototypeOutsidePressed_=false;prototypePressed_={};prototypeTouch_=false;prototypeTouchRoot_={};prototypeMouseDown_=false;prototypeHovered_={};return;}
     cancelPath();
     if (gesture_ == Gesture::Pan) {
         viewport_.pointerUp();
@@ -666,6 +710,69 @@ void Editor::pointerCancel() {
 void Editor::wheel(Vec2 screen, double deltaY, double deltaX) {
     if(presenting_) {scrollPrototype(screen,{deltaX,deltaY});return;}
     viewport_.wheel(screen, deltaY);
+}
+
+void Editor::resetPrototypeTriggers() {
+    prototypeTimersEnabled_=true;
+    prototypeTriggerElapsed_=0;
+    prototypeDelayFired_.clear();prototypeHovered_={};
+}
+
+void Editor::cancelPrototypeTriggers() {
+    prototypeTimersEnabled_=false;
+    prototypeTriggerElapsed_=0;
+    prototypeDelayFired_.clear();prototypeHovered_={};
+}
+
+std::vector<Id> Editor::prototypeVisibleNodes() const {
+    std::vector<Id> out;
+    const auto& document=session_.document();
+    const auto root=prototypeOverlays_.empty()?prototypeScreen_:prototypeOverlay();
+    const auto base=worldBounds(document,prototypeScreen_,activeMode_);
+    const auto bounds=worldBounds(document,root,activeMode_);
+    if(!base || !bounds) return out;
+    const auto intersect=[](const Rect& a,const Rect& b) {
+        const auto x=std::max(a.x,b.x),y=std::max(a.y,b.y);
+        return Rect{x,y,std::max(0.,std::min(a.x+a.w,b.x+b.w)-x),std::max(0.,std::min(a.y+a.h,b.y+b.h)-y)};
+    };
+    const auto offset=prototypeOffset(root);
+    const auto clip=intersect(*bounds,{base->x-offset.x,base->y-offset.y,base->w,base->h});
+    if(clip.w<=0 || clip.h<=0) return out;
+    out.push_back(root);
+    const auto scroll=prototypeScroll(root);
+    const auto collect=[&](const Id& parent,Vec2 origin,Rect clip,auto&& self)->void {
+        for(const auto& id:document.viewChildren(parent)) {
+            const auto* node=document.view(id);
+            if(!node || !node->visible) continue;
+            const auto local=document.box(id,activeMode_);
+            const Rect box{origin.x+local.x,origin.y+local.y,local.w,local.h};
+            const double reach=node->type==NodeType::Line || node->type==NodeType::Path?node->lineWidth/2:0;
+            const Rect paintedBox{box.x-reach,box.y-reach,box.w+2*reach,box.h+2*reach};
+            if(paintedBox.intersects(clip)) out.push_back(id);
+            if(isContainer(node->type)) {
+                const auto childClip=node->clipContent?intersect(clip,box):clip;
+                if(childClip.w>0 && childClip.h>0) self(id,{box.x,box.y},childClip,self);
+            }
+        }
+    };
+    collect(root,{bounds->x-scroll.x,bounds->y-scroll.y},clip,collect);
+    return out;
+}
+
+void Editor::advancePrototypeTriggers(double deltaMs) {
+    if(!prototypeTimersEnabled_) return;
+    prototypeTriggerElapsed_=std::min(60000.,prototypeTriggerElapsed_+deltaMs);
+    for(const auto& id:prototypeVisibleNodes()) {
+        if(prototypeDelayFired_.contains(id)) continue;
+        const auto* node=session_.document().view(id);
+        if(!node) continue;
+        const auto found=std::find_if(node->interactions.begin(),node->interactions.end(),[](const auto& entry){return entry.trigger==PrototypeTrigger::Delay;});
+        if(found==node->interactions.end() || prototypeTriggerElapsed_<found->delayMs) continue;
+        const auto interaction=found->interaction;
+        prototypeDelayFired_.insert(id);
+        runPrototypeInteraction(interaction);
+        return; // At most one due action per frame; cyclic flows cannot recurse.
+    }
 }
 
 Vec2 Editor::prototypeScroll(const Id& root) const {
@@ -712,13 +819,16 @@ bool Editor::scrollPrototype(Vec2 screen,Vec2 delta) {
     const bool changed=setPrototypeScroll(root,{current.x+delta.x/camera_.zoom(),current.y+delta.y/camera_.zoom()});
     // A wheel gesture cancels the pending click even when already at an edge.
     prototypeClick_=false;prototypeOutsidePressed_=false;prototypePressed_={};
+    prototypeHovered_={};
     return changed;
 }
 
 bool Editor::prototypeTouchStart(Vec2 screen) {
     if(!presenting_) return false;
+    const bool press=!prototypeHotspot(screen,PrototypeTrigger::Press).isNil();
     pointerCancel();pointerDown(screen,PointerButton::Primary);
     if(!presenting_) return false;
+    if(press) return true;
     prototypeTouch_=true;prototypeTouchDragged_=false;
     prototypeTouchRoot_=prototypeScrollRoot(screen);prototypeTouchPrevious_=screen;
     return true;
@@ -1728,7 +1838,8 @@ Handle Editor::handleAt(Vec2 screen) const {
 
 std::string_view Editor::cursor() const {
     if(presenting_) {
-        return prototypeHotspot(lastScreen_).isNil()?"default":"pointer";
+        return prototypeHotspot(lastScreen_).isNil() && prototypeHotspot(lastScreen_,PrototypeTrigger::Press).isNil() &&
+               prototypeHotspot(lastScreen_,PrototypeTrigger::Hover).isNil()?"default":"pointer";
     }
     const auto resizeCursor = [](Handle h) -> std::string_view {
         if (h.point >= 0) return "move";

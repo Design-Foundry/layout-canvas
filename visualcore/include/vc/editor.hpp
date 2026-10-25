@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -96,6 +97,8 @@ public:
     /// Modifier keys changed without the pointer moving. Updates the gesture in progress.
     void setModifiers(Modifiers modifiers);
     void pointerUp();
+    /// Release coordinates without synthesizing a hover/move event.
+    void pointerUpAt(Vec2 screen);
     /// Selects the child of the selected node under the pointer, which is how nodes inside an
     /// instance are reached.
     void doubleClick(Vec2 screen);
@@ -229,8 +232,13 @@ private:
     [[nodiscard]] Vec2 originOf(const Id& parent) const;
     void touch() { ++revision_; }
     void fitPrototype();
-    [[nodiscard]] Id prototypeHotspot(Vec2 screen) const;
-    bool activatePrototype(Vec2 screen);
+    [[nodiscard]] Id prototypeHotspot(Vec2 screen, PrototypeTrigger trigger = PrototypeTrigger::Click) const;
+    bool activatePrototype(Vec2 screen, PrototypeTrigger trigger = PrototypeTrigger::Click);
+    bool runPrototypeInteraction(const Interaction& interaction);
+    void resetPrototypeTriggers();
+    void cancelPrototypeTriggers();
+    void advancePrototypeTriggers(double deltaMs);
+    [[nodiscard]] std::vector<Id> prototypeVisibleNodes() const;
     [[nodiscard]] Vec2 prototypeOffset(const Id& screen) const;
     [[nodiscard]] bool prototypeOutsideOverlay(Vec2 screen) const;
     void cancelPrototypeTransition();
@@ -286,6 +294,12 @@ private:
     Vec2 prototypeTouchPrevious_{};
     bool prototypeClick_ = false;
     Id prototypePressed_;
+    Id prototypeHovered_;
+    bool prototypeMouseDown_ = false;
+    bool prototypeTimersEnabled_ = false;
+    bool prototypeLayoutPending_ = false;
+    double prototypeTriggerElapsed_ = 0;
+    std::unordered_set<Id> prototypeDelayFired_;
     struct PrototypeOverlay {
         Id screen;
         bool dismissOutside = true;
