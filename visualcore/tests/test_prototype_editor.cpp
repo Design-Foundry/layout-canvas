@@ -447,3 +447,15 @@ TEST_CASE("Prototype viewport and remote geometry interruptions finish at the de
         REQUIRE(f.editor.prototypeScene().from.empty());REQUIRE(f.editor.canPrototypeBack());REQUIRE(f.session.takeOutbox().empty());
     }
 }
+TEST_CASE("Prototype directional transitions between unequal viewports fall back without changing authored actions") {
+    for(const auto transition:{PrototypeTransition::SlideLeft,PrototypeTransition::SlideRight,PrototypeTransition::SlideUp,PrototypeTransition::SlideDown,
+        PrototypeTransition::PushLeft,PrototypeTransition::PushRight,PrototypeTransition::PushUp,PrototypeTransition::PushDown}) {
+        Prototype f;NodePatch p;p.w=100;p.h=300;f.patch(f.b,p);p={};
+        p.interaction=Interaction{PrototypeAction::Navigate,f.b,transition,400};f.patch(f.button,p);
+        const auto snapshot=snapshotToJson(f.session.document());REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+        REQUIRE(f.editor.prototypeScene().dissolve);f.editor.advancePrototype(200);
+        REQUIRE(f.editor.prototypeScene().progress==.5);f.editor.advancePrototype(200);
+        REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE_FALSE(f.editor.prototypeTransitioning());
+        REQUIRE(snapshotToJson(f.session.document())==snapshot);REQUIRE(f.session.takeOutbox().empty());
+    }
+}

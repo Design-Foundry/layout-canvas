@@ -371,6 +371,15 @@ bool Editor::activatePrototype(Vec2 screen) {
         }
         if(interaction.transition!=PrototypeTransition::Instant && !prototypeReducedMotion_) {
             prototypeDuration_=interaction.durationMs;prototypeElapsed_=0;prototypeOverlayTransition_=overlay;prototypeTransition_=interaction.transition;
+            if(!overlay && prototypeTransition_!=PrototypeTransition::Dissolve && !prototypeOutgoing_.empty()) {
+                const auto viewport=prototypeOutgoing_.front().viewport;
+                const auto incoming=worldBounds(session_.document(),prototypeScreen_,activeMode_);
+                // A directional wipe cannot cover a differently shaped old viewport.
+                // Blend complete scenes rather than dropping the uncovered pixels at the end.
+                if(viewport && incoming && (std::abs(viewport->x-incoming->x)>1e-6 || std::abs(viewport->y-incoming->y)>1e-6 ||
+                    std::abs(viewport->w-incoming->w)>1e-6 || std::abs(viewport->h-incoming->h)>1e-6))
+                    prototypeTransition_=PrototypeTransition::Dissolve;
+            }
             prototypeTransitionBase_=worldBounds(session_.document(),prototypeScreen_,activeMode_);
             prototypeTransitionTarget_=overlay?worldBounds(session_.document(),prototypeOverlay(),activeMode_):old;
         } else cancelPrototypeTransition();

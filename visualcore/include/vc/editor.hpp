@@ -24,7 +24,8 @@ struct Modifiers {
     bool deep = false;
 };
 
-/// A scoped screen translated in world units before presentation. Layers are back to front.
+/// A scoped screen mapped by point*scale+offset into the current camera's world.
+/// Viewport clips in that output space; layers are back to front.
 struct PrototypeLayer {
     Id screen;
     Vec2 offset;
