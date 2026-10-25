@@ -4,8 +4,8 @@
 #include <algorithm>
 
 namespace vc {
-void transformDrawItem(DrawItem& item, Vec2 offset, double opacity, std::optional<Rect> viewport) {
-    const auto translate=[&](Rect& r) {r.x+=offset.x;r.y+=offset.y;};
+void transformDrawItem(DrawItem& item, Vec2 offset, double opacity, std::optional<Rect> viewport, double scale) {
+    const auto translate=[&](Rect& r) {r.x=r.x*scale+offset.x;r.y=r.y*scale+offset.y;r.w*=scale;r.h*=scale;};
     translate(item.quad);translate(item.clip);
     if(viewport) {
         const auto x=std::max(item.clip.x,viewport->x),y=std::max(item.clip.y,viewport->y);
@@ -14,7 +14,9 @@ void transformDrawItem(DrawItem& item, Vec2 offset, double opacity, std::optiona
     }
     if(item.kind!=DrawKind::Glyph && item.kind!=DrawKind::Image) translate(item.a.rect);
     translate(item.b.rect);
-    for(auto& point:item.points) {point.x+=offset.x;point.y+=offset.y;}
+    for(auto& point:item.points) {point.x=point.x*scale+offset.x;point.y=point.y*scale+offset.y;}
+    for(auto* radii:{&item.a.radii,&item.b.radii}) for(auto& radius:*radii) radius*=scale;
+    item.sigma*=scale;item.strokeWidth*=scale;
     item.color.a*=static_cast<float>(std::clamp(opacity,0.,1.));
 }
 namespace {

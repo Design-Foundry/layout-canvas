@@ -52,7 +52,7 @@ std::size_t buildDrawList(const Document& document, const Rect& view, const Id& 
 
 /// Translate native presentation geometry, keeping glyph/image UV coordinates unchanged.
 void transformDrawItem(DrawItem& item, Vec2 offset, double opacity,
-                       std::optional<Rect> viewport = std::nullopt);
+                       std::optional<Rect> viewport = std::nullopt, double scale = 1);
 
 /// The color drawn for a token reference that can't be resolved.
 inline constexpr Color kUnresolvedColor{1.0f, 0.0f, 1.0f, 1.0f};

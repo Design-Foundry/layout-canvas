@@ -183,3 +183,12 @@ TEST_CASE("clipping frames pass their box to children") {
     REQUIRE(same(items.back().clip, {10, 10, 50, 50}));
     REQUIRE(same(items.back().a.rect, {50, 50, 30, 30}));
 }
+TEST_CASE("Presentation affine scaling preserves old viewport geometry and texture coordinates") {
+    DrawItem item;item.kind=DrawKind::Image;item.quad={10,20,30,40};item.clip={0,0,100,80};
+    item.a.rect={.1,.2,.3,.4};item.b.rect={8,9,0,0};item.points={{4,5},{6,7}};
+    item.a.radii={1,2,3,4};item.strokeWidth=3;item.sigma=2;item.color={1,1,1,.8f};
+    vc::transformDrawItem(item,{100,200},1,std::nullopt,2);
+    REQUIRE(item.quad.x==120);REQUIRE(item.quad.w==60);REQUIRE(item.clip.w==200);
+    REQUIRE(item.points[0].x==108);REQUIRE(item.a.radii[3]==8);REQUIRE(item.strokeWidth==6);REQUIRE(item.sigma==4);
+    REQUIRE_THAT(item.a.rect.x,WithinAbs(.1,.00001));REQUIRE_THAT(item.color.a,WithinAbs(.8,.00001));
+}

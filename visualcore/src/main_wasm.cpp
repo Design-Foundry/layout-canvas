@@ -139,6 +139,7 @@ void stopPrototype() {if(rt)rt->editor.stopPrototype();}
 bool prototypeBack() {return rt && rt->editor.prototypeBack();}
 bool restartPrototype() {return rt && rt->editor.restartPrototype();}
 bool closePrototypeOverlay() {return rt && rt->editor.closePrototypeOverlay();}
+void setPrototypeReducedMotion(bool reduced) {if(rt) rt->editor.setPrototypeReducedMotion(reduced);}
 
 std::string prototypeState() {
     if(!rt) return "{\"active\":false,\"screen\":null,\"start\":null,\"canBack\":false,\"overlay\":null,\"transitioning\":false}";
@@ -470,6 +471,7 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("prototypeBack", &prototypeBack);
     function("restartPrototype", &restartPrototype);
     function("closePrototypeOverlay", &closePrototypeOverlay);
+    function("setPrototypeReducedMotion", &setPrototypeReducedMotion);
     function("prototypeState", &prototypeState);
     function("prototypeScreens", &prototypeScreens);
     function("select", &select);

@@ -152,6 +152,14 @@ void Editor::resizePrototype(Vec2 viewport) {
     if(!presenting_) return;
     if(!prototypeEligible(prototypeScreen_) || !prototypeEligible(prototypeStart_)) {stopPrototype();return;}
     if(!std::isfinite(viewport.x) || !std::isfinite(viewport.y) || viewport.x<=0 || viewport.y<=0) {prototypeClick_=false;return;}
+    const auto changed=[](const std::optional<Rect>& a,const std::optional<Rect>& b) {
+        return a.has_value()!=b.has_value() || (a && (a->x!=b->x || a->y!=b->y || a->w!=b->w || a->h!=b->h));
+    };
+    if(prototypeTransitioning() && (viewport.x!=prototypeViewport_.x || viewport.y!=prototypeViewport_.y ||
+        changed(prototypeTransitionBase_,worldBounds(session_.document(),prototypeScreen_,activeMode_)) ||
+        (prototypeOverlayTransition_ && changed(prototypeTransitionTarget_,worldBounds(session_.document(),prototypeOverlay(),activeMode_))) ||
+        (!prototypeOverlayTransition_ && !prototypeOutgoing_.empty() && changed(prototypeTransitionTarget_,worldBounds(session_.document(),prototypeOutgoing_.front().screen,activeMode_)))))
+        finishPrototypeTransition();
     for(std::size_t i=0;i<prototypeOverlays_.size();++i) {
         if(!prototypeEligible(prototypeOverlays_[i].screen)) {
             prototypeOverlays_.resize(i);cancelPrototypeTransition();prototypeClick_=false;touch();break;
@@ -216,6 +224,17 @@ Vec2 Editor::prototypeOffset(const Id& screen) const {
 
 void Editor::cancelPrototypeTransition() {
     prototypeOutgoing_.clear();prototypeDuration_=prototypeElapsed_=0;prototypeOverlayTransition_=false;prototypeTransition_=PrototypeTransition::Instant;
+    prototypeTransitionBase_.reset();prototypeTransitionTarget_.reset();
+}
+
+void Editor::finishPrototypeTransition() {
+    if(!prototypeTransitioning()) return;
+    cancelPrototypeTransition();prototypeClick_=false;prototypeOutsidePressed_=false;prototypePressed_={};touch();
+}
+
+void Editor::setPrototypeReducedMotion(bool reduced) {
+    prototypeReducedMotion_=reduced;
+    if(reduced) finishPrototypeTransition();
 }
 
 void Editor::advancePrototype(double deltaMs) {
@@ -257,14 +276,32 @@ std::vector<PrototypeLayer> Editor::prototypeLayers() const {
             layers.push_back(layer);
         }
     }
+    const auto stage=worldBounds(session_.document(),prototypeScreen_,activeMode_);
     layers.push_back({prototypeScreen_,prototypeOverlayTransition_?Vec2{}:incoming,
-        prototypeOverlayTransition_ || moving?1:progress,false});
+        prototypeOverlayTransition_ || moving?1:progress,false,1,stage});
     for(std::size_t i=0;i<prototypeOverlays_.size();++i) {
         const auto id=prototypeOverlays_[i].screen;
         const bool entering=prototypeOverlayTransition_ && i+1==prototypeOverlays_.size();
-        layers.push_back({id,prototypeOffset(id)+(entering?incoming:Vec2{}),entering && !moving?progress:1,true});
+        layers.push_back({id,prototypeOffset(id)+(entering?incoming:Vec2{}),entering && !moving?progress:1,true,1,stage});
     }
     return layers;
+}
+
+PrototypeScene Editor::prototypeScene() const {
+    PrototypeScene scene;
+    scene.to=prototypeLayers();
+    scene.dissolve=prototypeTransitioning() && prototypeTransition_==PrototypeTransition::Dissolve;
+    if(!scene.dissolve) return scene;
+    scene.progress=prototypeElapsed_/prototypeDuration_;
+    if(prototypeOverlayTransition_) {
+        scene.from=scene.to;
+        if(!scene.from.empty()) scene.from.pop_back();
+    } else {
+        scene.from=prototypeOutgoing_;
+        scene.to.erase(scene.to.begin(),scene.to.begin()+static_cast<std::ptrdiff_t>(prototypeOutgoing_.size()));
+    }
+    for(auto* layers:{&scene.from,&scene.to}) for(auto& layer:*layers) layer.opacity=1;
+    return scene;
 }
 
 bool Editor::closePrototypeOverlay() {
@@ -314,6 +351,7 @@ bool Editor::activatePrototype(Vec2 screen) {
             prototypeOverlays_.clear();cancelPrototypeTransition();prototypeClick_=false;prototypeOutsidePressed_=false;touch();return true;
         }
         const auto old=worldBounds(session_.document(),prototypeScreen_,activeMode_);
+        const auto outgoingCamera=camera_;
         cancelPrototypeTransition();
         if(overlay) {
             prototypeOverlays_.push_back({interaction.target,interaction.dismissOutside,interaction.placement,interaction.overlayOffset});
@@ -323,10 +361,18 @@ bool Editor::activatePrototype(Vec2 screen) {
             const auto previous=prototypeScreen_;
             prototypeScreen_=interaction.target;prototypeOverlays_.clear();fitPrototype();
             const auto next=worldBounds(session_.document(),prototypeScreen_,activeMode_);
-            if(old && next) prototypeOutgoing_.push_back({previous,{next->x+next->w/2-old->x-old->w/2,next->y+next->h/2-old->y-old->h/2},1,false});
+            if(old && next) {
+                const auto scale=outgoingCamera.zoom()/camera_.zoom();
+                const Vec2 offset{camera_.position().x-outgoingCamera.position().x*scale,
+                                  camera_.position().y-outgoingCamera.position().y*scale};
+                const Rect viewport{old->x*scale+offset.x,old->y*scale+offset.y,old->w*scale,old->h*scale};
+                prototypeOutgoing_.push_back({previous,offset,1,false,scale,viewport});
+            }
         }
-        if(interaction.transition!=PrototypeTransition::Instant) {
+        if(interaction.transition!=PrototypeTransition::Instant && !prototypeReducedMotion_) {
             prototypeDuration_=interaction.durationMs;prototypeElapsed_=0;prototypeOverlayTransition_=overlay;prototypeTransition_=interaction.transition;
+            prototypeTransitionBase_=worldBounds(session_.document(),prototypeScreen_,activeMode_);
+            prototypeTransitionTarget_=overlay?worldBounds(session_.document(),prototypeOverlay(),activeMode_):old;
         } else cancelPrototypeTransition();
         prototypeClick_=false;prototypeOutsidePressed_=false;touch();return true;
     }

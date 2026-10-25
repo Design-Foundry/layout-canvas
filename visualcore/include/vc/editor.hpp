@@ -30,6 +30,16 @@ struct PrototypeLayer {
     Vec2 offset;
     double opacity = 1;
     bool overlay = false;
+    double scale = 1;
+    std::optional<Rect> viewport;
+};
+
+/// Complete native scenes to mix after each has been painted at full opacity.
+struct PrototypeScene {
+    std::vector<PrototypeLayer> from;
+    std::vector<PrototypeLayer> to;
+    double progress = 1;
+    bool dissolve = false;
 };
 
 /// A resize handle: which vertical edge (-1 left, 1 right, 0 none) and which horizontal edge
@@ -62,6 +72,9 @@ public:
     void advancePrototype(double deltaMs);
     bool closePrototypeOverlay();
     [[nodiscard]] std::vector<PrototypeLayer> prototypeLayers() const;
+    [[nodiscard]] PrototypeScene prototypeScene() const;
+    void setPrototypeReducedMotion(bool reduced);
+    void finishPrototypeTransition();
     [[nodiscard]] Id prototypeOverlay() const;
     [[nodiscard]] bool prototypeTransitioning() const { return prototypeDuration_>0; }
     [[nodiscard]] bool presenting() const { return presenting_; }
@@ -268,6 +281,9 @@ private:
     double prototypeElapsed_ = 0;
     bool prototypeOverlayTransition_ = false;
     PrototypeTransition prototypeTransition_ = PrototypeTransition::Instant;
+    bool prototypeReducedMotion_ = false;
+    std::optional<Rect> prototypeTransitionBase_;
+    std::optional<Rect> prototypeTransitionTarget_;
 };
 
 [[nodiscard]] std::optional<Tool> toolFromName(std::string_view name);

@@ -387,3 +387,63 @@ TEST_CASE("Prototype manual overlay placement follows remote base geometry and i
     REQUIRE(f.editor.prototypeOverlay().isNil());REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE(f.editor.presenting());
     REQUIRE(f.session.takeOutbox().empty());
 }
+TEST_CASE("Prototype dissolve composes complete scenes once rather than fading individual paints") {
+    Prototype f;NodePatch p;p.interaction=Interaction{PrototypeAction::Navigate,f.b,PrototypeTransition::Dissolve,400};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));f.editor.advancePrototype(200);
+    const auto scene=f.editor.prototypeScene();REQUIRE(scene.dissolve);REQUIRE(scene.progress==.5);
+    REQUIRE(scene.from.size()==1);REQUIRE(scene.to.size()==1);
+    REQUIRE(scene.from[0].opacity==1);REQUIRE(scene.to[0].opacity==1);
+    REQUIRE(scene.from[0].screen==f.a);REQUIRE(scene.to[0].screen==f.b);
+    REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Prototype modal dissolve preserves the full background composition on both sides") {
+    Prototype f;const auto a=f.add(NodeType::Frame,{},1100,800,80,60),b=f.add(NodeType::Frame,{},1400,800,60,40);NodePatch p;
+    p.interaction=Interaction{PrototypeAction::OpenOverlay,a};f.patch(f.button,p);
+    p.interaction=Interaction{PrototypeAction::OpenOverlay,b,PrototypeTransition::Dissolve,400};f.patch(a,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    f.click(f.center(a)+f.editor.prototypeLayers().back().offset);f.editor.advancePrototype(200);
+    const auto scene=f.editor.prototypeScene();REQUIRE(scene.dissolve);REQUIRE(scene.progress==.5);
+    REQUIRE(scene.from.size()==2);REQUIRE(scene.to.size()==3);
+    REQUIRE(scene.from[0].screen==f.a);REQUIRE(scene.from[1].screen==a);REQUIRE(scene.to[2].screen==b);
+    for(const auto* layers:{&scene.from,&scene.to}) for(const auto& layer:*layers) REQUIRE(layer.opacity==1);
+    REQUIRE(f.editor.prototypeBack());REQUIRE_FALSE(f.editor.prototypeScene().dissolve);
+}
+
+TEST_CASE("Prototype outgoing screen retains its exact prior viewport across unequal destination sizes") {
+    Prototype f;NodePatch p;p.w=100;p.h=300;f.patch(f.b,p);
+    p={};p.interaction=Interaction{PrototypeAction::Navigate,f.b,PrototypeTransition::Dissolve,400};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto previous=f.camera;f.click(f.center(f.button));
+    const auto layer=f.editor.prototypeScene().from.front();REQUIRE(layer.scale!=1);REQUIRE(layer.viewport.has_value());
+    for(const Vec2 point:{Vec2{100,200},Vec2{300,300}}) {
+        const auto before=previous.toScreen(point),after=f.camera.toScreen({point.x*layer.scale+layer.offset.x,point.y*layer.scale+layer.offset.y});
+        REQUIRE_THAT(after.x,WithinAbs(before.x,1e-9));REQUIRE_THAT(after.y,WithinAbs(before.y,1e-9));
+    }
+    REQUIRE_THAT(layer.viewport->w*f.camera.zoom(),WithinAbs(200*previous.zoom(),1e-9));
+    REQUIRE_THAT(layer.viewport->h*f.camera.zoom(),WithinAbs(100*previous.zoom(),1e-9));
+    f.editor.advancePrototype(400);REQUIRE_FALSE(f.editor.prototypeScene().dissolve);REQUIRE(f.editor.prototypeScene().from.empty());
+}
+
+TEST_CASE("Prototype reduced motion skips animations and changing the preference settles a live transition") {
+    for(const auto transition:{PrototypeTransition::Dissolve,PrototypeTransition::SlideUp,PrototypeTransition::PushLeft}) {
+        Prototype f;NodePatch p;p.interaction=Interaction{PrototypeAction::Navigate,f.b,transition,400};f.patch(f.button,p);
+        const auto snapshot=snapshotToJson(f.session.document());f.editor.setPrototypeReducedMotion(true);
+        REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+        REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE(f.editor.canPrototypeBack());
+        REQUIRE(f.editor.prototypeBack());f.editor.setPrototypeReducedMotion(false);f.click(f.center(f.button));REQUIRE(f.editor.prototypeTransitioning());
+        f.editor.advancePrototype(100);f.editor.setPrototypeReducedMotion(true);
+        REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE(f.editor.prototypeScreen()==f.b);
+        REQUIRE(snapshotToJson(f.session.document())==snapshot);REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+    }
+}
+
+TEST_CASE("Prototype viewport and remote geometry interruptions finish at the destination without replay writes") {
+    for(const bool resize:{true,false}) {
+        Prototype f;NodePatch p;p.interaction=Interaction{PrototypeAction::Navigate,f.b,PrototypeTransition::Dissolve,400};f.patch(f.button,p);
+        REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));f.editor.advancePrototype(100);
+        if(resize) f.editor.resizePrototype({600,400});
+        else {p={};p.w=260;f.patch(f.b,p);f.editor.advancePrototype(1);}
+        REQUIRE(f.editor.presenting());REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE_FALSE(f.editor.prototypeTransitioning());
+        REQUIRE(f.editor.prototypeScene().from.empty());REQUIRE(f.editor.canPrototypeBack());REQUIRE(f.session.takeOutbox().empty());
+    }
+}
