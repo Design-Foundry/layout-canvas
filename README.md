@@ -62,5 +62,9 @@ individuals; the project name is not a legal entity or an assignment of rights.
     npm run contributors
     npm run contributors:check
 
-Attribution files do not grant a license or transfer copyright. Bundled fonts and
-third-party source retain their respective license notices.
+Attribution files do not transfer copyright. Bundled fonts and third-party source retain
+their respective license notices.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
