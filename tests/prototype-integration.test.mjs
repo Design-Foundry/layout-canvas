@@ -13,6 +13,25 @@ const fixture = () => ({
     modes: [],
   },
 });
+test('snapshot20 without ordered prototype metadata remains portable', () => {
+  const data = fixture();
+  data.snapshot.version = 20;
+  assert.equal(readComponent(JSON.stringify(data)).snapshot.version, 20);
+  assert.equal(exportComponent(data.snapshot, id(1)).snapshot.version, 20);
+});
+test('ordered prototype lists including empty masks cannot escape in portable components', () => {
+  for (const interactions of [[], [{ trigger: 'hover', action: 'back' }], [{ trigger: 'delay', delayMs: 500, action: 'back' }]]) {
+    for (const location of ['node', 'override', 'rule']) {
+      const data = fixture();
+      data.snapshot.version = 20;
+      if (location === 'node') data.snapshot.nodes[0].interactions = interactions;
+      if (location === 'override') data.snapshot.nodes[0].overrides = [{ node: id(2), patch: { interactions } }];
+      if (location === 'rule') data.snapshot.nodes[0].definition = { rules: [{ target: id(2), when: { state: 'a' }, patch: { interactions } }] };
+      assert.throws(() => readComponent(JSON.stringify(data)), /document-local/);
+      assert.throws(() => exportComponent(data.snapshot, id(1)), /document-local/);
+    }
+  }
+});
 test('native component files refuse document-local prototype metadata including explicit null and false', () => {
   for (const fields of [
     { interaction: null },

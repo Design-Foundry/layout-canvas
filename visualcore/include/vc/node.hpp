@@ -132,6 +132,15 @@ struct Interaction {
 };
 [[nodiscard]] bool validInteractionSettings(const Interaction& interaction);
 
+enum class PrototypeTrigger { Click, Hover, Press, Delay };
+struct TriggeredInteraction {
+    PrototypeTrigger trigger = PrototypeTrigger::Click;
+    Interaction interaction;
+    int delayMs = 0;
+    friend bool operator==(const TriggeredInteraction&,const TriggeredInteraction&) = default;
+};
+[[nodiscard]] bool validTriggeredInteractions(const std::vector<TriggeredInteraction>& interactions);
+
 struct ImageCrop : Rect {
     ImageCrop() : Rect{0,0,1,1} {}
     ImageCrop(double x,double y,double w,double h) : Rect{x,y,w,h} {}
@@ -139,6 +148,7 @@ struct ImageCrop : Rect {
 };
 struct NodePatch {
     std::optional<Interaction> interaction;
+    std::optional<std::vector<TriggeredInteraction>> interactions;
     std::optional<bool> prototypeStart;
     std::optional<PrototypeOverflow> prototypeOverflow;
     std::optional<Raster> image;
@@ -237,6 +247,7 @@ struct Override {
 
 struct Node {
     Interaction interaction;
+    std::vector<TriggeredInteraction> interactions;
     bool prototypeStart = false;
     PrototypeOverflow prototypeOverflow = PrototypeOverflow::None;
     Raster image;

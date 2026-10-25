@@ -33,6 +33,22 @@ bool validInteractionSettings(const Interaction& i) {
         default: return false;
     }
 }
+bool validTriggeredInteractions(const std::vector<TriggeredInteraction>& interactions) {
+    if(interactions.size()>16) return false;
+    for(const auto& entry:interactions) {
+        if(!validInteractionSettings(entry.interaction) || entry.interaction.action==PrototypeAction::None) return false;
+        switch(entry.trigger) {
+            case PrototypeTrigger::Click: case PrototypeTrigger::Hover: case PrototypeTrigger::Press:
+                if(entry.delayMs!=0) return false;
+                break;
+            case PrototypeTrigger::Delay:
+                if(entry.delayMs<1 || entry.delayMs>60000) return false;
+                break;
+            default: return false;
+        }
+    }
+    return true;
+}
 namespace {
 
 template <typename T>
@@ -63,7 +79,12 @@ bool validPath(const Path& path) {
 
 NodePatch applyPatch(Node& node, const NodePatch& patch) {
     NodePatch inverse;
-    swapIn(inverse.interaction,patch.interaction,node.interaction);
+    if(patch.interaction || patch.interactions) {
+        inverse.interaction=node.interaction;
+        if(patch.interactions || !node.interactions.empty()) inverse.interactions=node.interactions;
+        node.interaction=patch.interaction.value_or(Interaction{});
+        node.interactions=patch.interactions.value_or(std::vector<TriggeredInteraction>{});
+    }
     swapIn(inverse.prototypeStart,patch.prototypeStart,node.prototypeStart);
     swapIn(inverse.prototypeOverflow,patch.prototypeOverflow,node.prototypeOverflow);
     swapIn(inverse.image,patch.image,node.image);
@@ -111,7 +132,11 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
 
 NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
     NodePatch out = base;
-    if(top.interaction) out.interaction=top.interaction;
+    if(top.interaction || top.interactions) {
+        out.interaction=top.interaction.value_or(Interaction{});
+        if(top.interactions || base.interactions) out.interactions=top.interactions.value_or(std::vector<TriggeredInteraction>{});
+        else out.interactions.reset();
+    }
     if(top.prototypeStart) out.prototypeStart=top.prototypeStart;
     if(top.prototypeOverflow) out.prototypeOverflow=top.prototypeOverflow;
     if(top.image) out.image=top.image;
@@ -170,6 +195,7 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
 NodePatch fullPatch(const Node& n) {
     NodePatch p;
     if(n.interaction!=Interaction{}) p.interaction=n.interaction;
+    if(!n.interactions.empty()) p.interactions=n.interactions;
     if(n.prototypeStart) p.prototypeStart=true;
     if(n.prototypeOverflow!=PrototypeOverflow::None) p.prototypeOverflow=n.prototypeOverflow;
     if(n.type==NodeType::Image){p.image=n.image;p.imageFit=n.imageFit;p.imageCrop=n.imageCrop;}

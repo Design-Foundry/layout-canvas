@@ -43,7 +43,7 @@ function object(value: unknown): value is Record<string, any> {
 function snapshot(value: unknown): asserts value is ComponentSnapshot {
   if (
     !object(value) ||
-    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].includes(value['version']) ||
+    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].includes(value['version']) ||
     !Array.isArray(value['nodes']) ||
     !Array.isArray(value['tokens']) ||
     !Array.isArray(value['modes']) ||
@@ -58,7 +58,7 @@ function snapshot(value: unknown): asserts value is ComponentSnapshot {
     value['nodes'].some((node: any) => {
       const metadata = (fields: any) =>
         object(fields) &&
-        (Object.hasOwn(fields, 'interaction') || Object.hasOwn(fields, 'prototypeStart') || Object.hasOwn(fields, 'prototypeOverflow'));
+        (Object.hasOwn(fields, 'interaction') || Object.hasOwn(fields, 'interactions') || Object.hasOwn(fields, 'prototypeStart') || Object.hasOwn(fields, 'prototypeOverflow'));
       return (
         metadata(node) ||
         [...(node?.overrides ?? []), ...(node?.definition?.rules ?? [])].some((item: any) =>

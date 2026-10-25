@@ -11,6 +11,50 @@ struct Prototypes {
     Node create(NodeType type=NodeType::Frame,Id parent={}){auto n=node(type,parent);REQUIRE(session.edit(CreateNode{n}));return n;}
 };
 }
+TEST_CASE("Ordered prototype interactions validate triggers delay bounds lists and exclusive legacy actions") {
+    const auto patch=patchFromJson(R"({"interactions":[{"trigger":"hover","action":"back"},{"trigger":"press","action":"close-overlay"},{"trigger":"delay","delayMs":60000,"action":"back"},{"trigger":"click","action":"back"}]})");
+    REQUIRE(patch.has_value());REQUIRE(patch->interactions->size()==4);
+    REQUIRE(patch->interactions->at(0).trigger==PrototypeTrigger::Hover);REQUIRE(patch->interactions->at(2).delayMs==60000);
+    const auto encoded=opToJson(SetProps{Id{146,99},*patch});const auto op=opFromJson("SetProps",encoded);REQUIRE(op.has_value());REQUIRE(std::get<SetProps>(*op).patch==*patch);
+    for(const auto json:{R"({"interactions":null})",R"({"interactions":{}})",R"({"interactions":[null]})",R"({"interactions":[{"trigger":"delay","action":"back"}]})",R"({"interactions":[{"trigger":"delay","delayMs":0,"action":"back"}]})",R"({"interactions":[{"trigger":"delay","delayMs":60001,"action":"back"}]})",R"({"interactions":[{"trigger":"delay","delayMs":1.5,"action":"back"}]})",R"({"interactions":[{"trigger":"hover","delayMs":5,"action":"back"}]})",R"({"interactions":[{"trigger":"keydown","action":"back"}]})",R"({"interactions":[{"trigger":"click","action":"none"}]})",R"({"interaction":{"trigger":"click","action":"back"},"interactions":[{"trigger":"hover","action":"back"}]})"}) REQUIRE_FALSE(patchFromJson(json).has_value());
+    NodePatch oversized;oversized.interactions=std::vector<TriggeredInteraction>(17,{PrototypeTrigger::Click,Interaction{PrototypeAction::Back,{}}});Prototypes f;const auto source=f.create();REQUIRE_FALSE(f.editor.setProps(source.id,oversized));
+    for(const auto entry:{TriggeredInteraction{PrototypeTrigger::Delay,Interaction{PrototypeAction::Back,{}},0},TriggeredInteraction{PrototypeTrigger::Hover,Interaction{PrototypeAction::Back,{}},2},TriggeredInteraction{static_cast<PrototypeTrigger>(99),Interaction{PrototypeAction::Back,{}}},TriggeredInteraction{PrototypeTrigger::Click,Interaction{}}}) {
+        NodePatch malformed;malformed.interactions=std::vector<TriggeredInteraction>{entry};REQUIRE_FALSE(f.editor.setProps(source.id,malformed));
+    }
+}
+
+TEST_CASE("Ordered interactions atomically migrate legacy state with reversible independent patches") {
+    Prototypes f;const auto source=f.create(),target=f.create();NodePatch legacy;legacy.interaction=Interaction{PrototypeAction::Navigate,target.id};REQUIRE(f.editor.setProps(source.id,legacy));
+    NodePatch list;list.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Hover,Interaction{PrototypeAction::Back,{}}},{PrototypeTrigger::Delay,Interaction{PrototypeAction::Navigate,target.id},250}};
+    REQUIRE(f.editor.setProps(source.id,list));REQUIRE(f.session.document().find(source.id)->interaction==Interaction{});REQUIRE(f.session.document().find(source.id)->interactions.size()==2);
+    REQUIRE(f.editor.undo());REQUIRE(f.session.document().find(source.id)->interaction==*legacy.interaction);REQUIRE(f.session.document().find(source.id)->interactions.empty());REQUIRE(f.editor.redo());
+    REQUIRE(f.editor.setProps(source.id,legacy));REQUIRE(f.session.document().find(source.id)->interactions.empty());REQUIRE(f.editor.undo());REQUIRE(f.session.document().find(source.id)->interactions==*list.interactions);
+    Node node=source;applyPatch(node,legacy);const auto inverse=applyPatch(node,list);applyPatch(node,inverse);REQUIRE(node.interaction==*legacy.interaction);REQUIRE(node.interactions.empty());
+    const auto merged=mergePatch(legacy,list);REQUIRE(merged.interaction->action==PrototypeAction::None);REQUIRE(merged.interactions==list.interactions);
+    REQUIRE_FALSE(mergePatch(NodePatch{},legacy).interactions.has_value());
+}
+
+TEST_CASE("Ordered snapshot20 preserves forward cyclic references and rejects explicit downlevel lists") {
+    Prototypes f;const auto a=f.create(),b=f.create();NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,Interaction{PrototypeAction::Navigate,b.id},10}};REQUIRE(f.editor.setProps(a.id,p));p.interactions->at(0).interaction.target=a.id;REQUIRE(f.editor.setProps(b.id,p));
+    const auto snapshot=snapshotToJson(f.session.document());REQUIRE(snapshot.find("\"version\":20")!=std::string::npos);const auto ops=snapshotFromJson(snapshot);REQUIRE(ops.has_value());Document loaded;for(const auto& op:*ops) REQUIRE(loaded.apply(op));REQUIRE(loaded.find(a.id)->interactions.front().interaction.target==b.id);REQUIRE(loaded.find(b.id)->interactions.front().interaction.target==a.id);
+    auto old=snapshot;old.replace(old.find("\"version\":20"),12,"\"version\":19");REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    REQUIRE_FALSE(snapshotFromJson(R"({"version":19,"modes":[],"tokens":[],"nodes":[{"id":"00000000-0000-0000-0000-000000000001","type":"frame","order":"a0","interactions":[]}]})").has_value());
+}
+
+TEST_CASE("Every ordered target protects its root frame even when another trigger comes first") {
+    Prototypes f;const auto source=f.create(NodeType::Rect),target=f.create(),container=f.create();NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Click,Interaction{PrototypeAction::Back,{}}},{PrototypeTrigger::Hover,Interaction{PrototypeAction::Navigate,target.id}}};REQUIRE(f.editor.setProps(source.id,p));
+    REQUIRE_FALSE(f.session.edit(DeleteNode{target.id}));REQUIRE_FALSE(f.session.edit(MoveNode{target.id,container.id,"a0"}));NodePatch promote;promote.type=NodeType::Component;REQUIRE_FALSE(f.session.edit(SetProps{target.id,promote}));
+    p.interactions->at(1).interaction.target={146,999};REQUIRE_FALSE(f.editor.setProps(source.id,p));p.interactions=std::vector<TriggeredInteraction>{};REQUIRE(f.editor.setProps(source.id,p));REQUIRE(f.session.edit(DeleteNode{target.id}));
+}
+
+TEST_CASE("Ordered component overrides replace inherited legacy actions and explicit empty lists persist") {
+    Prototypes f;const auto target=f.create(),main=f.create(NodeType::Component),child=f.create(NodeType::Rect,main.id);NodePatch legacy;legacy.interaction=Interaction{PrototypeAction::Navigate,target.id};REQUIRE(f.editor.setProps(child.id,legacy));const auto instance=*f.editor.createInstance(main.id);const auto copy=f.session.document().viewChildren(instance).front();
+    NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Press,Interaction{PrototypeAction::Back,{}}}};REQUIRE(f.session.edit(SetOverride{instance,child.id,p}));REQUIRE(f.session.document().view(copy)->interaction==Interaction{});REQUIRE(f.session.document().view(copy)->interactions.size()==1);
+    p.interactions=std::vector<TriggeredInteraction>{};REQUIRE(f.session.edit(SetOverride{instance,child.id,p}));REQUIRE(f.session.document().view(copy)->interactions.empty());REQUIRE(f.session.document().view(copy)->interaction==Interaction{});
+    const auto snapshot=snapshotToJson(f.session.document());REQUIRE(snapshot.find("\"interactions\":[]")!=std::string::npos);const auto ops=snapshotFromJson(snapshot);REQUIRE(ops.has_value());Document loaded;for(const auto& op:*ops) REQUIRE(loaded.apply(op));REQUIRE(loaded.view(copy)->interaction==Interaction{});
+    REQUIRE_FALSE(f.session.edit(SetProps{instance,p}));ComponentDefinition definition;definition.axes.push_back({"state",{"a","b"},"a"});definition.rules={{{{"state","b"}},child.id,p}};REQUIRE_FALSE(f.editor.setComponentDefinition(main.id,definition));
+}
+
 TEST_CASE("Prototype JSON patches preserve explicit clears and reject unsupported click actions and fields") {
     const auto clear=patchFromJson(R"({"interaction":null,"prototypeStart":false})");REQUIRE(clear.has_value());REQUIRE(clear->interaction.has_value());REQUIRE(clear->interaction->action==PrototypeAction::None);REQUIRE(clear->prototypeStart.has_value());REQUIRE_FALSE(*clear->prototypeStart);
     const auto back=patchFromJson(R"({"interaction":{"trigger":"click","action":"back"}})");REQUIRE(back.has_value());REQUIRE(back->interaction->action==PrototypeAction::Back);
