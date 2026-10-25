@@ -113,6 +113,34 @@ These links belong to a full document. Portable Canvas component files refuse
 prototype metadata with an explanation instead of discarding links to screens
 outside the component. Native document storage/reload remains self-contained.
 
-This remains a bounded click-prototype contract. Smart Animate, scroll behaviors, hover/press/delay triggers,
+## Scrollable screens and overlays
+
+Select an authored root Frame, open Prototype, and choose **Overflow scrolling**:
+No scrolling, Vertical, Horizontal or Both axes. Place content beyond the frame's
+right/bottom edges. The frame size remains the viewport in Play; its background
+and border stay fixed while descendants scroll and clip within it.
+
+Use the wheel or trackpad; Shift-wheel scrolls horizontally. Single-touch drag
+also scrolls, while a tap keeps hotspot activation. Dragging cancels the click.
+Only the top modal receives scrolling, and its scrim blocks background scrolling.
+Scrolling is blocked during transitions. Opening a modal or navigating to another
+screen starts at zero; Back restores the previous screen's position. Restart and
+starting a new Play session reset it. Resize preserves clamped scroll; incoming
+document edits clamp offsets and cancel gestures/animations.
+
+The native field is `prototypeOverflow:"vertical"|"horizontal"|"both"`, requiring
+snapshot **19**. `"none"` clears it; default node metadata is omitted on save.
+It is accepted only on authored root frames, never component overrides or rules.
+Clear scrolling before nesting the frame or converting it into a component.
+Portable component files refuse the metadata, including explicit `"none"`.
+Scroll offsets stay in the player and produce no operations or undo entries.
+
+Ranges use visible descendant layout boxes and honor nested clipping. Negative
+content coordinates and paint bleed (such as shadows) do not extend the ranges.
+Nested scroll containers, fixed/sticky layers, momentum and pinch zoom are not
+part of this increment. Touch logic has native regression coverage; physical
+touch-device behavior has not been verified.
+
+This remains a bounded click-prototype contract. Smart Animate, hover/press/delay triggers,
 variables, conditional actions, external URLs and hosted sharing are not implemented.
 See the [staged implementation plan](prototyping-plan.md) for sequencing and acceptance.

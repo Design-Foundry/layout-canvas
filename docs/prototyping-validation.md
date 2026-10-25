@@ -21,6 +21,30 @@ change snapshot version 18 or authored actions. Oversized render viewports settl
 instantly rather than exceeding the two-target allocation budget. Scrolling, more
 triggers and Smart Animate remain separate planned increments.
 
+## Stage 3: scrollable viewports
+
+The public Layout Canvas branch passed **545 automated checks**: 323 native,
+122 Angular, 37 Node interchange, 38 server and 25 live localhost HTTP checks.
+Native, WASM release, bridge TypeScript, production client and server builds pass.
+Native/server `vc_native.dll` SHA256 matches:
+`5320FCB5094A432F1E15F970FD3F67CC50D47025BE8F981FC783355F2DAE906B`.
+
+Native regressions cover stationary root paint and clipping, transformed picking,
+positive content bounds with hidden/expanded/clipped descendants, axis limits,
+modal isolation, outgoing scene scroll, history restoration, reset, remote shrink,
+tap versus touch drag/cancel and prevention of playback writes. HTTP tests verify
+snapshot 19, persisted overflow operations/reset, refused overrides/misplacement,
+invalid values and downgrade rejection.
+
+Browser QA verified vertical screen and modal wheel scrolling, closing through a
+scrolled hotspot, navigation from scrolled content, Back restoration and Restart.
+The modal viewport and underlying screen stay fixed. Playback left the imported
+document at operation sequence 1. Inspector editing, Undo/Redo and reload preserve
+the authored overflow value. No WebGPU validation messages were observed.
+Single-touch logic is tested natively; physical touch-device behavior remains
+unverified. Fixed/sticky layers, nested scroll containers, momentum and pinch zoom
+are outside this increment.
+
 ## Stage 1: native prototype authoring
 
 This branch is based on main `9f96ccc` and includes native click navigation,
