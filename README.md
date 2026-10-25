@@ -1,4 +1,4 @@
-# canvas
+# layout-canvas
 
 Design canvas in the spirit of Figma, with native editable components, typography,
 vectors, drawing tools and local raster images. See [editor capabilities and limits](docs/editor-features.md).
@@ -62,5 +62,9 @@ individuals; the project name is not a legal entity or an assignment of rights.
     npm run contributors
     npm run contributors:check
 
-Attribution files do not grant a license or transfer copyright. Bundled fonts and
-third-party source retain their respective license notices.
+Attribution files do not transfer copyright. Bundled fonts and third-party source retain
+their respective license notices.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

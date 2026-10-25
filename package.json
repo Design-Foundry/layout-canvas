@@ -1,6 +1,7 @@
 {
   "name": "canvas",
   "private": true,
+  "license": "Apache-2.0",
   "packageManager": "pnpm@12.6.0",
   "scripts": {
     "wasm": "pnpm --filter @canvas/bridge wasm",

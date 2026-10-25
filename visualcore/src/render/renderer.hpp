@@ -28,6 +28,9 @@ public:
     void start();
     void stop();
 
+    /// Canvas clear color in 0..1 sRGB; alpha 0 leaves the page behind the canvas visible.
+    void setBackground(float r, float g, float b, float a);
+
     [[nodiscard]] FrameStats stats() const;
 
 private:

@@ -1,5 +1,6 @@
 # Prototyping implementation plan
 
+Repository: [Design-Foundry/layout-canvas](https://github.com/Design-Foundry/layout-canvas) (public).
 Working branch: `codex/prototyping-roadmap`. General editor functionality only.
 
 ## Validated baseline
@@ -7,7 +8,9 @@ Working branch: `codex/prototyping-roadmap`. General editor functionality only.
 Native click Navigate/Back, root-frame entry screens, isolated playback, centered
 Open/Close overlay, outside dismissal, independent component hotspot overrides,
 basic per-paint dissolve and snapshots 16/17 are implemented. Upstream main at
-`9f96ccc` adds structured diagnostics, live MCP edits and filtered glyph rendering.
+`55bff8f` adds structured diagnostics, live MCP edits and filtered glyph rendering.
+The branch also integrates public main `949e7f1`: theme-aware canvas/grid,
+unfilled frame/component defaults, Apache 2.0 licensing and updated attribution.
 The native baseline is covered by model, runtime and browser regressions.
 
 ## Sequence and acceptance

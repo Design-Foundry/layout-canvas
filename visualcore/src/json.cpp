@@ -278,6 +278,9 @@ json writeOverrides(const std::vector<Override>& overrides) {
     return out;
 }
 
+/// Frames and components start without a fill; every other type starts with a visible one.
+bool defaultFillVisible(NodeType type) { return type != NodeType::Frame && type != NodeType::Component; }
+
 /// The whole node, leaving out properties that still have their default value.
 json write(const Node& n) {
     json out{{"id", n.id.toString()}, {"type", typeName(n.type)}, {"order", n.order}};
@@ -688,9 +691,10 @@ std::optional<NodePatch> readPatch(const json& j) {
         if (const char* why = textProblem(text)) return refused(why);
         p.text = std::move(text);
     }
+    const bool fillCleared = j.contains("fill") && j["fill"].is_null();
     const bool ok = readField(j, "name", p.name, readString) && readField(j, "x", p.x, readNumber) &&
                     readField(j, "y", p.y, readNumber) && readField(j, "w", p.w, readNumber) &&
-                    readField(j, "h", p.h, readNumber) && readField(j, "fill", p.fill, readColor) &&
+                    readField(j, "h", p.h, readNumber) && (fillCleared || readField(j, "fill", p.fill, readColor)) &&
                     readField(j, "fillVisible", p.fillVisible, readBool) &&
                     readField(j, "cornerRadius", p.cornerRadius, readLength) &&
                     readField(j, "cornerRadii", p.cornerRadii, readFour) &&
@@ -708,6 +712,7 @@ std::optional<NodePatch> readPatch(const json& j) {
                     readField(j, "type", p.type, readNodeType) &&
                     readField(j, "component", p.component, readId) &&
                     readField(j, "componentValues", p.componentValues, readValues);
+    if (ok && fillCleared && !p.fillVisible) p.fillVisible = false;
     return ok ? std::optional{p} : std::nullopt;
 }
 
@@ -850,6 +855,7 @@ std::optional<Node> readNode(const json& j) {
     n.id = *id;
     n.type = *type;
     n.order = *order;
+    n.fillVisible = defaultFillVisible(n.type) || (j.contains("fill") && !j["fill"].is_null());
 
     if (j.contains("parent")) {
         const auto parent = requireId(j, "parent");

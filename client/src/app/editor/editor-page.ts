@@ -37,6 +37,7 @@ import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';
 import { watchPrototypeMotion } from './prototype-motion';
+import { followTheme } from './canvas-background';
 import { ComponentCommand, EditorTool, LayerKind, LayerRow } from './editor-model';
 import { EditorToolbar } from './editor-toolbar';
 import { InspectorPanel } from './inspector-panel';
@@ -270,10 +271,14 @@ export class EditorPage {
 
   protected readonly core = signal<VisualCore | undefined>(undefined);
   private destroyed = false;
+  private stopFollowingTheme = () => {};
   private labelSizesKey = '';
 
   constructor() {
-    this.destroyRef.onDestroy(() => (this.destroyed = true));
+    this.destroyRef.onDestroy(() => {
+      this.destroyed = true;
+      this.stopFollowingTheme();
+    });
     effect(() => {
       const name = this.name();
       this.title.setTitle(name ? `${name} - Canvas` : 'Canvas');
@@ -471,6 +476,7 @@ export class EditorPage {
       if (this.destroyed) return;
 
       core.attach('#canvas');
+      this.stopFollowingTheme = followTheme(core);
       const sync = new DocumentSync(this.api, core, this.id(), (failing) =>
         this.syncFailing.set(failing),
       );

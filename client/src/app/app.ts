@@ -1,5 +1,6 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { Theme } from './theme';
 
 @Component({
   selector: 'app-root',
@@ -7,4 +8,8 @@ import { RouterOutlet } from '@angular/router';
   template: '<router-outlet />',
   styles: ':host { display: contents; }',
 })
-export class App {}
+export class App {
+  constructor() {
+    inject(Theme);
+  }
+}
