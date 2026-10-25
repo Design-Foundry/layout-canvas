@@ -10,6 +10,8 @@ struct Frame {
     gridOffset: vec2f,
     gridMinor: f32,
     gridMinorAlpha: f32,
+    gridTint: f32,
+    pad: f32,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -38,7 +40,7 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     let world = pos.xy / frame.dpr / frame.zoom + frame.gridOffset;
     let minor = lineCoverage(world, frame.gridMinor) * 0.05 * frame.gridMinorAlpha;
     let major = lineCoverage(world, frame.gridMinor * 10.0) * 0.1;
-    return vec4f(1.0, 1.0, 1.0, max(minor, major));
+    return vec4f(vec3f(frame.gridTint), max(minor, major));
 }
 )";
 

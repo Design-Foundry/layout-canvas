@@ -250,6 +250,10 @@ std::string activeMode() {
     return rt ? rt->editor.activeMode().toString() : vc::kDefaultModeId.toString();
 }
 
+void setCanvasBackground(float r, float g, float b, float a) {
+    if (rt) rt->renderer.setBackground(r, g, b, a);
+}
+
 bool setActiveMode(const std::string& id) {
     const auto parsed = vc::Id::parse(id);
     if (!rt || !parsed) {
@@ -432,6 +436,7 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("modes", &modes);
     function("activeMode", &activeMode);
     function("setActiveMode", &setActiveMode);
+    function("setCanvasBackground", &setCanvasBackground);
     function("addToken", &addToken);
     function("replaceToken", &replaceToken);
     function("deleteToken", &deleteToken);

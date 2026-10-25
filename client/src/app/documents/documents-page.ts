@@ -1,4 +1,4 @@
-import { Component, inject, resource, signal } from '@angular/core';
+import { Component, computed, inject, resource, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
@@ -15,6 +15,7 @@ import {
 import { Api } from '../api/api';
 import { createDocument, deleteDocument, listDocuments } from '../api/functions';
 import { DocumentSummary } from '../api/models';
+import { Theme } from '../theme';
 
 @Component({
   selector: 'app-documents-page',
@@ -39,6 +40,10 @@ export class DocumentsPage {
 
   protected readonly documents = resource({ loader: () => this.api.invoke(listDocuments) });
   protected readonly creating = signal(false);
+  protected readonly theme = inject(Theme);
+  protected readonly themeIcon = computed(
+    () => ({ system: 'contrast', light: 'light_mode', dark: 'dark_mode' })[this.theme.preference()],
+  );
 
   protected async create(): Promise<void> {
     this.creating.set(true);

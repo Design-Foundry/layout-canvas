@@ -20,6 +20,12 @@
   }
 }
 
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--dimension--primitive--spacing-2);
+}
+
 .state {
   display: flex;
   align-items: center;

@@ -1,9 +1,18 @@
 <header class="header">
   <h1 class="typography-title-md">Documents</h1>
-  <lucent-button variant="primary" size="sm" [loading]="creating()" (clicked)="create()">
-    <lucent-icon lucentPrefix name="add" size="sm" />
-    New document
-  </lucent-button>
+  <div class="actions">
+    <lucent-icon-button
+      [icon]="themeIcon()"
+      variant="text"
+      size="sm"
+      [ariaLabel]="'Theme: ' + theme.preference()"
+      (clicked)="theme.cycle()"
+    />
+    <lucent-button variant="primary" size="sm" [loading]="creating()" (clicked)="create()">
+      <lucent-icon lucentPrefix name="add" size="sm" />
+      New document
+    </lucent-button>
+  </div>
 </header>
 
 @if (documents.error()) {
