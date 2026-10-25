@@ -141,6 +141,36 @@ Nested scroll containers, fixed/sticky layers, momentum and pinch zoom are not
 part of this increment. Touch logic has native regression coverage; physical
 touch-device behavior has not been verified.
 
-This remains a bounded click-prototype contract. Smart Animate, hover/press/delay triggers,
-variables, conditional actions, external URLs and hosted sharing are not implemented.
+## Multiple interactions and triggers
+
+The Prototype inspector can add, select, remove and reorder up to 16 interactions
+on a source layer or an independent copied-layer override. The selected row keeps
+its own action, destination, transition and modal options. Triggers are On click,
+On hover, On press and After delay. Delay requires an integer from 1 to 60000 ms.
+
+The deepest ancestor with the current trigger wins; its first matching row runs.
+Later rows with the same trigger are shadowed, including duplicate delays. Rows
+are priority alternatives, not a chain of actions. Hover runs on pointer entry,
+excluding touch and dragging. Primary press runs on down and consumes release click.
+Delay runs once per node per active screen/modal visit, starting after transitions
+settle. Hidden, clipped or offscreen nodes wait until they are visible. Timers on
+underlying screens do not run beneath a modal. At most one due automatic action
+runs per frame, in visible paint order, so cyclic flows cannot recurse in one frame.
+
+Navigation, Back and closing a modal start a new delay epoch on the visible screen.
+Viewport resizing restarts a complete delay epoch after the new layout, including
+the initial expansion into Play. Remote edits cancel scheduled delays until an
+explicit navigation or Restart; Exit cancels all trigger state. A context change
+also cancels captured mouse/touch gestures. Playback adds no document operations.
+
+New lists use native `interactions:[{trigger:"delay",delayMs:1500,action:"navigate",
+target:"frame-uuid"}]` and require snapshot **20**. Setting a list atomically clears
+legacy `interaction`, and setting legacy metadata clears the list. An explicit
+empty list masks inherited behavior. Undo/Redo reverses that migration. Existing
+click-only documents retain their old format/version until a list is authored.
+Variants cannot store lists; raw instances use the normal override path. All
+targets, including shadowed rows, remain protected references. Portable component
+files refuse lists even when empty, instead of dropping document-local behavior.
+
+Smart Animate, variables, conditional actions, external URLs and hosted sharing are not implemented.
 See the [staged implementation plan](prototyping-plan.md) for sequencing and acceptance.

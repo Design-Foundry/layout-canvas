@@ -21,6 +21,30 @@ change snapshot version 18 or authored actions. Oversized render viewports settl
 instantly rather than exceeding the two-target allocation budget. Scrolling, more
 triggers and Smart Animate remain separate planned increments.
 
+## Stage 4: ordered trigger lists
+
+The public branch passed **570 automated checks**: 338 native, 127 Angular,
+39 Node interchange, 38 server and 28 live localhost HTTP checks. Native, WASM
+release, bridge TypeScript, production client and server builds pass. The final
+native/server DLL SHA256 matches:
+`C5691E6FCB86189457AB0E90B0B5254082C5C744D3D0B44A636A3E26105CB150`.
+
+Model tests cover strict lists, delays, legacy/list migration, Undo/Redo, instance
+overrides, empty masks, target safeguards, snapshot 20 and downgrade refusal.
+Runtime regressions cover event-specific ancestor priority, duplicate shadowing,
+press consumption, hover exclusions, one due timer per frame, transition pause,
+modal suspension, scroll/visibility, remote cancellation and viewport delay epochs.
+An automatic modal entry cancels a captured base touch. A regression reproduces
+the initial stage expansion after an earlier frame, rather than assuming a fixed
+viewport on Play entry.
+
+Browser QA verified click navigation, press without a second click action, hover
+overlay opening/closing and automatic delay navigation. Direct Play entry into
+the timed screen also reached its destination after the initial viewport expanded.
+Playback left the imported document at sequence 1. Inspector reorder, Undo, trigger
+and delay editing were checked against persisted operations and reload. No WebGPU
+validation messages were observed. Physical touch hardware remains unverified.
+
 ## Stage 3: scrollable viewports
 
 The public Layout Canvas branch passed **545 automated checks**: 323 native,
