@@ -18,7 +18,7 @@ Types: `frame`, `component`, `instance`, `rect`, `ellipse`, `text`, `line`, `pat
 Common properties (all optional):
 - `x`, `y`: position relative to the parent; ignored for children placed by auto layout unless `absolute: true`.
 - `w`, `h`: size, at least 0.
-- `fill`: color; `fillVisible: false` hides it. Frames get a gray fill unless you set `fill` or `fillVisible: false`.
+- `fill`: color; `fillVisible: false` hides it, and `fill: null` does the same. Frames and components have no fill unless you set `fill`; other nodes without `fill` are black.
 - `opacity`: 0 to 1, or a token.
 - `cornerRadius`: length; `cornerRadii`: `[topStart, topEnd, bottomEnd, bottomStart]`, each a length or null.
 - `stroke`: `{ "width", "style": "solid" | "dashed" | "dotted" | "double" | "none", "color", "align": "inside" | "center" | "outside", "sides": [top, end, bottom, start] }` (`sides` optional, each a length or null), or a border token.
