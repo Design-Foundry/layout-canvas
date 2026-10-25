@@ -1,0 +1,103 @@
+# Native click prototypes
+
+Use root **Frame** nodes as screens. In the inspector, switch from **Design** to
+**Prototype**, select a layer and give it one **On click** action:
+
+- **Navigate to screen** selects a named root frame in this document.
+- **Back** returns through the preview's navigation history.
+- **Open overlay** opens a root frame over the base screen, at the same camera
+  scale. Center is the default; choose one of nine anchors or Manual X/Y from the
+  base screen's top-left, in design units. The background is dimmed and cannot
+  receive clicks.
+- **Close overlay** closes the top overlay without navigating the base screen.
+- **None** removes the action, including an inherited copied-layer action.
+
+The same panel marks a root frame as a **Flow starting screen**. Multiple starting
+screens are allowed; the toolbar chooses the entry to play. A selected navigation
+action displays its connection on the editing canvas. This increment authors
+connections through the inspector, without draggable connection endpoints.
+
+## Playing a flow
+
+**Play prototype** presents the chosen screen with the existing native canvas
+renderer. The editor chrome and selection handles are hidden. **Back**, **Restart**
+and **Exit** control the preview; Escape exits and Alt+Left goes back. Preview
+navigation does not create document operations, change Undo/Redo or save the
+current playback screen. Exiting restores the editing camera and selection.
+
+Navigate supports **Instant**, **Dissolve**, **Slide** and **Push**; Open overlay
+supports Instant, Dissolve and Slide. Slide/Push have left/right/up/down directions.
+All animations take 1–2000 ms (default 300), with input blocked until completion.
+Slide moves the incoming screen over a stationary outgoing base; Push moves both.
+Direction names describe travel: Slide left enters from the right. Movement is
+linear and deterministic. Presentation content, modal scrims and hit testing stay
+clipped to the base screen viewport, including manually positioned oversized modals.
+Manual X/Y may range from -100000 to 100000; offscreen portions remain unclickable.
+
+Dissolve fades native paint primitives. It is a basic layer fade: overlapping translucent paints are not
+composited into offscreen groups, and outgoing/incoming fades can reveal the stage
+background. It does not interpolate matching objects or preserve the old camera
+scale when screen sizes differ. Navigating from an overlay drops the modal stack
+and transitions the base screens; navigating to its existing base simply closes all
+overlays immediately.
+
+The modal stack holds up to eight distinct screens. Reopening a screen already in
+the stack or opening the base as its own overlay is ignored. **Dismiss when clicking
+outside** is enabled by default and can be disabled per action. An outside click
+closes only the top modal, without activating the underlying screen. Back closes
+the top overlay before consulting base-screen history. Restart clears both stacks
+and any transition. Close overlay is also available in the presentation controls.
+Closing overlays is instantaneous. Hidden/deleted/invalid modal screens are safely
+removed when remote document changes arrive.
+
+The screen fits the available canvas and is clipped to its frame even when its
+design-time clip setting is off. Hidden layers are not clickable; design locks do
+not disable visible prototype hotspots. Clicking a text/icon child can activate an
+ancestor's action. A deeper action takes precedence. Dragging, leaving the canvas
+or canceling a press does not trigger navigation. Other overlapping editing frames
+cannot intercept preview clicks. The history keeps at most 128 navigation hops.
+
+Preview blocks authoring commands. Incoming document changes still apply through
+normal synchronization; a screen that becomes invalid stops playback safely.
+Frames must be visible and have positive computed dimensions to play. Component
+masters, instances and nested frames are not screen destinations in this slice,
+although their layers can provide or override hotspots inside a root frame.
+
+## Persistence and references
+
+Prototype metadata uses native snapshot **16**. A node may store
+`interaction:{trigger:"click",action:"navigate",target:"frame-uuid"}` or
+`interaction:{trigger:"click",action:"back"}`. An explicit patch
+`interaction:null` clears it. Root frame `prototypeStart` flags are independent.
+Earlier documents retain their earlier minimum snapshot versions.
+
+Overlays and dissolve options require snapshot **17**. Actions use `open-overlay`
+with a root-frame `target`, or `close-overlay` with no target. Navigate/Open overlay
+may add `transition:"dissolve"` and integer `durationMs`; Instant omits these fields.
+Only Open overlay accepts `dismissOutside:false` (true is the default). Unknown
+options, invalid combinations, unsupported durations and downlevel snapshots are
+refused by the native model, including independent component overrides.
+
+Slide/Push and non-default overlay placements require snapshot **18**. Transition
+names are `slide-left/right/up/down` or `push-left/right/up/down`. Push is only
+valid for Navigate. Overlay `placement` accepts `center`, `top-left/center/right`,
+`center-left/right`, `bottom-left/center/right` and `manual`; the slash groups here
+denote individual names such as `top-center`. Manual placement requires exactly
+`offset:{x:80,y:70}`; other placements refuse `offset`. Center defaults are omitted.
+Durations are accepted only with non-instant transitions. New source and independent
+override metadata refuse downlevel snapshots; earlier documents keep versions 16/17.
+
+The model validates target identity and type, including forward and cyclic links
+when loading a snapshot. Deleting, nesting or promoting a referenced destination
+is refused until its incoming links are removed. Variant rules cannot author
+prototype behavior. Copied-layer interactions use the normal independent override
+mechanism, including inherited actions and explicit clears.
+
+These links belong to a full document. Portable Canvas component files refuse
+prototype metadata with an explanation instead of discarding links to screens
+outside the component. Native document storage/reload remains self-contained.
+
+This remains a bounded click-prototype contract. Offscreen group compositing, Smart
+Animate, scroll behaviors, hover/press/delay triggers,
+variables, conditional actions, external URLs and hosted sharing are not implemented.
+See the [staged implementation plan](prototyping-plan.md) for sequencing and acceptance.
