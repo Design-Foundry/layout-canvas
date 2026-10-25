@@ -6,6 +6,57 @@ const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const navigate = (target) => ({ trigger: 'click', action: 'navigate', target });
 const back = { trigger: 'click', action: 'back' };
 
+test('snapshot19 persists screen and overlay overflow while rejecting downgrades and invalid edits outside the oplog', async () => {
+  const snapshot = fixture();
+  snapshot.version = 19;
+  snapshot.nodes[0].prototypeOverflow = 'vertical';
+  snapshot.nodes.find((n) => n.id === id(20)).prototypeOverflow = 'both';
+  snapshot.nodes[1].interaction = { trigger: 'click', action: 'open-overlay', target: id(20) };
+  await using(snapshot, async (document) => {
+    const detail = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
+    assert.equal(detail.snapshot.data.version, 19);
+    assert.equal(detail.snapshot.data.nodes.find((n) => n.id === id(10)).prototypeOverflow, 'vertical');
+    assert.equal(detail.snapshot.data.nodes.find((n) => n.id === id(20)).prototypeOverflow, 'both');
+    for (const prototypeOverflow of ['scroll', '', null, true, 1, {}, ['vertical']]) {
+      refuse(await append(document, 'SetProps', { id: id(10), patch: { prototypeOverflow } }));
+    }
+    for (const target of [id(11), id(30), id(32)]) {
+      refuse(await append(document, 'SetProps', { id: target, patch: { prototypeOverflow: 'none' } }));
+    }
+    refuse(await append(document, 'SetOverride', {
+      id: id(32), node: id(31), patch: { prototypeOverflow: 'vertical' },
+    }));
+    for (const prototypeOverflow of ['horizontal', 'both', 'none']) {
+      accept(await append(document, 'SetProps', { id: id(10), patch: { prototypeOverflow } }));
+    }
+    const reloaded = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
+    assert.equal(reloaded.snapshot.data.version, 19);
+    const ops = await (await fetch(new URL(`/api/documents/${document}/ops?after=1`, origin))).json();
+    assert.equal(ops.ops.length, 3, 'refused overflow changes must not enter the persisted oplog');
+    assert.deepEqual(ops.ops.map((op) => op.data.patch), [
+      { prototypeOverflow: 'horizontal' },
+      { prototypeOverflow: 'both' },
+      { prototypeOverflow: 'none' },
+    ]);
+    assert.ok(ops.ops.every((op) => op.kind === 'SetProps' && op.data.id === id(10)));
+  });
+  const downlevel = structuredClone(snapshot);
+  downlevel.version = 18;
+  const invalidSnapshots = [downlevel];
+  for (const target of [id(11), id(30), id(32)]) {
+    const misplaced = structuredClone(snapshot);
+    misplaced.nodes.find((n) => n.id === target).prototypeOverflow = 'none';
+    invalidSnapshots.push(misplaced);
+  }
+  const badValue = structuredClone(snapshot);
+  badValue.nodes[0].prototypeOverflow = 'scroll';
+  invalidSnapshots.push(badValue);
+  for (const invalid of invalidSnapshots) {
+    const response = await request('/api/documents/import', { name: 'Invalid overflow QA', snapshot: invalid });
+    assert.equal(response.status, 400, await response.text());
+  }
+});
+
 test('snapshot18 persists directional transitions and manual modal placement with strict downgrade and option errors', async () => {
   for (const transition of [
     'slide-left',

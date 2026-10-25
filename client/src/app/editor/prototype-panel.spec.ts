@@ -32,6 +32,67 @@ async function setup(
   return { fixture, saved, select };
 }
 describe('document-local prototype authoring', () => {
+  it('authors root frame overflow without replacing its click interaction', async () => {
+    const { fixture, saved, select } = await setup(true, {
+      id: 'frame-a',
+      type: 'frame',
+      prototypeOverflow: 'vertical',
+      interaction: { trigger: 'click', action: 'open-overlay', target: 'frame-b' },
+    } as NodeProps);
+    const control = fixture.nativeElement.querySelector(
+      '[aria-label="Prototype overflow"]',
+    ) as HTMLSelectElement;
+    expect(control.value).toBe('vertical');
+    expect(saved).toEqual([]);
+    for (const prototypeOverflow of ['horizontal', 'both', 'none', 'vertical']) {
+      await select('Prototype overflow', prototypeOverflow);
+      expect(saved.at(-1)).toEqual({ id: 'frame-a', patch: { prototypeOverflow } });
+      expect(
+        (
+          fixture.nativeElement.querySelector(
+            '[aria-label="Prototype action"]',
+          ) as HTMLSelectElement
+        ).value,
+      ).toBe('open-overlay');
+    }
+  });
+  it('restores saved overflow when refused and follows later native changes', async () => {
+    const { fixture, saved, select } = await setup(false, {
+      id: 'frame-a',
+      type: 'frame',
+      prototypeOverflow: 'horizontal',
+    } as NodeProps);
+    expect((await select('Prototype overflow', 'both')).value).toBe('horizontal');
+    expect(saved).toEqual([{ id: 'frame-a', patch: { prototypeOverflow: 'both' } }]);
+    expect(fixture.nativeElement.querySelector('[role=alert]').textContent).toContain('refused');
+    fixture.componentRef.setInput('node', {
+      id: 'frame-a',
+      type: 'frame',
+      prototypeOverflow: 'both',
+    } as NodeProps);
+    await fixture.whenStable();
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          '[aria-label="Prototype overflow"]',
+        ) as HTMLSelectElement
+      ).value,
+    ).toBe('both');
+    expect(saved).toHaveLength(1);
+  });
+  it('offers overflow only on authored root frames, not copied frames or components', async () => {
+    const { fixture } = await setup();
+    for (const node of [
+      { id: 'rect', type: 'rect' },
+      { id: 'component', type: 'component' },
+      { id: 'nested', type: 'frame', parent: 'frame-a' },
+      { id: 'copy', type: 'frame', inInstance: true },
+    ]) {
+      fixture.componentRef.setInput('node', node as NodeProps);
+      await fixture.whenStable();
+      expect(fixture.nativeElement.querySelector('[aria-label="Prototype overflow"]')).toBeNull();
+    }
+  });
   it('shows a persisted second-screen target on initial render without writing an edit', async () => {
     const { fixture, saved } = await setup(true, {
       id: 'button',

@@ -53,6 +53,14 @@ All five fields are required when `layout` is present. Typical card: a `column` 
 - `line`: a segment from the top-left to the bottom-right corner of its box, or bottom-left to top-right with `lineReverse: true`. A horizontal line has `h: 0`. Thickness is `lineWidth`, color is `fill`.
 - `path`: `"path": { "points": [{ "x", "y" }], "closed", "filled", "inHandles", "outHandles" }`. Points and handles are normalized to the node's box (0 to 1). At most 64 points, one contour. `inHandles`/`outHandles` (one per point) make cubic curves; a handle equal to its point is a sharp corner. `filled` needs `closed`. Stroke width is `lineWidth`, color is `fill`. Lines and paths use fixed sizing.
 
+### Prototype viewport scrolling
+
+- An authored top-level `frame` can set `prototypeOverflow: "none" | "vertical" | "horizontal" | "both"`. The default is `"none"`; use it in `SetProps` to remove scrolling. A non-default value requires snapshot version 19 or later.
+- The frame's `w` and `h` define its viewport. Place child content beyond its bounds to enable scrolling on the selected axes during Play. The same frame setting applies when it is presented as a screen or opened as an overlay.
+- Playback clips scrolled children to the viewport and keeps drawing and hit testing aligned. Scrolling is temporary playback state; it does not change child positions or append document operations.
+- Nested frames, components, instances, copied layers, component overrides and variant rules cannot set this field, including an explicit `"none"`. Clear scrolling before nesting a configured frame or changing its type.
+- This field does not implement fixed or sticky child positioning. Portable component files refuse document-local prototype metadata.
+
 ## Tokens
 
 `{ "id", "type", "identifier", "order", "value" | "source", "modifiers" }`

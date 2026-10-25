@@ -7,6 +7,7 @@ import type {
   PrototypeTransition,
   PrototypeOverlayTransition,
   PrototypePlacement,
+  PrototypeOverflow,
 } from '@canvas/bridge';
 
 const OVERLAY_TRANSITIONS: readonly PrototypeOverlayTransition[] = [
@@ -156,6 +157,32 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
       }
     }
     @if (rootFrame()) {
+      <label
+        >Overflow scrolling
+        <select
+          aria-label="Prototype overflow"
+          [value]="value().prototypeOverflow ?? 'none'"
+          (change)="overflow($event)"
+        >
+          <option
+            value="none"
+            [selected]="!value().prototypeOverflow || value().prototypeOverflow === 'none'"
+          >
+            No scrolling
+          </option>
+          <option value="vertical" [selected]="value().prototypeOverflow === 'vertical'">
+            Vertical
+          </option>
+          <option value="horizontal" [selected]="value().prototypeOverflow === 'horizontal'">
+            Horizontal
+          </option>
+          <option value="both" [selected]="value().prototypeOverflow === 'both'">Both axes</option>
+        </select></label
+      >
+      <p>
+        Scroll content beyond this frame's viewport during Play. Applies when used as a screen or
+        overlay.
+      </p>
       <label
         ><input
           type="checkbox"
@@ -408,13 +435,23 @@ export class PrototypePanel {
     if (!this.rootFrame() || !this.change({ prototypeStart: checkbox.checked }))
       checkbox.checked = !!this.value().prototypeStart;
   }
+  protected overflow(event: Event): void {
+    const control = event.target as HTMLSelectElement;
+    const value = control.value as PrototypeOverflow;
+    if (
+      !this.rootFrame() ||
+      !['none', 'vertical', 'horizontal', 'both'].includes(value) ||
+      !this.change({ prototypeOverflow: value })
+    )
+      control.value = this.value().prototypeOverflow ?? 'none';
+  }
   private change(patch: NodePatch): boolean {
     if (this.save()(this.node().id, patch)) {
       this.pending.update((old) => ({ ...old, ...patch }));
       this.error.set('');
       return true;
     }
-    this.error.set('The prototype edit was refused. The saved interaction was kept.');
+    this.error.set('The prototype edit was refused. The saved prototype settings were kept.');
     return false;
   }
 }

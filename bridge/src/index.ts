@@ -188,6 +188,8 @@ export type PrototypeInteraction =
     } & PrototypeAnimation<PrototypeOverlayTransition>)
   | { readonly trigger: 'click'; readonly action: 'back' | 'close-overlay' };
 export type PrototypeSlideTransition = 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down';
+/** Scrollable axes of an authored root screen or overlay during playback. */
+export type PrototypeOverflow = 'none' | 'vertical' | 'horizontal' | 'both';
 export type PrototypeOverlayTransition = 'dissolve' | PrototypeSlideTransition;
 export type PrototypeTransition =
   PrototypeOverlayTransition | 'push-left' | 'push-right' | 'push-up' | 'push-down';
@@ -225,6 +227,7 @@ export interface PrototypeState {
 export interface NodeFields {
   readonly interaction?: PrototypeInteraction | null;
   readonly prototypeStart?: boolean;
+  readonly prototypeOverflow?: PrototypeOverflow;
   readonly image?: RasterImage;
   readonly imageFit?: ImageFit;
   readonly imageCrop?: ImageCrop;
