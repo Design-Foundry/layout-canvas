@@ -34,7 +34,9 @@ describe('EditorToolbar', () => {
   }
 
   it('selects a tool', () => {
-    const buttons = (fixture.nativeElement as HTMLElement).querySelectorAll('[role="toolbar"] button');
+    const buttons = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      '[role="toolbar"] button',
+    );
     (buttons[2] as HTMLButtonElement).click();
 
     expect(fixture.componentInstance.tool()).toBe('rectangle');
@@ -57,5 +59,26 @@ describe('EditorToolbar', () => {
     await type('Landing page');
 
     expect(renamed).toEqual([]);
+  });
+  it('requires an eligible root frame before playing and emits the selected start choice', async () => {
+    const play = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      'button[aria-label="Play prototype"]',
+    )!;
+    expect(play.disabled).toBe(true);
+    fixture.componentRef.setInput('prototypeScreens', [
+      { id: 'screen', name: 'Home', start: true, w: 300, h: 500 },
+    ]);
+    fixture.componentRef.setInput('prototypeStart', 'screen');
+    await fixture.whenStable();
+    let started = false;
+    fixture.componentInstance.play.subscribe(() => (started = true));
+    play.click();
+    expect(started).toBe(true);
+    let selected = '';
+    fixture.componentInstance.choosePrototypeStart.subscribe((value) => (selected = value));
+    const choice = (fixture.nativeElement as HTMLElement).querySelector('select')!;
+    choice.value = 'screen';
+    choice.dispatchEvent(new Event('change'));
+    expect(selected).toBe('screen');
   });
 });

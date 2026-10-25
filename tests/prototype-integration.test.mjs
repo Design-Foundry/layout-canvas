@@ -1,0 +1,96 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { readComponent, exportComponent } from '../client/src/app/editor/component-package.ts';
+const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
+const fixture = () => ({
+  format: 'canvas-component/1',
+  name: 'Button',
+  componentId: id(1),
+  snapshot: {
+    version: 16,
+    nodes: [{ id: id(1), type: 'component', order: 'a0', w: 100, h: 40 }],
+    tokens: [],
+    modes: [],
+  },
+});
+test('native component files refuse document-local prototype metadata including explicit null and false', () => {
+  for (const fields of [
+    { interaction: null },
+    { prototypeStart: false },
+    { interaction: { trigger: 'click', action: 'back' } },
+    { interaction: { trigger: 'click', action: 'navigate', target: id(3) } },
+    {
+      interaction: {
+        trigger: 'click',
+        action: 'open-overlay',
+        target: id(3),
+        transition: 'dissolve',
+        durationMs: 450,
+        dismissOutside: false,
+      },
+    },
+    { interaction: { trigger: 'click', action: 'close-overlay' } },
+  ]) {
+    const data = fixture();
+    if (
+      fields.interaction?.action === 'open-overlay' ||
+      fields.interaction?.action === 'close-overlay'
+    )
+      data.snapshot.version = 17;
+    Object.assign(data.snapshot.nodes[0], fields);
+    assert.throws(() => readComponent(JSON.stringify(data)), /document-local/);
+    assert.throws(() => exportComponent(data.snapshot, id(1)), /document-local/);
+  }
+});
+test('prototype metadata in overrides or variant rules is refused before portable conversion', () => {
+  for (const key of ['overrides', 'rules']) {
+    const data = fixture(),
+      patch = { interaction: { trigger: 'click', action: 'back' } };
+    if (key === 'overrides') data.snapshot.nodes[0].overrides = [{ node: id(2), patch }];
+    else
+      data.snapshot.nodes[0].definition = {
+        rules: [{ target: id(2), when: { tone: 'a' }, patch }],
+      };
+    assert.throws(() => readComponent(JSON.stringify(data)), /document-local/);
+  }
+});
+test('snapshot16 without authored prototype metadata remains portable', () => {
+  const data = fixture();
+  assert.equal(readComponent(JSON.stringify(data)).snapshot.version, 16);
+});
+test('snapshot17 without document-local metadata remains portable', () => {
+  const data = fixture();
+  data.snapshot.version = 17;
+  assert.equal(readComponent(JSON.stringify(data)).snapshot.version, 17);
+});
+test('snapshot18 preserves portable data without document-local prototype metadata', () => {
+  const data = fixture();
+  data.snapshot.version = 18;
+  assert.equal(readComponent(JSON.stringify(data)).snapshot.version, 18);
+});
+test('snapshot18 positioned overlays and directional transitions refuse component export', () => {
+  for (const interaction of [
+    { trigger: 'click', action: 'navigate', target: id(3), transition: 'push-up', durationMs: 500 },
+    {
+      trigger: 'click',
+      action: 'open-overlay',
+      target: id(3),
+      transition: 'slide-right',
+      durationMs: 650,
+      placement: 'bottom-left',
+    },
+    {
+      trigger: 'click',
+      action: 'open-overlay',
+      target: id(3),
+      placement: 'manual',
+      offset: { x: -40.5, y: 90.25 },
+    },
+  ]) {
+    const data = fixture();
+    data.snapshot.version = 18;
+    data.snapshot.nodes[0].interaction = interaction;
+    assert.throws(() => readComponent(JSON.stringify(data)), /document-local/);
+    assert.throws(() => exportComponent(data.snapshot, id(1)), /document-local/);
+  }
+});

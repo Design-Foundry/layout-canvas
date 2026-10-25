@@ -29,6 +29,8 @@ import {
   Rect,
   TextRun,
   RasterImage,
+  PrototypeState,
+  PrototypeScreen,
 } from '@canvas/bridge';
 import { LucentButton, LucentTab, LucentTabList } from '@designfoundry/lucent-angular';
 import { Api } from '../api/api';
@@ -122,10 +124,79 @@ export class EditorPage {
   protected readonly layers = signal<readonly LayerRow[]>([]);
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   protected readonly selectedNode = signal<NodeProps | null>(null);
+  protected readonly presentation = signal<PrototypeState>({
+    active: false,
+    screen: null,
+    start: null,
+    canBack: false,
+    overlay: null,
+    transitioning: false,
+  });
+  protected readonly prototypeScreens = signal<readonly PrototypeScreen[]>([]);
+  protected readonly prototypeChoice = signal('');
+  protected readonly prototypeStart = computed(() => {
+    const screens = this.prototypeScreens(),
+      chosen = this.prototypeChoice(),
+      selected = this.selectedNode();
+    return (
+      screens.find((screen) => screen.id === chosen)?.id ??
+      screens.find((screen) => screen.id === selected?.id)?.id ??
+      screens.find((screen) => screen.start)?.id ??
+      screens[0]?.id ??
+      ''
+    );
+  });
+  protected readonly prototypeName = computed(
+    () =>
+      this.prototypeScreens().find(
+        (screen) => screen.id === (this.presentation().overlay ?? this.presentation().screen),
+      )?.name || 'Prototype',
+  );
+  protected readonly prototypeError = signal('');
+  protected readonly prototypeWire = signal('');
+  protected playPrototype(): void {
+    this.prototypeError.set('');
+    if (this.inlineText()) {
+      this.prototypeError.set('Finish or cancel the text edit before playing.');
+      return;
+    }
+    const core = this.core();
+    if (!core || !this.prototypeStart() || !core.startPrototype(this.prototypeStart())) {
+      this.prototypeError.set('Create a visible root frame (F), then choose a starting screen.');
+      return;
+    }
+    this.presentation.set(core.prototypeState());
+  }
+  protected exitPrototype(): void {
+    const core = this.core();
+    core?.stopPrototype();
+    if (core) this.presentation.set(core.prototypeState());
+  }
+  protected backPrototype(): void {
+    const core = this.core();
+    core?.prototypeBack();
+    if (core) this.presentation.set(core.prototypeState());
+  }
+  protected restartPrototype(): void {
+    const core = this.core();
+    core?.restartPrototype();
+    if (core) this.presentation.set(core.prototypeState());
+  }
+  protected closePrototypeOverlay(): void {
+    const core = this.core();
+    core?.closePrototypeOverlay();
+    if (core) this.presentation.set(core.prototypeState());
+  }
   protected readonly inlineText = signal<NodeProps | null>(null);
   protected readonly inlineBounds = signal<Rect | null>(null);
   protected beginInlineText(): void {
-    if (this.inlineText() || this.core()?.drawingPath() || this.tool() === 'pen') return;
+    if (
+      this.presentation().active ||
+      this.inlineText() ||
+      this.core()?.drawingPath() ||
+      this.tool() === 'pen'
+    )
+      return;
     const core = this.core(),
       selected = core?.selection();
     const node = selected?.length === 1 ? core?.node(selected[0]) : null;
@@ -321,7 +392,33 @@ export class EditorPage {
 
   protected onKeydown(event: KeyboardEvent): void {
     const core = this.core();
-    if (!core || event.defaultPrevented || isTyping(event.target)) return;
+    if (!core || event.defaultPrevented) return;
+    if (this.presentation().active) {
+      const key = event.key.toLowerCase(),
+        command = event.ctrlKey || event.metaKey;
+      if (key === 'escape') {
+        this.exitPrototype();
+        event.preventDefault();
+      } else if (event.altKey && key === 'arrowleft') {
+        this.backPrototype();
+        event.preventDefault();
+      } else if (
+        isTyping(event.target) ||
+        key === 'tab' ||
+        (event.target instanceof HTMLButtonElement && ['enter', ' '].includes(key))
+      )
+        return;
+      else {
+        const editing = command
+          ? ['z', 'y'].includes(key) || (event.altKey && ['k', 'b'].includes(key))
+          : ['delete', 'backspace', 'enter', 'f2'].includes(key) ||
+            !!NUDGE_DIRECTIONS[key] ||
+            (!event.altKey && !!TOOL_SHORTCUTS[key]);
+        if (editing) event.preventDefault();
+      }
+      return;
+    }
+    if (isTyping(event.target)) return;
 
     const key = event.key.toLowerCase();
     const command = event.ctrlKey || event.metaKey;
@@ -388,6 +485,9 @@ export class EditorPage {
       let mode = '';
       let frame = 0;
       const tick = () => {
+        const presentation = core.prototypeState();
+        if (JSON.stringify(this.presentation()) !== JSON.stringify(presentation))
+          this.presentation.set(presentation);
         const editing = this.inlineText();
         if (editing) {
           const bounds = core.screenBounds(editing.id);
@@ -415,11 +515,31 @@ export class EditorPage {
         const next = core.revision();
         if (next !== revision) {
           revision = next;
+          this.prototypeScreens.set(core.prototypeScreens());
           const selection = core.selection();
           this.selectedIds.set(new Set(selection));
           this.selectedNode.set(selection.length === 1 ? core.node(selection[0]) : null);
           this.tool.set(core.tool);
         }
+        let wire = '';
+        const interaction = this.selectedNode()?.interaction;
+        if (
+          !presentation.active &&
+          (interaction?.action === 'navigate' || interaction?.action === 'open-overlay')
+        ) {
+          const selected = this.selectedNode(),
+            source = selected ? core.screenBounds(selected.id) : null,
+            target = core.screenBounds(interaction.target);
+          if (source && target) {
+            const x = source.x + source.w,
+              y = source.y + source.h / 2,
+              tx = target.x,
+              ty = target.y + target.h / 2,
+              dx = Math.max(40, Math.abs(tx - x) / 2);
+            wire = `M ${x} ${y} C ${x + dx} ${y}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+          }
+        }
+        if (this.prototypeWire() !== wire) this.prototypeWire.set(wire);
         frame = requestAnimationFrame(tick);
       };
       frame = requestAnimationFrame(tick);

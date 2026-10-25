@@ -43,7 +43,7 @@ function object(value: unknown): value is Record<string, any> {
 function snapshot(value: unknown): asserts value is ComponentSnapshot {
   if (
     !object(value) ||
-    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(value['version']) ||
+    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(value['version']) ||
     !Array.isArray(value['nodes']) ||
     !Array.isArray(value['tokens']) ||
     !Array.isArray(value['modes']) ||
@@ -53,6 +53,23 @@ function snapshot(value: unknown): asserts value is ComponentSnapshot {
   ) {
     throw new Error('This file is not a supported Canvas component snapshot.');
   }
+  // Prototype destinations refer to authored root frames in the current document.
+  if (
+    value['nodes'].some((node: any) => {
+      const metadata = (fields: any) =>
+        object(fields) &&
+        (Object.hasOwn(fields, 'interaction') || Object.hasOwn(fields, 'prototypeStart'));
+      return (
+        metadata(node) ||
+        [...(node?.overrides ?? []), ...(node?.definition?.rules ?? [])].some((item: any) =>
+          metadata(item?.patch),
+        )
+      );
+    })
+  )
+    throw new Error(
+      'Prototype interactions and starting screens are document-local and cannot travel in Canvas component files. Remove prototype metadata before importing or exporting this component.',
+    );
   const ids = new Set<string>();
   const imageFields = ['image', 'imageFit', 'imageCrop'];
   const rasterIds = new Set<string>();

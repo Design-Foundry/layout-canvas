@@ -1,5 +1,10 @@
 <app-editor-toolbar
   class="toolbar"
+  [hidden]="presentation().active"
+  [prototypeScreens]="prototypeScreens()"
+  [prototypeStart]="prototypeStart()"
+  (choosePrototypeStart)="prototypeChoice.set($event)"
+  (play)="playPrototype()"
   [name]="name()"
   [(tool)]="tool"
   [canCreateComponent]="selectedIds().size > 0"
@@ -7,7 +12,7 @@
   (createComponent)="core()?.createComponent()"
 />
 
-<aside class="layers side">
+<aside class="layers side" [hidden]="presentation().active">
   <div class="side-tabs">
     <lucent-tab-list [activeTab]="sideTab()" (tabChange)="sideTab.set($any($event))">
       <lucent-tab label="Layers" value="layers" />
@@ -52,9 +57,9 @@
   }
 </aside>
 
-<main class="stage">
+<main class="stage" [class.presenting]="presentation().active">
   <canvas id="canvas" (dblclick)="beginInlineText()"></canvas>
-  @if (tool() === 'pen') {
+  @if (!presentation().active && tool() === 'pen') {
     <p
       role="status"
       style="
@@ -74,6 +79,44 @@
       Backspace: remove last vertex
     </p>
   }
+  @if (presentation().active) {
+    <nav class="prototype-controls" aria-label="Prototype presentation">
+      <button type="button" [disabled]="!presentation().canBack" (click)="backPrototype()">
+        Back
+      </button>
+      <button type="button" (click)="restartPrototype()">Restart</button>
+      @if (presentation().overlay) {
+        <button type="button" (click)="closePrototypeOverlay()">Close overlay</button>
+      }
+      <span aria-live="polite">{{ prototypeName() }}</span>
+      <button type="button" (click)="exitPrototype()">Exit (Esc)</button>
+    </nav>
+  } @else if (prototypeWire()) {
+    <svg class="prototype-wire" aria-hidden="true">
+      <defs>
+        <marker
+          id="prototype-arrow"
+          markerWidth="7"
+          markerHeight="7"
+          refX="6"
+          refY="3.5"
+          orient="auto"
+        >
+          <path d="M0,0 L7,3.5 L0,7" fill="#688cff" />
+        </marker>
+      </defs>
+      <path
+        [attr.d]="prototypeWire()"
+        fill="none"
+        stroke="#688cff"
+        stroke-width="2"
+        marker-end="url(#prototype-arrow)"
+      />
+    </svg>
+  }
+  @if (prototypeError() && !presentation().active) {
+    <p class="prototype-error" role="alert">{{ prototypeError() }}</p>
+  }
   @if (inlineText(); as textNode) {
     <app-inline-text-editor
       [node]="textNode"
@@ -83,7 +126,7 @@
       [style.top]="'clamp(0px, ' + (inlineBounds()?.y ?? 0) + 'px, max(0px, calc(100% - 220px)))'"
     />
   }
-  <div class="labels">
+  <div class="labels" [hidden]="presentation().active">
     @for (label of frameLabels(); track label.id) {
       @if (label.w > 24) {
         <span
@@ -111,6 +154,7 @@
 @if (selectedToken(); as token) {
   <app-token-inspector
     class="inspector"
+    [hidden]="presentation().active"
     [token]="token"
     [tokens]="tokens()"
     [modes]="modes()"
@@ -121,7 +165,9 @@
 } @else {
   <app-inspector-panel
     class="inspector"
+    [hidden]="presentation().active"
     [node]="selectedNode()"
+    [prototypeScreens]="prototypeScreens()"
     [components]="componentOptions()"
     [snapshot]="componentSnapshot"
     [saveDefinition]="saveComponentDefinition"
@@ -141,6 +187,6 @@
   />
 }
 
-<footer class="status typography-caption">
+<footer class="status typography-caption" [hidden]="presentation().active">
   <span>{{ status() }}</span>
 </footer>
