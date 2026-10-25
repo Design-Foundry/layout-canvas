@@ -11,6 +11,7 @@
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
 #include <emscripten/val.h>
+#include <array>
 #include <webgpu/webgpu_cpp.h>
 
 #include "shaders.hpp"
@@ -21,6 +22,10 @@
 namespace vc::render {
 namespace {
 
+float luminance(const std::array<float, 4>& c) {
+    return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+}
+
 struct FrameUniform {
     float viewport[2];
     float zoom;
@@ -28,6 +33,8 @@ struct FrameUniform {
     float gridOffset[2];
     float gridMinor;
     float gridMinorAlpha;
+    float gridTint;
+    float pad;
 };
 
 /// One draw item as the shaders read it. Rects are center and half size, relative to the camera
@@ -102,6 +109,7 @@ struct Renderer::State {
     wgpu::RenderPipeline gridPipeline;
     wgpu::RenderPipeline shapesPipeline;
     wgpu::Buffer frameBuffer;
+    std::array<float, 4> background{0.12f, 0.12f, 0.13f, 1.0f};
     wgpu::Buffer shapesBuffer;
     wgpu::Buffer pointsBuffer;
     std::size_t pointsCapacity = 0;
@@ -169,6 +177,10 @@ void Renderer::start() {
     state_->surface = state_->instance.CreateSurface(&surfaceDesc);
 
     state_->requestAdapter();
+}
+
+void Renderer::setBackground(float r, float g, float b, float a) {
+    state_->background = {r, g, b, a};
 }
 
 void Renderer::stop() {
@@ -382,6 +394,7 @@ bool Renderer::State::resizeIfNeeded() {
     config.format = format;
     config.width = width;
     config.height = height;
+    config.alphaMode = wgpu::CompositeAlphaMode::Premultiplied;
     surface.Configure(&config);
     return true;
 }
@@ -402,6 +415,8 @@ void Renderer::State::writeFrameUniform() {
          float(positiveMod(camera.position().y, major))},
         float(minor),
         float(fade),
+        luminance(background) > 0.5f ? 0.0f : 1.0f,
+        0.0f,
     };
     device.GetQueue().WriteBuffer(frameBuffer, 0, &uniform, sizeof(uniform));
 }
@@ -611,7 +626,7 @@ bool Renderer::State::frame(double time) {
     color.view = surfaceTexture.texture.CreateView();
     color.loadOp = wgpu::LoadOp::Clear;
     color.storeOp = wgpu::StoreOp::Store;
-    color.clearValue = {0.12, 0.12, 0.13, 1.0};
+    color.clearValue = {background[0] * background[3], background[1] * background[3], background[2] * background[3], background[3]};
 
     wgpu::RenderPassDescriptor passDesc{};
     passDesc.colorAttachmentCount = 1;

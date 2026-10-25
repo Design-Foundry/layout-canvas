@@ -583,6 +583,11 @@ export class VisualCore {
     this.module.setActiveMode(id);
   }
 
+  /** Canvas clear color as sRGB 0 to 1. Alpha 0 shows the page behind the canvas. */
+  setCanvasBackground(r: number, g: number, b: number, a = 1): void {
+    this.module.setCanvasBackground(r, g, b, a);
+  }
+
   /** Adds a token with a starting value and a free identifier. Returns its id. */
   addToken(type: TokenType): string | null {
     return this.module.addToken(type) || null;
