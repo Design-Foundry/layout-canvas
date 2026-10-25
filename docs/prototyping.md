@@ -30,16 +30,32 @@ supports Instant, Dissolve and Slide. Slide/Push have left/right/up/down directi
 All animations take 1–2000 ms (default 300), with input blocked until completion.
 Slide moves the incoming screen over a stationary outgoing base; Push moves both.
 Direction names describe travel: Slide left enters from the right. Movement is
-linear and deterministic. Presentation content, modal scrims and hit testing stay
-clipped to the base screen viewport, including manually positioned oversized modals.
+linear and deterministic. Modal content, scrims and hit testing stay clipped to
+the base screen viewport, including manually positioned oversized modals.
 Manual X/Y may range from -100000 to 100000; offscreen portions remain unclickable.
 
-Dissolve fades native paint primitives. It is a basic layer fade: overlapping translucent paints are not
-composited into offscreen groups, and outgoing/incoming fades can reveal the stage
-background. It does not interpolate matching objects or preserve the old camera
-scale when screen sizes differ. Navigating from an overlay drops the modal stack
+Dissolve paints each complete scene into an offscreen target, then mixes the
+premultiplied scene colors once. Transition opacity therefore preserves overlapping
+paints, glyphs and images; opaque equal-size screens remain opaque throughout.
+This is scene composition, not matching-object interpolation. The outgoing screen
+keeps its old camera scale and viewport when the destination has different dimensions.
+Slide/Push use composed Dissolve when those rendered viewport shapes do not match,
+so uncovered portions of the old screen do not disappear abruptly. The saved action
+and duration remain unchanged. Navigating from an overlay drops the modal stack
 and transitions the base screens; navigating to its existing base simply closes all
 overlays immediately.
+
+Playback follows the browser's `prefers-reduced-motion` setting. With reduced motion,
+navigation and overlays appear instantly; changing the preference mid-transition
+settles at the destination. Resizing the player or changing a screen's root geometry
+through synchronization also finishes the transition there. These actions never
+write document operations or change authored animation settings. Back, Restart and
+Exit cancel the active transition and perform their normal explicit actions.
+
+The compositor uses two viewport-size targets, reused during playback and released
+on exit/detach. Above 16,777,216 render pixels it finishes the transition instantly
+instead of allocating more than 128 MiB of scene targets. Document opacity and paint
+semantics outside prototype scene mixing are unchanged.
 
 The modal stack holds up to eight distinct screens. Reopening a screen already in
 the stack or opening the base as its own overlay is ignored. **Dismiss when clicking
@@ -97,7 +113,6 @@ These links belong to a full document. Portable Canvas component files refuse
 prototype metadata with an explanation instead of discarding links to screens
 outside the component. Native document storage/reload remains self-contained.
 
-This remains a bounded click-prototype contract. Offscreen group compositing, Smart
-Animate, scroll behaviors, hover/press/delay triggers,
+This remains a bounded click-prototype contract. Smart Animate, scroll behaviors, hover/press/delay triggers,
 variables, conditional actions, external URLs and hosted sharing are not implemented.
 See the [staged implementation plan](prototyping-plan.md) for sequencing and acceptance.

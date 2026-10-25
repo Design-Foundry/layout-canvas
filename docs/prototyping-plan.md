@@ -14,8 +14,8 @@ The native baseline is covered by model, runtime and browser regressions.
 
 | Stage | Deliverable | Acceptance | Status |
 | --- | --- | --- | --- |
-| 1 | Directional Slide/Push and positioned overlays | Strict native schema and downgrade refusal; deterministic native layers and matching modal hit testing; inspector authoring, Undo/Redo and reload; real local playback with unchanged document operations | Complete locally |
-| 2 | Offscreen composition and transition polish | Correct group alpha for overlapping paints/images/text; preserved outgoing viewport across unequal screens; reduced-motion preference and consistent interrupted transition policy | Planned |
+| 1 | Directional Slide/Push and positioned overlays | Strict native schema and downgrade refusal; deterministic native layers and matching modal hit testing; inspector authoring, Undo/Redo and reload; real local playback with unchanged document operations | Complete |
+| 2 | Offscreen composition and transition polish | Correct group alpha for overlapping paints/images/text; preserved outgoing viewport across unequal screens; reduced-motion preference and consistent interrupted transition policy | Complete |
 | 3 | Scrollable screen and overlay viewports | Explicit overflow contract, wheel/touch scroll with clipping and consistent picking; fixed/sticky elements only after native layout semantics exist; reset and remote invalidation behavior tested | Planned |
 | 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | Planned |
 | 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | Planned |
@@ -52,5 +52,16 @@ authoring tests, portable-file refusal checks and HTTP persistence tests. Real
 browser QA verified Undo/Redo, reload, moving screens, positioned hotspot closure,
 input blocking, outside dismissal and Restart cancellation without playback writes.
 
-Next implementation stage is offscreen composition and transition polish. Stages
-2–6 are still planned; completing Stage 1 is not full Figma prototyping parity.
+Stage 2 paints full native scenes into two offscreen targets and mixes their
+premultiplied colors once. Outgoing screens keep their previous camera transform.
+Directional navigation falls back to composed dissolve when viewport shapes do
+not match, without changing authored metadata. Reduced-motion changes, viewport
+resizes and remote screen geometry changes finish the active transition at its
+destination; Back/Restart/Exit retain their explicit navigation behavior.
+
+Stage 2 validation covers 526 automated checks plus active-transition browser
+capture and a pixel comparison of identical scenes containing translucent overlaps,
+glyphs and an RGBA image. See [validation](prototyping-validation.md).
+
+Next implementation stage is scrollable screen and overlay viewports. Stages
+3–6 remain planned; these increments are not full Figma prototyping parity.
