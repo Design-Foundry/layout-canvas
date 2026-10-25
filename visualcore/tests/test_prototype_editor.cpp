@@ -619,12 +619,13 @@ TEST_CASE("Delay eligibility honors hidden and scrolled clipping, while top moda
     f.editor.advancePrototype(99);REQUIRE(f.editor.prototypeScreen()==f.a);f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.b);
 }
 
-TEST_CASE("Remote edits and resizing cancel scheduled delays until explicit new entry or Restart") {
+TEST_CASE("Remote edits cancel delays while viewport resizing restarts a complete delay epoch") {
     for(const bool remote:{false,true}) {
         Prototype f;NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b},100}};f.patch(f.a,p);
         REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.editor.advancePrototype(50);
         if(remote) {p={};p.name="Changed";f.patch(f.button,p);} else f.editor.resizePrototype({600,400});
-        f.editor.advancePrototype(10000);REQUIRE(f.editor.prototypeScreen()==f.a);
+        if(remote) {f.editor.advancePrototype(10000);REQUIRE(f.editor.prototypeScreen()==f.a);}
+        else {f.editor.advancePrototype(99);REQUIRE(f.editor.prototypeScreen()==f.a);f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.b);}
         REQUIRE(f.editor.restartPrototype());f.editor.advancePrototype(100);REQUIRE(f.editor.prototypeScreen()==f.b);
     }
 }
@@ -642,7 +643,7 @@ TEST_CASE("Independent copied-layer trigger lists replace inherited actions in p
 
 TEST_CASE("Initial full-stage layout settles before delay timing without canceling the flow") {
     Prototype f;NodePatch p;p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Delay,{PrototypeAction::Navigate,f.b},100}};f.patch(f.a,p);
-    REQUIRE(f.editor.startPrototype(f.a,{200,100}));f.editor.resizePrototype({870,668});
+    REQUIRE(f.editor.startPrototype(f.a,{200,100}));f.editor.advancePrototype(25);f.editor.resizePrototype({870,668});
     f.editor.advancePrototype(99);REQUIRE(f.editor.prototypeScreen()==f.a);
     f.editor.advancePrototype(1);REQUIRE(f.editor.prototypeScreen()==f.b);
 }

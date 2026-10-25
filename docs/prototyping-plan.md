@@ -101,7 +101,8 @@ Delay fires once per node per active screen/modal visit after the transition has
 settled; hidden/clipped/offscreen nodes wait until visible. Only the top modal
 has active timers. At most one due action runs per frame, in visible paint order,
 so cyclic flows cannot recurse within a frame. Back/Close reveal a new timed visit.
-Resize and remote edits cancel scheduled delays until explicit navigation/restart.
+Viewport resizing restarts the full delay after the new layout; remote edits
+cancel scheduled delays until explicit navigation/restart.
 Exit cancels all trigger state. Timers, hover and presses never author document ops.
 
 Stage 3 validation: 545 automated checks and real browser wheel/hotspot/history,

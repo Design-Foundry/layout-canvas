@@ -119,7 +119,6 @@ bool Editor::startPrototype(const Id& screen,Vec2 viewport) {
     prototypeScreen_=prototypeStart_=screen;
     prototypeViewport_=viewport;
     prototypeBaseScroll_={};prototypeTouch_=false;prototypeMouseDown_=false;prototypeDocumentRevision_=session_.revision();
-    prototypeLayoutPending_=true;
     prototypeHistory_.clear();prototypeOverlays_.clear();cancelPrototypeTransition();
     prototypeClick_=false;prototypeOutsidePressed_=false;
     resetPrototypeTriggers();
@@ -158,7 +157,9 @@ void Editor::resizePrototype(Vec2 viewport) {
     if(!std::isfinite(viewport.x) || !std::isfinite(viewport.y) || viewport.x<=0 || viewport.y<=0) {prototypeClick_=false;return;}
     if(prototypeDocumentRevision_!=session_.revision() || viewport.x!=prototypeViewport_.x || viewport.y!=prototypeViewport_.y) {
         pointerCancel();
-        if(prototypeDocumentRevision_==session_.revision() && prototypeLayoutPending_) resetPrototypeTriggers();
+        // The stage expands after Play's UI render. A new viewport starts a fresh
+        // delay epoch rather than disabling timers during that initial expansion.
+        if(prototypeDocumentRevision_==session_.revision()) resetPrototypeTriggers();
         else cancelPrototypeTriggers();
         if(prototypeDocumentRevision_!=session_.revision()) finishPrototypeTransition();
         prototypeDocumentRevision_=session_.revision();
@@ -256,7 +257,6 @@ void Editor::advancePrototype(double deltaMs) {
     if(!presenting_) return;
     resizePrototype(prototypeViewport_);
     if(!presenting_ || !std::isfinite(deltaMs) || deltaMs<=0) return;
-    prototypeLayoutPending_=false;
     if(prototypeTransitioning()) {
         prototypeElapsed_=std::min(prototypeDuration_,prototypeElapsed_+deltaMs);
         if(prototypeElapsed_>=prototypeDuration_) cancelPrototypeTransition();

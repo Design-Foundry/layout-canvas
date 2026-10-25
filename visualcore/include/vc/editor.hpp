@@ -297,7 +297,6 @@ private:
     Id prototypeHovered_;
     bool prototypeMouseDown_ = false;
     bool prototypeTimersEnabled_ = false;
-    bool prototypeLayoutPending_ = false;
     double prototypeTriggerElapsed_ = 0;
     std::unordered_set<Id> prototypeDelayFired_;
     struct PrototypeOverlay {
