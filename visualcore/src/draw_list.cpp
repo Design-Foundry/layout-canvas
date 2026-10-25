@@ -61,8 +61,8 @@ Color withAlpha(const Oklch& color, double opacity) {
 
 class Builder {
 public:
-    Builder(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root)
-        : document_(document), view_(view), mode_(mode), out_(out),root_(root) {}
+    Builder(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root,Vec2 scroll)
+        : document_(document), view_(view), mode_(mode), out_(out),root_(root),scroll_(scroll) {}
 
     std::size_t run() {
         out_.clear();
@@ -174,7 +174,8 @@ private:
             if (isContainer(node.type)) {
                 const Rect childClip = node.clipContent ? intersect(clip, box) : clip;
                 if (!node.clipContent || childClip.intersects(view_)) {
-                    collect(id, {box.x, box.y}, childClip, alpha);
+                    const Vec2 scroll=id==root_?scroll_:Vec2{};
+                    collect(id, {box.x-scroll.x, box.y-scroll.y}, childClip, alpha);
                 }
             }
 
@@ -240,12 +241,13 @@ private:
     std::vector<DrawItem>& out_;
     std::size_t drawn_ = 0;
     Id root_;
+    Vec2 scroll_;
 };
 
 } // namespace
 
-std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root) {
-    return Builder{document, view, mode, out,root}.run();
+std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root,Vec2 scroll) {
+    return Builder{document, view, mode, out,root,scroll}.run();
 }
 
 } // namespace vc

@@ -531,7 +531,7 @@ void Renderer::State::buildInstances() {
                 }
                 const Rect sourceView{(view.x-layer.offset.x)/layer.scale,(view.y-layer.offset.y)/layer.scale,
                                       view.w/layer.scale,view.h/layer.scale};
-                stats.visible+=buildDrawList(document,sourceView,editor.activeMode(),layerItems,layer.screen);
+                stats.visible+=buildDrawList(document,sourceView,editor.activeMode(),layerItems,layer.screen,layer.scroll);
                 for(auto& item:layerItems) {
                     transformDrawItem(item,layer.offset,1,layer.viewport,layer.scale);
                     drawItems.push_back(std::move(item));

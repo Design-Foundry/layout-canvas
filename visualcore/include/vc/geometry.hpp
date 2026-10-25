@@ -29,7 +29,12 @@ namespace vc {
 /// frames are considered. Returns a nil id when nothing is hit.
 [[nodiscard]] Id hitTest(const Document& document, Vec2 world, bool framesOnly = false,
                          const Id& mode = kDefaultModeId, double tolerance = 4.0,
-                         const Id& root = {}, bool includeLocked = false);
+                         const Id& root = {}, bool includeLocked = false, Vec2 scroll = {});
+
+/// Positive right/bottom overflow of visible layout boxes, respecting descendant clips.
+/// Root clipping does not constrain its own scroll range; paint bleed is excluded.
+[[nodiscard]] Vec2 prototypeScrollLimit(const Document& document, const Id& root,
+                                       const Id& mode = kDefaultModeId);
 
 /// The deepest visible, unlocked frame under `world`, skipping `excluded` nodes and everything inside
 /// them. Returns a nil id for the canvas itself.

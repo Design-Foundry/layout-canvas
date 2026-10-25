@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "vc/draw_list.hpp"
+#include "vc/geometry.hpp"
 
 using Catch::Matchers::WithinAbs;
 using vc::CreateNode;
@@ -66,6 +67,60 @@ bool same(const Rect& a, const Rect& b) {
 }
 
 } // namespace
+
+TEST_CASE("Prototype scrolling moves descendants while keeping the viewport and root paint fixed", "[draw][prototype][scroll]") {
+    Document doc;
+    auto frame=rect(1,100,200,100,80);frame.type=NodeType::Frame;frame.clipContent=true;
+    REQUIRE(doc.apply(CreateNode{frame}));
+    REQUIRE(doc.apply(CreateNode{rect(2,10,110,30,20,1)}));
+    std::vector<DrawItem> items;
+    vc::buildDrawList(doc,kView,vc::kDefaultModeId,items,frame.id,{0,100});
+    REQUIRE(items.size()==2);
+    REQUIRE(same(items[0].quad,{100,200,100,80}));
+    REQUIRE(same(items[1].quad,{110,210,30,20}));
+    REQUIRE(same(items[1].clip,{100,200,100,80}));
+    REQUIRE(vc::hitTest(doc,{120,220},false,vc::kDefaultModeId,0,frame.id,true,{0,100})==idOf(2));
+    REQUIRE(vc::hitTest(doc,{120,220},false,vc::kDefaultModeId,0,frame.id,true)==frame.id);
+    REQUIRE(vc::hitTest(doc,{120,290},false,vc::kDefaultModeId,0,frame.id,true,{0,100}).isNil());
+    // Scrolling is scoped to presentation: the ordinary editor geometry stays authored.
+    REQUIRE(vc::hitTest(doc,{120,320}).isNil());
+    REQUIRE(doc.box(idOf(2)).y==110);
+}
+
+TEST_CASE("Scrolled nested clipping agrees between native paint and picking", "[draw][prototype][scroll]") {
+    Document doc;
+    auto frame=rect(1,100,200,100,80);frame.type=NodeType::Frame;frame.clipContent=false;
+    auto nested=rect(2,10,100,40,30,1);nested.type=NodeType::Frame;nested.clipContent=true;
+    REQUIRE(doc.apply(CreateNode{frame}));REQUIRE(doc.apply(CreateNode{nested}));
+    REQUIRE(doc.apply(CreateNode{rect(3,0,20,20,30,2)}));
+    std::vector<DrawItem> items;
+    vc::buildDrawList(doc,kView,vc::kDefaultModeId,items,frame.id,{0,90});
+    REQUIRE(items.size()==3);
+    REQUIRE(same(items[2].quad,{110,230,20,30}));
+    REQUIRE(same(items[2].clip,{110,210,40,30}));
+    REQUIRE(vc::hitTest(doc,{115,235},false,vc::kDefaultModeId,0,frame.id,true,{0,90})==idOf(3));
+    REQUIRE(vc::hitTest(doc,{115,250},false,vc::kDefaultModeId,0,frame.id,true,{0,90})==frame.id);
+}
+
+TEST_CASE("Prototype scroll range excludes hidden and clipped overflow but includes expanded copies", "[geometry][prototype][scroll]") {
+    Document doc;
+    auto frame=rect(1,100,200,100,80);frame.type=NodeType::Frame;frame.clipContent=true;
+    auto nested=rect(2,0,70,40,20,1);nested.type=NodeType::Frame;nested.clipContent=true;
+    REQUIRE(doc.apply(CreateNode{frame}));REQUIRE(doc.apply(CreateNode{nested}));
+    REQUIRE(doc.apply(CreateNode{rect(3,0,200,20,20,2)}));
+    auto hidden=rect(4,500,500,100,100,1);hidden.type=NodeType::Frame;hidden.visible=false;
+    REQUIRE(doc.apply(CreateNode{hidden}));REQUIRE(doc.apply(CreateNode{rect(5,900,900,100,100,4)}));
+    auto limit=vc::prototypeScrollLimit(doc,frame.id);
+    REQUIRE(limit.x==0);REQUIRE(limit.y==10);
+    auto main=rect(6,1000,1000,30,20);main.type=NodeType::Component;
+    REQUIRE(doc.apply(CreateNode{main}));REQUIRE(doc.apply(CreateNode{rect(7,50,100,20,20,6)}));
+    auto instance=rect(8,80,60,30,20,1);instance.type=NodeType::Instance;instance.component=main.id;
+    REQUIRE(doc.apply(CreateNode{instance}));
+    limit=vc::prototypeScrollLimit(doc,frame.id);
+    REQUIRE(limit.x==50);REQUIRE(limit.y==100);
+    // The root's own clip does not truncate the content extent.
+    REQUIRE(frame.clipContent);
+}
 
 TEST_CASE("paint order is drop shadows, fill, inner shadows, children, then stroke") {
     Document doc;

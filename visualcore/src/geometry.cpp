@@ -6,7 +6,7 @@ namespace vc {
 namespace {
 
 void hitChildren(const Document& document, const Id& parent, Vec2 offset, Vec2 world, bool framesOnly,
-                 const Id& mode, Id& hit, double tolerance, const Id& root, bool includeLocked) {
+                 const Id& mode, Id& hit, double tolerance, const Id& root, bool includeLocked,Vec2 scroll) {
     for (const Id& id : document.viewChildren(parent)) {
         if(parent.isNil() && !root.isNil() && id!=root) continue;
         const Node& node = *document.view(id);
@@ -39,7 +39,8 @@ void hitChildren(const Document& document, const Id& parent, Vec2 offset, Vec2 w
             hit = id;
         }
         if (isContainer(node.type) && (inside || !node.clipContent)) {
-            hitChildren(document, id, {bounds.x, bounds.y}, world, framesOnly, mode, hit, tolerance,root,includeLocked);
+            const Vec2 shift=id==root?scroll:Vec2{};
+            hitChildren(document, id, {bounds.x-shift.x, bounds.y-shift.y}, world, framesOnly, mode, hit, tolerance,root,includeLocked,scroll);
         }
     }
 }
@@ -151,15 +152,47 @@ std::optional<Rect> worldBounds(const Document& document, const Id& id, const Id
     return bounds;
 }
 
-Id hitTest(const Document& document, Vec2 world, bool framesOnly, const Id& mode,double tolerance,const Id& root,bool includeLocked) {
+Id hitTest(const Document& document, Vec2 world, bool framesOnly, const Id& mode,double tolerance,const Id& root,bool includeLocked,Vec2 scroll) {
     Id hit;
     if(!root.isNil()) {
         const auto* node=document.find(root);
         const auto box=worldBounds(document,root,mode);
         if(!node || !node->parent.isNil() || !node->visible || !box || !box->contains(world)) return {};
     }
-    hitChildren(document, Id{}, {}, world, framesOnly, mode, hit, tolerance,root,includeLocked);
+    hitChildren(document, Id{}, {}, world, framesOnly, mode, hit, tolerance,root,includeLocked,scroll);
     return hit;
+}
+
+Vec2 prototypeScrollLimit(const Document& document,const Id& root,const Id& mode) {
+    const auto* node=document.find(root);
+    const auto bounds=worldBounds(document,root,mode);
+    if(!node || !node->parent.isNil() || !node->visible || !bounds) return {};
+    Vec2 extent{bounds->x+bounds->w,bounds->y+bounds->h};
+    const auto intersect=[](const Rect& a,const Rect& b) {
+        const auto x=std::max(a.x,b.x),y=std::max(a.y,b.y);
+        return Rect{x,y,std::max(0.,std::min(a.x+a.w,b.x+b.w)-x),std::max(0.,std::min(a.y+a.h,b.y+b.h)-y)};
+    };
+    const auto collect=[&](const Id& parent,Vec2 origin,std::optional<Rect> clip,auto&& self)->void {
+        for(const auto& id:document.viewChildren(parent)) {
+            const auto* child=document.view(id);
+            if(!child || !child->visible) continue;
+            const auto local=document.box(id,mode);
+            const Rect box{origin.x+local.x,origin.y+local.y,local.w,local.h};
+            const auto visible=clip?intersect(box,*clip):box;
+            if((!clip || box.intersects(*clip)) && std::isfinite(visible.x+visible.w) && std::isfinite(visible.y+visible.h)) {
+                extent.x=std::max(extent.x,visible.x+visible.w);
+                extent.y=std::max(extent.y,visible.y+visible.h);
+            }
+            if(isContainer(child->type)) {
+                auto childClip=clip;
+                if(child->clipContent) childClip=clip?intersect(*clip,box):box;
+                if(!childClip || (childClip->w>0 && childClip->h>0))
+                    self(id,{box.x,box.y},childClip,self);
+            }
+        }
+    };
+    collect(root,{bounds->x,bounds->y},std::nullopt,collect);
+    return {std::max(0.,extent.x-bounds->x-bounds->w),std::max(0.,extent.y-bounds->y-bounds->h)};
 }
 
 } // namespace vc

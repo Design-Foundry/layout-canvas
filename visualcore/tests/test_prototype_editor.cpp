@@ -459,3 +459,82 @@ TEST_CASE("Prototype directional transitions between unequal viewports fall back
         REQUIRE(snapshotToJson(f.session.document())==snapshot);REQUIRE(f.session.takeOutbox().empty());
     }
 }
+
+TEST_CASE("Prototype wheel scroll clamps allowed axes, keeps camera fixed and never writes") {
+    Prototype f;const auto content=f.add(NodeType::Rect,f.a,350,240,50,60);
+    NodePatch p;p.prototypeOverflow=PrototypeOverflow::Vertical;f.patch(f.a,p);
+    const auto before=snapshotToJson(f.session.document());
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto camera=f.camera;
+    const auto inside=f.camera.toScreen({150,240});
+    f.editor.wheel(inside,100,400);
+    REQUIRE(f.editor.prototypeScroll(f.a).x==0);REQUIRE(f.editor.prototypeScroll(f.a).y==50);
+    f.editor.wheel(inside,10000);REQUIRE(f.editor.prototypeScroll(f.a).y==200);
+    f.editor.wheel({0,0},-10000);REQUIRE(f.editor.prototypeScroll(f.a).y==200);
+    f.editor.wheel(inside,-10000);REQUIRE(f.editor.prototypeScroll(f.a).y==0);
+    REQUIRE(f.camera.zoom()==camera.zoom());REQUIRE(f.camera.position().y==camera.position().y);
+    p.prototypeOverflow=PrototypeOverflow::Both;f.patch(f.a,p);
+    f.editor.wheel(inside,10000,10000);
+    REQUIRE(f.editor.prototypeScroll(f.a).x==200);REQUIRE(f.editor.prototypeScroll(f.a).y==200);
+    p.prototypeOverflow=PrototypeOverflow::Horizontal;f.patch(f.a,p);f.editor.advancePrototype(1);
+    REQUIRE(f.editor.prototypeScroll(f.a).x==200);REQUIRE(f.editor.prototypeScroll(f.a).y==0);
+    p.prototypeOverflow=PrototypeOverflow::None;f.patch(f.a,p);f.editor.advancePrototype(1);
+    REQUIRE(f.editor.prototypeScroll(f.a).x==0);REQUIRE(f.editor.prototypeScroll(f.a).y==0);
+    // Only the deliberate remote metadata edits changed this snapshot.
+    p.prototypeOverflow=PrototypeOverflow::Vertical;f.patch(f.a,p);
+    REQUIRE(snapshotToJson(f.session.document())==before);REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+}
+
+TEST_CASE("Scrolled hotspots navigate, outgoing scenes capture scroll, Back restores and Restart resets") {
+    Prototype f;const auto link=f.add(NodeType::Rect,f.a,10,210,60,40);
+    NodePatch p;p.prototypeOverflow=PrototypeOverflow::Vertical;f.patch(f.a,p);
+    p={};p.interaction=Interaction{PrototypeAction::Navigate,f.b,PrototypeTransition::Dissolve,300};f.patch(link,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    const auto inside=f.camera.toScreen({130,250});f.editor.wheel(inside,300);
+    REQUIRE(f.editor.prototypeScroll(f.a).y==150);
+    f.click(f.center(link)-Vec2{0,150});REQUIRE(f.editor.prototypeScreen()==f.b);
+    REQUIRE(f.editor.prototypeScene().from.front().scroll.y==150);
+    REQUIRE_FALSE(f.editor.scrollPrototype(inside,{0,30}));
+    REQUIRE(f.editor.prototypeBack());REQUIRE(f.editor.prototypeScroll(f.a).y==150);
+    REQUIRE(f.editor.restartPrototype());REQUIRE(f.editor.prototypeScroll(f.a).y==0);
+    REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Top modal scroll is independent, blocks background wheel and resets when reopened") {
+    Prototype f;f.add(NodeType::Rect,f.a,0,200,20,50);f.add(NodeType::Rect,f.b,0,200,20,50);
+    NodePatch p;p.prototypeOverflow=PrototypeOverflow::Vertical;f.patch(f.a,p);f.patch(f.b,p);
+    p={};p.w=100;p.h=60;f.patch(f.b,p);
+    p={};p.interaction=Interaction{PrototypeAction::OpenOverlay,f.b};f.patch(f.button,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click(f.center(f.button));
+    const auto inside=f.camera.toScreen({150,250});f.editor.wheel(inside,100);
+    REQUIRE(f.editor.prototypeScroll(f.b).y==50);REQUIRE(f.editor.prototypeScroll(f.a).y==0);
+    REQUIRE(f.editor.closePrototypeOverlay());REQUIRE(f.editor.prototypeScroll(f.b).y==0);
+    f.click(f.center(f.button));REQUIRE(f.editor.prototypeScroll(f.b).y==0);
+    f.editor.wheel(f.camera.toScreen({110,210}),100); // Scrim inside the base, outside the modal.
+    REQUIRE(f.editor.prototypeScroll(f.a).y==0);REQUIRE(f.editor.prototypeScroll(f.b).y==0);
+}
+
+TEST_CASE("Single touch preserves taps but drag, cancellation and wheel cannot activate hotspots") {
+    Prototype f;f.add(NodeType::Rect,f.a,0,200,20,50);
+    NodePatch p;p.prototypeOverflow=PrototypeOverflow::Vertical;f.patch(f.a,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    const auto point=f.camera.toScreen(f.center(f.button));
+    REQUIRE(f.editor.prototypeTouchStart(point));f.editor.prototypeTouchMove(point-Vec2{0,40});f.editor.prototypeTouchEnd();
+    REQUIRE(f.editor.prototypeScreen()==f.a);REQUIRE(f.editor.prototypeScroll(f.a).y==20);
+    REQUIRE(f.editor.restartPrototype());
+    f.editor.prototypeTouchStart(point);f.editor.pointerCancel();f.editor.prototypeTouchEnd();REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.pointerDown(point,PointerButton::Primary);f.editor.wheel(point,-20);f.editor.pointerUp();REQUIRE(f.editor.prototypeScreen()==f.a);
+    f.editor.prototypeTouchStart(point);f.editor.prototypeTouchEnd();REQUIRE(f.editor.prototypeScreen()==f.b);
+}
+
+TEST_CASE("Remote content shrink clamps scroll and cancels in-flight touch; resize preserves clamped position") {
+    Prototype f;const auto content=f.add(NodeType::Rect,f.a,0,200,20,50);
+    NodePatch p;p.prototypeOverflow=PrototypeOverflow::Vertical;f.patch(f.a,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));auto point=f.camera.toScreen({160,270});
+    f.editor.wheel(point,300);REQUIRE(f.editor.prototypeScroll(f.a).y==150);
+    f.editor.prototypeTouchStart(point);
+    p={};p.y=60;f.patch(content,p);f.editor.advancePrototype(1);
+    REQUIRE(f.editor.prototypeScroll(f.a).y==10);
+    f.editor.prototypeTouchMove(point-Vec2{0,100});f.editor.prototypeTouchEnd();REQUIRE(f.editor.prototypeScroll(f.a).y==10);
+    f.editor.resizePrototype({600,400});REQUIRE(f.editor.prototypeScroll(f.a).y==10);
+    f.editor.stopPrototype();REQUIRE(f.editor.startPrototype(f.a,{448,248}));REQUIRE(f.editor.prototypeScroll(f.a).y==0);
+}

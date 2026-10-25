@@ -33,6 +33,8 @@ struct PrototypeLayer {
     bool overlay = false;
     double scale = 1;
     std::optional<Rect> viewport;
+    /// Content-only translation, before the screen affine transform.
+    Vec2 scroll{};
 };
 
 /// Complete native scenes to mix after each has been painted at full opacity.
@@ -83,6 +85,11 @@ public:
     [[nodiscard]] Id prototypeStart() const { return prototypeStart_; }
     [[nodiscard]] bool canPrototypeBack() const { return presenting_ && (!prototypeHistory_.empty() || !prototypeOverlays_.empty()); }
     [[nodiscard]] bool prototypeEligible(const Id& id) const;
+    [[nodiscard]] Vec2 prototypeScroll(const Id& screen) const;
+    bool scrollPrototype(Vec2 screen, Vec2 delta);
+    bool prototypeTouchStart(Vec2 screen);
+    void prototypeTouchMove(Vec2 screen);
+    void prototypeTouchEnd();
 
     void pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers = {});
     void pointerMove(Vec2 screen, Modifiers modifiers = {});
@@ -99,7 +106,7 @@ public:
     void cancelPath();
     bool popPathPoint();
     [[nodiscard]] bool drawingPath() const { return !penPoints_.empty(); }
-    void wheel(Vec2 screen, double deltaY);
+    void wheel(Vec2 screen, double deltaY, double deltaX = 0);
     /// Applies `patch` to `id` as one undo step, for edits made outside the canvas.
     bool setProps(const Id& id, const NodePatch& patch);
     bool setComponentDefinition(const Id& component, const ComponentDefinition& definition);
@@ -227,6 +234,9 @@ private:
     [[nodiscard]] Vec2 prototypeOffset(const Id& screen) const;
     [[nodiscard]] bool prototypeOutsideOverlay(Vec2 screen) const;
     void cancelPrototypeTransition();
+    [[nodiscard]] Id prototypeScrollRoot(Vec2 screen) const;
+    [[nodiscard]] Vec2 clampPrototypeScroll(const Id& root, Vec2 value) const;
+    bool setPrototypeScroll(const Id& root, Vec2 value);
 
     Session& session_;
     Camera& camera_;
@@ -266,7 +276,14 @@ private:
     Id prototypeScreen_;
     Id prototypeStart_;
     Vec2 prototypeViewport_{};
-    std::vector<Id> prototypeHistory_;
+    struct PrototypeVisit { Id screen; Vec2 scroll; };
+    std::vector<PrototypeVisit> prototypeHistory_;
+    Vec2 prototypeBaseScroll_{};
+    std::uint64_t prototypeDocumentRevision_ = 0;
+    bool prototypeTouch_ = false;
+    bool prototypeTouchDragged_ = false;
+    Id prototypeTouchRoot_;
+    Vec2 prototypeTouchPrevious_{};
     bool prototypeClick_ = false;
     Id prototypePressed_;
     struct PrototypeOverlay {
@@ -274,6 +291,7 @@ private:
         bool dismissOutside = true;
         OverlayPlacement placement = OverlayPlacement::Center;
         OverlayOffset offset{};
+        Vec2 scroll{};
     };
     std::vector<PrototypeOverlay> prototypeOverlays_;
     bool prototypeOutsidePressed_ = false;
