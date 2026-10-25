@@ -187,6 +187,16 @@ export type PrototypeInteraction =
       readonly offset?: { readonly x: number; readonly y: number };
     } & PrototypeAnimation<PrototypeOverlayTransition>)
   | { readonly trigger: 'click'; readonly action: 'back' | 'close-overlay' };
+export type PrototypeTrigger = 'click' | 'hover' | 'press' | 'delay';
+type Triggered<T> = T extends PrototypeInteraction
+  ? Omit<T, 'trigger'> &
+      (
+        | { readonly trigger: 'click' | 'hover' | 'press'; readonly delayMs?: never }
+        | { readonly trigger: 'delay'; readonly delayMs: number }
+      )
+  : never;
+/** Ordered document-local interactions. Delay is measured in milliseconds. */
+export type PrototypeTriggeredInteraction = Triggered<PrototypeInteraction>;
 export type PrototypeSlideTransition = 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down';
 /** Scrollable axes of an authored root screen or overlay during playback. */
 export type PrototypeOverflow = 'none' | 'vertical' | 'horizontal' | 'both';
@@ -226,6 +236,7 @@ export interface PrototypeState {
 
 export interface NodeFields {
   readonly interaction?: PrototypeInteraction | null;
+  readonly interactions?: readonly PrototypeTriggeredInteraction[];
   readonly prototypeStart?: boolean;
   readonly prototypeOverflow?: PrototypeOverflow;
   readonly image?: RasterImage;

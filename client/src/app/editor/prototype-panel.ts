@@ -4,6 +4,8 @@ import type {
   NodeProps,
   PrototypeScreen,
   PrototypeInteraction,
+  PrototypeTrigger,
+  PrototypeTriggeredInteraction,
   PrototypeTransition,
   PrototypeOverlayTransition,
   PrototypePlacement,
@@ -40,12 +42,93 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
 @Component({
   selector: 'app-prototype-panel',
   template: `<section aria-label="Prototype interactions">
-    <h3>On click</h3>
+    <h3>Interactions</h3>
+    @if (entries().length) {
+      <label
+        >Interaction
+        <select
+          aria-label="Prototype interaction"
+          [value]="selectedIndex()"
+          (change)="selectInteraction($event)"
+        >
+          @for (entry of entries(); track $index) {
+            <option [value]="$index" [selected]="$index === selectedIndex()">
+              {{ $index + 1 }}. {{ triggerLabel(entry.trigger) }} · {{ actionLabel(entry.action) }}
+            </option>
+          }
+        </select>
+      </label>
+    }
+    <div class="interaction-buttons">
+      <button
+        type="button"
+        aria-label="Add interaction"
+        [disabled]="!!node().swapBound || entries().length >= 16"
+        (click)="addInteraction()"
+      >
+        Add
+      </button>
+      <button
+        type="button"
+        aria-label="Remove interaction"
+        [disabled]="!!node().swapBound || !entries().length"
+        (click)="removeInteraction()"
+      >
+        Remove
+      </button>
+      <button
+        type="button"
+        aria-label="Move interaction up"
+        [disabled]="!!node().swapBound || selectedIndex() <= 0"
+        (click)="moveInteraction(-1)"
+      >
+        Move up
+      </button>
+      <button
+        type="button"
+        aria-label="Move interaction down"
+        [disabled]="!!node().swapBound || selectedIndex() >= entries().length - 1"
+        (click)="moveInteraction(1)"
+      >
+        Move down
+      </button>
+    </div>
+    <label
+      >Trigger
+      <select
+        aria-label="Prototype trigger"
+        [value]="currentInteraction()?.trigger ?? 'click'"
+        [disabled]="!!node().swapBound || !currentInteraction()"
+        (change)="trigger($event)"
+      >
+        @for (choice of triggers; track choice) {
+          <option
+            [value]="choice"
+            [selected]="(currentInteraction()?.trigger ?? 'click') === choice"
+          >
+            {{ triggerLabel(choice) }}
+          </option>
+        }
+      </select>
+    </label>
+    @if (currentInteraction()?.trigger === 'delay') {
+      <label
+        >Delay (ms)<input
+          type="number"
+          min="1"
+          max="60000"
+          step="1"
+          aria-label="Prototype delay"
+          [value]="delayValue()"
+          [disabled]="!!node().swapBound"
+          (change)="delay($event)"
+      /></label>
+    }
     <label
       >Action
       <select
         aria-label="Prototype action"
-        [value]="value().interaction?.action ?? 'none'"
+        [value]="editingInteraction()?.action ?? 'none'"
         [disabled]="!!node().swapBound"
         (change)="action($event)"
       >
@@ -194,8 +277,12 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
       >
     }
     <p>
-      Click interactions navigate between root frames, position overlays, close them or go back.
-      Play the flow from the toolbar.
+      Interactions navigate between root frames, position overlays, close them or go back. Play the
+      flow from the toolbar.
+    </p>
+    <p>
+      The first interaction for each trigger wins; later entries with the same trigger are ignored.
+      Delay starts after the screen settles and runs once per visit.
     </p>
     @if (!screens().length) {
       <p>Create a visible root frame with the Frame tool (F) to add a destination.</p>
@@ -226,6 +313,15 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
       display: grid;
       gap: 6px;
     }
+    .interaction-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    button {
+      font: inherit;
+      padding: 5px 7px;
+    }
     select {
       background: var(--color--semantic--surface-default);
       color: inherit;
@@ -243,9 +339,33 @@ export class PrototypePanel {
   readonly save = input.required<(id: string, patch: NodePatch) => boolean>();
   private readonly pending = signal<NodePatch | null>(null);
   protected readonly error = signal('');
+  private readonly selected = signal(0);
+  private nodeId = '';
+  protected readonly triggers: readonly PrototypeTrigger[] = ['click', 'hover', 'press', 'delay'];
   protected readonly value = computed(() => ({ ...this.node(), ...this.pending() }));
+  protected readonly entries = computed<readonly PrototypeTriggeredInteraction[]>(() => {
+    const value = this.value();
+    return value.interactions ?? (value.interaction ? [value.interaction] : []);
+  });
+  protected readonly selectedIndex = computed(() =>
+    Math.max(0, Math.min(this.selected(), this.entries().length - 1)),
+  );
+  protected readonly currentInteraction = computed(
+    () => this.entries()[this.selectedIndex()] ?? null,
+  );
+  // Existing action controls edit the action independently of the selected trigger.
+  protected readonly editingInteraction = computed<PrototypeInteraction | null>(() => {
+    const entry = this.currentInteraction();
+    if (!entry) return null;
+    const { trigger: _trigger, delayMs: _delay, ...action } = entry;
+    return { ...action, trigger: 'click' } as PrototypeInteraction;
+  });
+  protected readonly delayValue = computed(() => {
+    const entry = this.currentInteraction();
+    return entry?.trigger === 'delay' ? entry.delayMs : 300;
+  });
   protected readonly linked = computed(() => {
-    const interaction = this.value().interaction;
+    const interaction = this.editingInteraction();
     return interaction?.action === 'navigate' || interaction?.action === 'open-overlay'
       ? interaction
       : null;
@@ -282,7 +402,11 @@ export class PrototypePanel {
   );
   constructor() {
     effect(() => {
-      this.node();
+      const node = this.node();
+      if (this.nodeId !== node.id) {
+        this.nodeId = node.id;
+        this.selected.set(0);
+      }
       this.pending.set(null);
       this.error.set('');
     });
@@ -290,7 +414,7 @@ export class PrototypePanel {
   protected action(event: Event): void {
     const select = event.target as HTMLSelectElement;
     if (this.node().swapBound) {
-      select.value = this.value().interaction?.action ?? 'none';
+      select.value = this.editingInteraction()?.action ?? 'none';
       return;
     }
     const value = select.value;
@@ -325,7 +449,7 @@ export class PrototypePanel {
         };
     }
     if (interaction === undefined || !this.change({ interaction }))
-      select.value = this.value().interaction?.action ?? 'none';
+      select.value = this.editingInteraction()?.action ?? 'none';
   }
   protected target(event: Event): void {
     const select = event.target as HTMLSelectElement;
@@ -445,9 +569,116 @@ export class PrototypePanel {
     )
       control.value = this.value().prototypeOverflow ?? 'none';
   }
+  protected triggerLabel(trigger: PrototypeTrigger): string {
+    return { click: 'On click', hover: 'On hover', press: 'On press', delay: 'After delay' }[
+      trigger
+    ];
+  }
+  protected actionLabel(action: PrototypeInteraction['action']): string {
+    return {
+      navigate: 'Navigate',
+      back: 'Back',
+      'open-overlay': 'Open overlay',
+      'close-overlay': 'Close overlay',
+    }[action];
+  }
+  protected selectInteraction(event: Event): void {
+    const index = Number((event.target as HTMLSelectElement).value);
+    if (Number.isInteger(index) && index >= 0 && index < this.entries().length)
+      this.selected.set(index);
+  }
+  protected addInteraction(): void {
+    if (this.node().swapBound || this.entries().length >= 16) return;
+    const entries = [...this.entries()];
+    const trigger =
+      this.triggers.find((choice) => !entries.some((entry) => entry.trigger === choice)) ?? 'click';
+    const action: PrototypeInteraction = this.screens().length
+      ? { trigger: 'click', action: 'navigate', target: this.screens()[0].id }
+      : { trigger: 'click', action: 'back' };
+    const entry = this.withTrigger(action, trigger, 300);
+    if (this.change({ interactions: [...entries, entry] })) this.selected.set(entries.length);
+  }
+  protected removeInteraction(): void {
+    if (this.node().swapBound || !this.entries().length) return;
+    const entries = [...this.entries()];
+    entries.splice(this.selectedIndex(), 1);
+    if (this.change({ interactions: entries }))
+      this.selected.set(Math.min(this.selectedIndex(), entries.length - 1));
+  }
+  protected moveInteraction(direction: -1 | 1): void {
+    if (this.node().swapBound) return;
+    const entries = [...this.entries()],
+      index = this.selectedIndex(),
+      next = index + direction;
+    if (next < 0 || next >= entries.length) return;
+    [entries[index], entries[next]] = [entries[next], entries[index]];
+    if (this.change({ interactions: entries })) this.selected.set(next);
+  }
+  protected trigger(event: Event): void {
+    const control = event.target as HTMLSelectElement;
+    const trigger = control.value as PrototypeTrigger;
+    const entry = this.currentInteraction(),
+      action = this.editingInteraction();
+    if (!entry || !action || this.node().swapBound || !this.triggers.includes(trigger)) {
+      control.value = entry?.trigger ?? 'click';
+      return;
+    }
+    if (entry.trigger === trigger) return;
+    const entries = [...this.entries()];
+    entries[this.selectedIndex()] = this.withTrigger(action, trigger, this.delayValue());
+    if (!this.change({ interactions: entries })) control.value = entry.trigger;
+  }
+  protected delay(event: Event): void {
+    const control = event.target as HTMLInputElement,
+      entry = this.currentInteraction();
+    const delayMs = Number(control.value);
+    if (
+      !entry ||
+      entry.trigger !== 'delay' ||
+      this.node().swapBound ||
+      !Number.isInteger(delayMs) ||
+      delayMs < 1 ||
+      delayMs > 60000
+    ) {
+      control.value = String(this.delayValue());
+      return;
+    }
+    const entries = [...this.entries()];
+    entries[this.selectedIndex()] = { ...entry, delayMs };
+    if (!this.change({ interactions: entries })) control.value = String(entry.delayMs);
+  }
+  private withTrigger(
+    action: PrototypeInteraction,
+    trigger: PrototypeTrigger,
+    delayMs: number,
+  ): PrototypeTriggeredInteraction {
+    const { trigger: _trigger, ...base } = action;
+    return (
+      trigger === 'delay' ? { ...base, trigger, delayMs } : { ...base, trigger }
+    ) as PrototypeTriggeredInteraction;
+  }
   private change(patch: NodePatch): boolean {
+    if ('interaction' in patch && this.value().interactions !== undefined) {
+      const entries = [...this.entries()],
+        entry = this.currentInteraction();
+      if (patch.interaction)
+        entries[this.selectedIndex()] = this.withTrigger(
+          patch.interaction,
+          entry?.trigger ?? 'click',
+          this.delayValue(),
+        );
+      else entries.splice(this.selectedIndex(), 1);
+      patch = { interactions: entries };
+    }
     if (this.save()(this.node().id, patch)) {
-      this.pending.update((old) => ({ ...old, ...patch }));
+      // Mirror native atomic replacement so pending legacy data cannot hide a list.
+      const pending =
+        'interactions' in patch
+          ? { ...patch, interaction: null }
+          : 'interaction' in patch
+            ? { ...patch, interactions: undefined }
+            : patch;
+      this.pending.update((old) => ({ ...old, ...pending }));
       this.error.set('');
       return true;
     }

@@ -6,6 +6,116 @@ const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const navigate = (target) => ({ trigger: 'click', action: 'navigate', target });
 const back = { trigger: 'click', action: 'back' };
 
+test('snapshot20 preserves ordered triggers and independent copied lists through HTTP', async () => {
+  const snapshot = fixture();
+  snapshot.version = 20;
+  const interactions = [
+    { trigger: 'hover', action: 'open-overlay', target: id(20), placement: 'top-right' },
+    { trigger: 'press', action: 'navigate', target: id(40), transition: 'slide-left', durationMs: 240 },
+    { trigger: 'delay', action: 'navigate', target: id(20), delayMs: 1200 },
+    back,
+  ];
+  delete snapshot.nodes[1].interaction;
+  snapshot.nodes[1].interactions = interactions;
+  snapshot.nodes.find((n) => n.id === id(32)).overrides = [
+    { node: id(31), patch: { interactions: [{ trigger: 'press', action: 'back' }] } },
+  ];
+  await using(snapshot, async (document) => {
+    const detail = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
+    assert.equal(detail.snapshot.data.version, 20);
+    const source = detail.snapshot.data.nodes.find((n) => n.id === id(11));
+    assert.deepEqual(source.interactions, interactions);
+    assert.equal(source.interaction, undefined);
+    const copied = detail.snapshot.data.nodes.find((n) => n.id === id(32)).overrides;
+    assert.equal(copied.length, 1);
+    assert.equal(copied[0].node, id(31));
+    assert.deepEqual(copied[0].patch.interactions, [{ trigger: 'press', action: 'back' }]);
+    assert.ok(copied[0].patch.interaction == null, 'the list masks the legacy inherited action');
+    accept(await append(document, 'SetProps', { id: id(11), patch: { interactions: [...interactions].reverse() } }));
+    accept(await append(document, 'SetOverride', { id: id(32), node: id(31), patch: { interactions: [] } }));
+    accept(await append(document, 'SetProps', { id: id(11), patch: { interaction: navigate(id(20)) } }));
+    accept(await append(document, 'SetProps', { id: id(11), patch: { interactions: [back] } }));
+    const result = await (await fetch(new URL(`/api/documents/${document}/ops?after=1`, origin))).json();
+    assert.equal(result.ops.length, 4);
+    assert.deepEqual(result.ops.map((op) => op.data.patch), [
+      { interactions: [...interactions].reverse() },
+      { interactions: [] },
+      { interaction: navigate(id(20)) },
+      { interactions: [back] },
+    ]);
+  });
+});
+
+test('ordered lists validate every destination and reject malformed trigger edits without persisting them', async () => {
+  const snapshot = fixture();
+  snapshot.version = 20;
+  delete snapshot.nodes[1].interaction;
+  snapshot.nodes[1].interactions = [back, { trigger: 'hover', action: 'navigate', target: id(40) }];
+  snapshot.nodes.find((n) => n.id === id(31)).interaction = back;
+  await using(snapshot, async (document) => {
+    refuse(await append(document, 'DeleteNode', { id: id(40) }));
+    refuse(await append(document, 'MoveNode', { id: id(40), parent: id(10), order: 'a2' }));
+    refuse(await append(document, 'SetProps', { id: id(40), patch: { type: 'component' } }));
+    const invalid = [
+      null, {}, [null], Array.from({ length: 17 }, () => back),
+      [{ trigger: 'hover', action: 'none' }],
+      [{ trigger: 'double-click', action: 'back' }],
+      [{ action: 'back' }],
+      [{ trigger: 'delay', action: 'back' }],
+      ...[0, 60001, 1.5, '100', null].map((delayMs) => [{ trigger: 'delay', action: 'back', delayMs }]),
+      [{ ...back, delayMs: 100 }],
+      [{ ...back, unexpected: true }],
+      [{ trigger: 'press', action: 'navigate', target: id(999) }],
+      [{ trigger: 'hover', action: 'open-overlay', target: id(31) }],
+      [{ trigger: 'delay', action: 'open-overlay', target: id(20), delayMs: 100, transition: 'push-left' }],
+    ];
+    for (const interactions of invalid)
+      refuse(await append(document, 'SetProps', { id: id(11), patch: { interactions } }));
+    refuse(await append(document, 'SetProps', { id: id(11), patch: { interaction: back, interactions: [back] } }));
+    refuse(await append(document, 'SetProps', { id: id(32), patch: { interactions: [] } }));
+    refuse(await append(document, 'SetComponentDefinition', {
+      id: id(30),
+      definition: {
+        axes: [{ name: 'state', values: ['a', 'b'], default: 'a' }],
+        rules: [{ when: { state: 'b' }, target: id(31), patch: { interactions: [back] } }],
+      },
+    }));
+    accept(await append(document, 'SetProps', { id: id(11), patch: { interactions: [] } }));
+    accept(await append(document, 'DeleteNode', { id: id(40) }));
+    const result = await (await fetch(new URL(`/api/documents/${document}/ops?after=1`, origin))).json();
+    assert.equal(result.ops.length, 2, 'refused list changes cannot enter the oplog');
+    assert.deepEqual(result.ops.map((op) => op.kind), ['SetProps', 'DeleteNode']);
+  });
+});
+
+test('snapshot20 lists reject downlevel or misplaced metadata including explicit empty override lists', async () => {
+  const list = fixture();
+  list.version = 20;
+  delete list.nodes[1].interaction;
+  list.nodes[1].interactions = [{ trigger: 'delay', action: 'back', delayMs: 1 }];
+  const invalid = [];
+  for (const metadata of [list.nodes[1].interactions, []]) {
+    const downlevel = structuredClone(list);
+    downlevel.version = 19;
+    downlevel.nodes[1].interactions = metadata;
+    invalid.push(downlevel);
+  }
+  const oldOverride = fixture();
+  oldOverride.version = 19;
+  oldOverride.nodes.find((n) => n.id === id(32)).overrides = [{ node: id(31), patch: { interactions: [] } }];
+  invalid.push(oldOverride);
+  const rawInstance = structuredClone(list);
+  rawInstance.nodes.find((n) => n.id === id(32)).interactions = [];
+  invalid.push(rawInstance);
+  const duplicate = structuredClone(list);
+  duplicate.nodes[1].interaction = back;
+  invalid.push(duplicate);
+  for (const snapshot of invalid) {
+    const response = await request('/api/documents/import', { name: 'Invalid trigger QA', snapshot });
+    assert.equal(response.status, 400, await response.text());
+  }
+});
+
 test('snapshot19 persists screen and overlay overflow while rejecting downgrades and invalid edits outside the oplog', async () => {
   const snapshot = fixture();
   snapshot.version = 19;

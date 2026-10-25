@@ -535,7 +535,10 @@ export class EditorPage {
           this.tool.set(core.tool);
         }
         let wire = '';
-        const interaction = this.selectedNode()?.interaction;
+        const selectedInteractionNode = this.selectedNode();
+        const interaction = selectedInteractionNode?.interactions?.find(
+          (entry) => entry.action === 'navigate' || entry.action === 'open-overlay',
+        ) ?? selectedInteractionNode?.interaction;
         if (
           !presentation.active &&
           (interaction?.action === 'navigate' || interaction?.action === 'open-overlay')

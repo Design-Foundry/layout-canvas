@@ -7,7 +7,7 @@ const screens: PrototypeScreen[] = [
 ];
 async function setup(
   accept = true,
-  node = { id: 'button', type: 'rect' } as NodeProps,
+  node: Partial<NodeProps> = { id: 'button', type: 'rect' } satisfies Partial<NodeProps>,
   initialScreens: PrototypeScreen[] = screens,
 ) {
   await TestBed.configureTestingModule({ imports: [PrototypePanel] }).compileComponents();
@@ -32,6 +32,174 @@ async function setup(
   return { fixture, saved, select };
 }
 describe('document-local prototype authoring', () => {
+  it('converts a legacy click only when adding an interaction and preserves its full action', async () => {
+    const legacy = {
+      trigger: 'click' as const,
+      action: 'open-overlay' as const,
+      target: 'frame-b',
+      transition: 'slide-up' as const,
+      durationMs: 640,
+      placement: 'manual' as const,
+      offset: { x: 12, y: 28 },
+      dismissOutside: false,
+    };
+    const { fixture, saved, select } = await setup(true, {
+      id: 'copy',
+      type: 'rect',
+      inInstance: true,
+      interaction: legacy,
+    } satisfies Partial<NodeProps>);
+    expect(saved).toEqual([]);
+    fixture.nativeElement.querySelector('[aria-label="Add interaction"]').click();
+    await fixture.whenStable();
+    expect(saved.at(-1)).toEqual({
+      id: 'copy',
+      patch: {
+        interactions: [legacy, { trigger: 'hover', action: 'navigate', target: 'frame-a' }],
+      },
+    });
+    expect(
+      (fixture.nativeElement.querySelector('[aria-label="Prototype trigger"]') as HTMLSelectElement)
+        .value,
+    ).toBe('hover');
+    await select('Prototype destination', 'frame-b');
+    expect(saved.at(-1)?.patch.interactions).toEqual([
+      legacy,
+      { trigger: 'hover', action: 'navigate', target: 'frame-b' },
+    ]);
+  });
+  it('edits delayed actions without losing their trigger and strips delay when trigger changes', async () => {
+    const { fixture, saved, select } = await setup(true, {
+      id: 'button',
+      type: 'rect',
+      interaction: { trigger: 'click', action: 'back' },
+    } satisfies Partial<NodeProps>);
+    await select('Prototype trigger', 'delay');
+    expect(saved.at(-1)?.patch).toEqual({
+      interactions: [{ trigger: 'delay', delayMs: 300, action: 'back' }],
+    });
+    const control = fixture.nativeElement.querySelector(
+      '[aria-label="Prototype delay"]',
+    ) as HTMLInputElement;
+    control.value = '1500';
+    control.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    await select('Prototype action', 'navigate');
+    await select('Prototype transition', 'dissolve');
+    expect(saved.at(-1)?.patch.interactions).toEqual([
+      {
+        trigger: 'delay',
+        delayMs: 1500,
+        action: 'navigate',
+        target: 'frame-a',
+        transition: 'dissolve',
+        durationMs: 300,
+      },
+    ]);
+    await select('Prototype trigger', 'press');
+    expect(saved.at(-1)?.patch.interactions).toEqual([
+      {
+        trigger: 'press',
+        action: 'navigate',
+        target: 'frame-a',
+        transition: 'dissolve',
+        durationMs: 300,
+      },
+    ]);
+    expect(fixture.nativeElement.querySelector('[aria-label="Prototype delay"]')).toBeNull();
+  });
+  it('preserves order when selecting and editing, then supports priority changes and explicit empty masking', async () => {
+    const first = { trigger: 'click' as const, action: 'back' as const };
+    const second = { trigger: 'press' as const, action: 'close-overlay' as const };
+    const { fixture, saved, select } = await setup(true, {
+      id: 'copy',
+      type: 'rect',
+      inInstance: true,
+      interactions: [first, second],
+    } satisfies Partial<NodeProps>);
+    await select('Prototype interaction', '1');
+    expect(saved).toEqual([]);
+    fixture.nativeElement.querySelector('[aria-label="Move interaction up"]').click();
+    await fixture.whenStable();
+    expect(saved.at(-1)?.patch.interactions).toEqual([second, first]);
+    expect(
+      (fixture.nativeElement.querySelector('[aria-label="Prototype action"]') as HTMLSelectElement)
+        .value,
+    ).toBe('close-overlay');
+    fixture.nativeElement.querySelector('[aria-label="Move interaction down"]').click();
+    await fixture.whenStable();
+    expect(saved.at(-1)?.patch.interactions).toEqual([first, second]);
+    fixture.nativeElement.querySelector('[aria-label="Remove interaction"]').click();
+    await fixture.whenStable();
+    expect(saved.at(-1)?.patch.interactions).toEqual([first]);
+    await select('Prototype action', 'none');
+    expect(saved.at(-1)?.patch).toEqual({ interactions: [] });
+    expect(fixture.nativeElement.querySelector('[aria-label="Prototype interaction"]')).toBeNull();
+  });
+  it('rejects invalid delays before saving and keeps refused inherited lists untouched', async () => {
+    const initial = [{ trigger: 'delay' as const, delayMs: 800, action: 'back' as const }];
+    const { fixture, saved, select } = await setup(false, {
+      id: 'copy',
+      type: 'rect',
+      inInstance: true,
+      interactions: initial,
+    } satisfies Partial<NodeProps>);
+    const control = fixture.nativeElement.querySelector(
+      '[aria-label="Prototype delay"]',
+    ) as HTMLInputElement;
+    for (const value of ['', '0', '60001', '2.5']) {
+      control.value = value;
+      control.dispatchEvent(new Event('change'));
+      await fixture.whenStable();
+      expect(control.value).toBe('800');
+    }
+    expect(saved).toEqual([]);
+    await select('Prototype trigger', 'hover');
+    expect(
+      (fixture.nativeElement.querySelector('[aria-label="Prototype trigger"]') as HTMLSelectElement)
+        .value,
+    ).toBe('delay');
+    fixture.nativeElement.querySelector('[aria-label="Remove interaction"]').click();
+    await fixture.whenStable();
+    expect(
+      (fixture.nativeElement.querySelector('[aria-label="Prototype delay"]') as HTMLInputElement)
+        .value,
+    ).toBe('800');
+    expect(saved.at(-1)?.patch).toEqual({ interactions: [] });
+    expect(fixture.nativeElement.querySelector('[role="alert"]').textContent).toContain('refused');
+  });
+  it('limits lists to sixteen and prevents changes to swap-controlled copies', async () => {
+    const interactions = Array.from({ length: 16 }, () => ({
+      trigger: 'click' as const,
+      action: 'back' as const,
+    }));
+    const { fixture, saved } = await setup(true, {
+      id: 'copy',
+      type: 'rect',
+      interactions,
+    } satisfies Partial<NodeProps>);
+    expect(
+      (fixture.nativeElement.querySelector('[aria-label="Add interaction"]') as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fixture.componentRef.setInput('node', {
+      id: 'copy',
+      type: 'rect',
+      interactions: interactions.slice(0, 2),
+      swapBound: true,
+    } satisfies Partial<NodeProps>);
+    await fixture.whenStable();
+    for (const label of ['Add interaction', 'Remove interaction', 'Move interaction down'])
+      expect(
+        (fixture.nativeElement.querySelector(`[aria-label="${label}"]`) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+    expect(
+      (fixture.nativeElement.querySelector('[aria-label="Prototype trigger"]') as HTMLSelectElement)
+        .disabled,
+    ).toBe(true);
+    expect(saved).toEqual([]);
+  });
   it('authors root frame overflow without replacing its click interaction', async () => {
     const { fixture, saved, select } = await setup(true, {
       id: 'frame-a',

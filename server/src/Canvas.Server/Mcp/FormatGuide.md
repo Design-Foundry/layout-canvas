@@ -61,6 +61,18 @@ All five fields are required when `layout` is present. Typical card: a `column` 
 - Nested frames, components, instances, copied layers, component overrides and variant rules cannot set this field, including an explicit `"none"`. Clear scrolling before nesting a configured frame or changing its type.
 - This field does not implement fixed or sticky child positioning. Portable component files refuse document-local prototype metadata.
 
+### Ordered prototype interactions
+
+- `interactions` is an ordered array of up to 16 actions and requires native snapshot version 20 or later. Each entry has `trigger: "click" | "hover" | "press" | "delay"` and `action: "navigate" | "back" | "open-overlay" | "close-overlay"`.
+- Navigate and Open overlay require a root-frame `target`. They accept the same native transition, duration and overlay placement settings as the legacy `interaction` field. Back and Close overlay have no target or transition settings.
+- A Delay entry requires integer `delayMs` from 1 to 60000. Other triggers refuse this field. An entry with `action: "none"`, unknown fields or unsupported trigger values is refused; clear the list with `interactions: []` instead.
+- Existing `interaction` documents retain their click behavior and minimum snapshot version. Setting `interactions` clears a legacy `interaction`; setting legacy `interaction` clears the list. Do not send both with active values. The explicit empty list is also an independent override that masks inherited prototype actions.
+- Lists belong to source layers or independent component-layer overrides. Raw instance metadata and variant rules cannot set them. Every listed destination is validated, including entries that would lose priority at runtime; delete, nesting and type-change safeguards retain all those references.
+- Pointer events resolve the deepest ancestor with a matching trigger, then its first entry for that trigger. Later entries for the same trigger are shadowed, not chained. Hover fires on pointer entry, excluding touch and dragging. Primary pointer-down fires Press and consumes the corresponding Click; a drag also cancels Click.
+- Delay uses the first matching entry per node once per visit, traversing visible nodes in paint order and executing at most one due action per playback update. The clock pauses during transitions; only the active base screen or top modal runs timers. Hidden, clipped and offscreen nodes do not fire; scrolling them into view can make an already due timer eligible.
+- Entry or reveal through Back/Close resets the active screen's timer clock. Resize and incoming document edits cancel pending timers until explicit navigation or Restart. These timers are temporary playback state and produce no document operations. See [prototyping usage](../../../../docs/prototyping.md) for the full lifecycle.
+- Portable component files refuse document-local lists even when empty, and snapshots older than version 20 refuse list metadata rather than silently dropping it. These actions do not add external URL navigation, conditions or variables.
+
 ## Tokens
 
 `{ "id", "type", "identifier", "order", "value" | "source", "modifiers" }`
