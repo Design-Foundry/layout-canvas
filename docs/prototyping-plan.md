@@ -20,7 +20,7 @@ The native baseline is covered by model, runtime and browser regressions.
 | 1 | Directional Slide/Push and positioned overlays | Strict native schema and downgrade refusal; deterministic native layers and matching modal hit testing; inspector authoring, Undo/Redo and reload; real local playback with unchanged document operations | Complete |
 | 2 | Offscreen composition and transition polish | Correct group alpha for overlapping paints/images/text; preserved outgoing viewport across unequal screens; reduced-motion preference and consistent interrupted transition policy | Complete |
 | 3 | Scrollable screen and overlay viewports | Explicit overflow contract, wheel/touch scroll with clipping and consistent picking; fixed/sticky elements only after native layout semantics exist; reset and remote invalidation behavior tested | Complete |
-| 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | Planned |
+| 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | In progress |
 | 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | Planned |
 | 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | Planned |
 
@@ -81,6 +81,28 @@ operations, undo entries or serialized scroll offsets. Fixed/sticky positioning,
 momentum, nested scroll containers and pinch zoom remain separate work.
 
 Stages 4–6 remain planned; these increments are not full Figma prototyping parity.
+
+## Stage 4 contract
+
+Snapshot 20 introduces `interactions`, an ordered list of at most 16 entries using
+the existing action options and `trigger: click | hover | press | delay`.
+Only delay accepts (and requires) integer `delayMs` from 1 through 60000. An empty
+list clears/masks authored behavior. Setting the list clears legacy `interaction`,
+and setting the legacy field clears the list, with reversible Undo/Redo. Older
+documents keep their click field and minimum versions until a list is authored.
+Independent copied-layer overrides may replace/mask the list; variants may not.
+All targets, including shadowed entries, retain native reference safeguards.
+
+Pointer events resolve the deepest ancestor with that trigger, using its first
+matching list entry. Duplicate triggers are priority alternatives, not action
+chains; the first delay also shadows later delays on the same node. Hover fires
+on pointer entry, not touch or dragging. Primary press consumes the release click.
+Delay fires once per node per active screen/modal visit after the transition has
+settled; hidden/clipped/offscreen nodes wait until visible. Only the top modal
+has active timers. At most one due action runs per frame, in visible paint order,
+so cyclic flows cannot recurse within a frame. Back/Close reveal a new timed visit.
+Resize and remote edits cancel scheduled delays until explicit navigation/restart.
+Exit cancels all trigger state. Timers, hover and presses never author document ops.
 
 Stage 3 validation: 545 automated checks and real browser wheel/hotspot/history,
 inspector Undo/Redo and reload checks passed. Builds and matching native/server
