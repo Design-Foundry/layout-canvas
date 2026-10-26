@@ -50,6 +50,9 @@ import { ComponentsPanel } from './components-panel';
 import { componentOptions } from './component-options';
 import { InlineTextEditor } from './inline-text-editor';
 import { ImageImport } from './image-import';
+import { PrototypeControls } from './prototype-controls';
+import { DocumentDelivery } from './document-delivery';
+import { PrototypeConnections, type PrototypeConnectionTarget } from './prototype-connections';
 import type { ComponentSnapshot } from './component-package';
 
 const STATS_INTERVAL_MS = 500;
@@ -103,6 +106,9 @@ const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
     ComponentsPanel,
     InlineTextEditor,
     ImageImport,
+    PrototypeControls,
+    DocumentDelivery,
+    PrototypeConnections,
   ],
   templateUrl: './editor-page.html',
   styleUrl: './editor-page.scss',
@@ -158,7 +164,11 @@ export class EditorPage {
       )?.name || 'Prototype',
   );
   protected readonly prototypeError = signal('');
-  protected readonly prototypeWire = signal('');
+  protected readonly connectionSource = signal<Rect | null>(null);
+  protected readonly connectionTargets = signal<readonly PrototypeConnectionTarget[]>([]);
+  protected readonly saveConnection = (id: string, patch: NodePatch): boolean =>
+    !this.presentation().active && !this.inlineText() &&
+    (this.core()?.setProps(id, patch) ?? false);
   protected playPrototype(): void {
     this.prototypeError.set('');
     if (this.inlineText()) {
@@ -539,28 +549,17 @@ export class EditorPage {
           this.prototypeStateAxes.set(findPrototypeStateAxes(selectedNode, (id) => core.node(id)));
           this.tool.set(core.tool);
         }
-        let wire = '';
-        const selectedInteractionNode = this.selectedNode();
-        const interaction = selectedInteractionNode?.interactions?.find(
-          (entry) => entry.action === 'navigate' || entry.action === 'open-overlay',
-        ) ?? selectedInteractionNode?.interaction;
-        if (
-          !presentation.active &&
-          (interaction?.action === 'navigate' || interaction?.action === 'open-overlay')
-        ) {
-          const selected = this.selectedNode(),
-            source = selected ? core.screenBounds(selected.id) : null,
-            target = core.screenBounds(interaction.target);
-          if (source && target) {
-            const x = source.x + source.w,
-              y = source.y + source.h / 2,
-              tx = target.x,
-              ty = target.y + target.h / 2,
-              dx = Math.max(40, Math.abs(tx - x) / 2);
-            wire = `M ${x} ${y} C ${x + dx} ${y}, ${tx - dx} ${ty}, ${tx} ${ty}`;
-          }
-        }
-        if (this.prototypeWire() !== wire) this.prototypeWire.set(wire);
+        const selected = this.selectedNode();
+        const source = !presentation.active && selected ? core.screenBounds(selected.id) : null;
+        if (JSON.stringify(source) !== JSON.stringify(this.connectionSource()))
+          this.connectionSource.set(source);
+        const targets = !presentation.active && selected
+          ? this.prototypeScreens().flatMap((screen) => {
+              const bounds = core.screenBounds(screen.id);
+              return bounds ? [{ id: screen.id, name: screen.name, bounds }] : [];
+            }) : [];
+        if (JSON.stringify(targets) !== JSON.stringify(this.connectionTargets()))
+          this.connectionTargets.set(targets);
         frame = requestAnimationFrame(tick);
       };
       frame = requestAnimationFrame(tick);

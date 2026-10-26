@@ -32,6 +32,7 @@
       (lock)="setProps($event.id, { locked: $event.locked })"
     />
   } @else if (sideTab() === 'components') {
+    <app-document-delivery [snapshot]="componentSnapshot" [name]="name()" />
     <app-image-import [add]="importImage" />
     <app-components-panel
       class="side-body"
@@ -80,43 +81,23 @@
     </p>
   }
   @if (presentation().active) {
-    <nav
-      class="prototype-controls"
-      aria-label="Prototype presentation"
-      [attr.aria-busy]="presentation().transitioning"
-    >
-      <button type="button" [disabled]="!presentation().canBack" (click)="backPrototype()">
-        Back
-      </button>
-      <button type="button" (click)="restartPrototype()">Restart</button>
-      @if (presentation().overlay) {
-        <button type="button" (click)="closePrototypeOverlay()">Close overlay</button>
-      }
-      <span aria-live="polite">{{ prototypeName() }}</span>
-      <button type="button" (click)="exitPrototype()">Exit (Esc)</button>
-    </nav>
-  } @else if (prototypeWire()) {
-    <svg class="prototype-wire" aria-hidden="true">
-      <defs>
-        <marker
-          id="prototype-arrow"
-          markerWidth="7"
-          markerHeight="7"
-          refX="6"
-          refY="3.5"
-          orient="auto"
-        >
-          <path d="M0,0 L7,3.5 L0,7" fill="#688cff" />
-        </marker>
-      </defs>
-      <path
-        [attr.d]="prototypeWire()"
-        fill="none"
-        stroke="#688cff"
-        stroke-width="2"
-        marker-end="url(#prototype-arrow)"
-      />
-    </svg>
+    <app-prototype-controls
+      [name]="prototypeName()"
+      [canBack]="presentation().canBack"
+      [overlay]="!!presentation().overlay"
+      [transitioning]="presentation().transitioning"
+      (back)="backPrototype()"
+      (restart)="restartPrototype()"
+      (closeOverlay)="closePrototypeOverlay()"
+      (exit)="exitPrototype()"
+    />
+  } @else if (selectedNode() && !inlineText()) {
+    <app-prototype-connections
+      [node]="selectedNode()"
+      [source]="connectionSource()"
+      [targets]="connectionTargets()"
+      [save]="saveConnection"
+    />
   }
   @if (prototypeError() && !presentation().active) {
     <p class="prototype-error" role="alert">{{ prototypeError() }}</p>
