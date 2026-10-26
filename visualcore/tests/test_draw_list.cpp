@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <limits>
 #include "vc/draw_list.hpp"
 #include "vc/geometry.hpp"
 
@@ -246,4 +247,84 @@ TEST_CASE("Presentation affine scaling preserves old viewport geometry and textu
     REQUIRE(item.quad.x==120);REQUIRE(item.quad.w==60);REQUIRE(item.clip.w==200);
     REQUIRE(item.points[0].x==108);REQUIRE(item.a.radii[3]==8);REQUIRE(item.strokeWidth==6);REQUIRE(item.sigma==4);
     REQUIRE_THAT(item.a.rect.x,WithinAbs(.1,.00001));REQUIRE_THAT(item.color.a,WithinAbs(.8,.00001));
+}
+
+TEST_CASE("Smart Animate identities retain parent paints around children and distinguish instance copies") {
+    Document doc;Node parent=rect(1,0,0,100,80);parent.type=NodeType::Frame;
+    vc::Stroke stroke;stroke.width=2.;parent.stroke=stroke;
+    REQUIRE(doc.apply(CreateNode{parent}).has_value());REQUIRE(doc.apply(CreateNode{rect(2,10,10,20,20,1)}).has_value());
+    const auto paints=draw(doc);REQUIRE(paints.size()==3);
+    REQUIRE(paints[0].node==parent.id);REQUIRE(paints[0].primitive==0);
+    REQUIRE(paints[1].node==idOf(2));REQUIRE(paints[1].primitive==0);
+    REQUIRE(paints[2].node==parent.id);REQUIRE(paints[2].primitive==1);
+
+    Node component=rect(3,200,0,50,40);component.type=NodeType::Component;
+    REQUIRE(doc.apply(CreateNode{component}).has_value());REQUIRE(doc.apply(CreateNode{rect(4,5,5,10,10,3)}).has_value());
+    for(std::uint64_t id:{5,6}) {Node instance=rect(id,300+double(id)*50,0,50,40);instance.type=NodeType::Instance;instance.component=component.id;REQUIRE(doc.apply(CreateNode{instance}).has_value());}
+    const auto copyA=doc.viewChildren(idOf(5)).front(),copyB=doc.viewChildren(idOf(6)).front();REQUIRE(copyA!=copyB);
+    const auto all=draw(doc);bool foundA=false,foundB=false;
+    for(const auto& paint:all) {foundA=foundA || paint.node==copyA;foundB=foundB || paint.node==copyB;}
+    REQUIRE(foundA);REQUIRE(foundB);REQUIRE(vc::interpolateDrawLists(all,draw(doc),.5).has_value());
+}
+
+TEST_CASE("Smart Animate interpolates native paint geometry color radius clip and exact endpoints") {
+    DrawItem a;a.node=idOf(1);a.quad={0,10,20,30};a.a.rect=a.quad;a.b.rect={2,12,16,26};a.clip={-10,-20,100,200};
+    a.a.radii={0,2,4,6};a.b.radii={1,3,5,7};a.color={.2f,.4f,.6f,.8f};a.sigma=2;a.strokeWidth=4;
+    auto b=a;b.quad={100,50,60,70};b.a.rect=b.quad;b.b.rect={110,60,40,50};b.clip={10,20,200,300};
+    b.a.radii={10,12,14,16};b.b.radii={11,13,15,17};b.color={.8f,.6f,.4f,.2f};b.sigma=8;b.strokeWidth=10;
+    const auto result=vc::interpolateDrawLists({a},{b},.5);REQUIRE(result.has_value());const auto& middle=result->front();
+    REQUIRE(same(middle.quad,{50,30,40,50}));REQUIRE(same(middle.a.rect,middle.quad));REQUIRE(same(middle.b.rect,{56,36,28,38}));
+    REQUIRE(same(middle.clip,{0,0,150,250}));REQUIRE(middle.a.radii[0]==5);REQUIRE(middle.b.radii[3]==12);
+    REQUIRE(middle.sigma==5);REQUIRE(middle.strokeWidth==7);REQUIRE_THAT(middle.color.r,WithinAbs(.5,.00001));REQUIRE_THAT(middle.color.a,WithinAbs(.5,.00001));
+    const auto start=vc::interpolateDrawLists({a},{b},0),end=vc::interpolateDrawLists({a},{b},1);REQUIRE(start.has_value());REQUIRE(end.has_value());
+    REQUIRE(same(start->front().quad,a.quad));REQUIRE(start->front().color.r==a.color.r);REQUIRE(same(end->front().quad,b.quad));REQUIRE(end->front().color.a==b.color.a);
+}
+
+TEST_CASE("Smart Animate refuses missing reordered ambiguous or semantically different paints") {
+    DrawItem a;a.node=idOf(1);auto b=a;b.node=idOf(2);
+    REQUIRE_FALSE(vc::interpolateDrawLists({a},{a,b},.5).has_value());
+    REQUIRE_FALSE(vc::interpolateDrawLists({a,b},{b,a},.5).has_value());
+    REQUIRE_FALSE(vc::interpolateDrawLists({a,a},{a,a},.5).has_value());
+    auto nil=a;nil.node={};REQUIRE_FALSE(vc::interpolateDrawLists({nil},{nil},.5).has_value());
+    auto changed=a;changed.kind=DrawKind::Stroke;REQUIRE_FALSE(vc::interpolateDrawLists({a},{changed},.5).has_value());
+    changed=a;changed.ellipse=true;REQUIRE_FALSE(vc::interpolateDrawLists({a},{changed},.5).has_value());
+    changed=a;changed.style=vc::StrokeStyle::Dashed;REQUIRE_FALSE(vc::interpolateDrawLists({a},{changed},.5).has_value());
+    REQUIRE_FALSE(vc::interpolateDrawLists({a},{a},std::numeric_limits<double>::quiet_NaN()).has_value());
+    REQUIRE_FALSE(vc::interpolateDrawLists({a},{a},std::numeric_limits<double>::infinity()).has_value());
+}
+
+TEST_CASE("Smart Animate preserves glyph and image texture coordinates and refuses texture changes") {
+    for(const auto kind:{DrawKind::Glyph,DrawKind::Image}) {
+        vc::Raster raster{2,2,"AAAAAA==","same-asset"};
+        DrawItem a;a.node=idOf(1);a.kind=kind;a.a.rect={.1,.2,.3,.4};a.quad={0,0,20,20};
+        if(kind==DrawKind::Image) a.image=&raster;
+        auto b=a;b.quad={30,40,60,80};
+        const auto result=vc::interpolateDrawLists({a},{b},.5);REQUIRE(result.has_value());
+        REQUIRE(same(result->front().a.rect,a.a.rect));REQUIRE(same(result->front().quad,{15,20,40,50}));
+        b.a.rect.x=.2;REQUIRE_FALSE(vc::interpolateDrawLists({a},{b},.5).has_value());
+        if(kind==DrawKind::Image) {
+            b=a;auto other=raster;other.id="different-asset";b.image=&other;REQUIRE_FALSE(vc::interpolateDrawLists({a},{b},.5).has_value());
+            other=raster;other.width=3;REQUIRE_FALSE(vc::interpolateDrawLists({a},{b},.5).has_value());
+        }
+    }
+}
+
+TEST_CASE("Smart Animate interpolates compatible path vertices and refuses changed topology") {
+    DrawItem a;a.node=idOf(1);a.kind=DrawKind::Path;a.points={{0,0},{10,20},{20,0}};a.closed=true;a.filled=true;
+    auto b=a;b.points={{10,20},{20,40},{30,20}};
+    const auto result=vc::interpolateDrawLists({a},{b},.25);REQUIRE(result.has_value());REQUIRE(result->front().points[1].x==12.5);REQUIRE(result->front().points[1].y==25);
+    b.points.pop_back();REQUIRE_FALSE(vc::interpolateDrawLists({a},{b},.5).has_value());
+    b=a;b.closed=false;REQUIRE_FALSE(vc::interpolateDrawLists({a},{b},.5).has_value());
+    b=a;b.filled=false;REQUIRE_FALSE(vc::interpolateDrawLists({a},{b},.5).has_value());
+}
+
+TEST_CASE("Smart Animate glyph identities retain original slots when clipping hides repeated glyphs") {
+    Document doc;Node text=rect(1,0,0,300,40);text.type=NodeType::Text;text.text.content="AAAAAA";
+    REQUIRE(doc.apply(CreateNode{text}).has_value());
+    const auto full=draw(doc);REQUIRE(full.size()>=4);
+    const auto clipped=draw(doc,{full[2].quad.x,0,300,40});REQUIRE_FALSE(clipped.empty());REQUIRE(clipped.front().primitive>=1);
+    for(const auto& paint:clipped) {
+        REQUIRE(paint.node==text.id);REQUIRE(paint.primitive<full.size());REQUIRE(same(paint.quad,full[paint.primitive].quad));
+    }
+    REQUIRE_FALSE(vc::interpolateDrawLists(full,clipped,.5).has_value());
 }

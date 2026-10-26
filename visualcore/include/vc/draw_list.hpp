@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 #include "vc/color.hpp"
 #include "vc/document.hpp"
@@ -43,6 +44,9 @@ struct DrawItem {
     bool closed = false;
     bool filled = false;
     const Raster* image = nullptr;
+    /// Stable expanded node key and primitive slot, independent of the paint's geometry.
+    Id node;
+    std::uint32_t primitive = 0;
 };
 
 /// Fills `out` with what's visible inside `view`, in paint order, resolving tokens in `mode`.
@@ -53,6 +57,12 @@ std::size_t buildDrawList(const Document& document, const Rect& view, const Id& 
 /// Translate native presentation geometry, keeping glyph/image UV coordinates unchanged.
 void transformDrawItem(DrawItem& item, Vec2 offset, double opacity,
                        std::optional<Rect> viewport = std::nullopt, double scale = 1);
+
+/// Interpolates only unambiguous, identically ordered native paint identities.
+/// Missing/reordered paints, different glyph/image UVs or incompatible path topology
+/// return nullopt so the caller can dissolve complete scenes instead.
+[[nodiscard]] std::optional<std::vector<DrawItem>> interpolateDrawLists(
+    const std::vector<DrawItem>& from, const std::vector<DrawItem>& to, double progress);
 
 /// The color drawn for a token reference that can't be resolved.
 inline constexpr Color kUnresolvedColor{1.0f, 0.0f, 1.0f, 1.0f};
