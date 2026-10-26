@@ -22,7 +22,7 @@ The native baseline is covered by model, runtime and browser regressions.
 | 3 | Scrollable screen and overlay viewports | Explicit overflow contract, wheel/touch scroll with clipping and consistent picking; fixed/sticky elements only after native layout semantics exist; reset and remote invalidation behavior tested | Complete |
 | 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | Complete |
 | 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | Complete |
-| 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | Planned |
+| 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | In progress |
 
 Variables, expressions, conditions and external URLs need separate contracts.
 Portable component files refuse document-local screen references rather than dropping them.
@@ -104,7 +104,31 @@ keeps the clamped position and cancels the gesture. Playback produces no documen
 operations, undo entries or serialized scroll offsets. Fixed/sticky positioning,
 momentum, nested scroll containers and pinch zoom remain separate work.
 
-Stage 6 remains planned; these increments are not full Figma prototyping parity.
+These increments are not full Figma prototyping parity.
+
+## Stage 6 contract
+
+Named flows label authored root-frame starting points, while retaining the frame's
+design name. An empty label clears it; disabling the starting flag preserves the
+label for later use. Names are bounded single-line native text and require
+snapshot 22. Component overrides, variant rules and portable component packages
+refuse this document-local metadata.
+
+Visual connection authoring appends a click Navigate interaction from the selected
+hotspot to a visible root frame. Existing interactions remain intact; an existing
+click entry or a full list requires an explicit inspector edit. Pointer authoring
+has a keyboard-accessible alternative and uses the normal reversible native edit.
+
+The player exposes keyboard-reachable controls, a live screen announcement and
+focus return on exit. Full-document delivery exports a bounded JSON envelope of
+the authored native snapshot, including embedded image pixels and all prototype
+metadata. Reopening validates the file and native snapshot before creating a new
+document through the configured local server. It never replaces the active
+document, imports remote code, hosts a public link or exports temporary Play state.
+This is a local document file, not a standalone offline HTML player.
+
+Derived nested component states and cross-screen Smart Animate identity matching
+remain explicit parity gaps after this delivery stage.
 
 ## Stage 4 contract
 
