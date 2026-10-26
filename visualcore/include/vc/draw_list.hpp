@@ -64,6 +64,14 @@ void transformDrawItem(DrawItem& item, Vec2 offset, double opacity,
 [[nodiscard]] std::optional<std::vector<DrawItem>> interpolateDrawLists(
     const std::vector<DrawItem>& from, const std::vector<DrawItem>& to, double progress);
 
+/// Rebind destination paints to outgoing identities for a cross-screen transition.
+/// The two expanded subtrees must have identical name/type paths. Root names are
+/// ignored; unnamed descendants and repeated sibling names refuse the whole match.
+/// This does not change either document or relax primitive/texture/order checks.
+[[nodiscard]] std::optional<std::vector<DrawItem>> remapDrawListIdentities(
+    const Document& from, const Id& fromRoot, const Document& to, const Id& toRoot,
+    const std::vector<DrawItem>& destination);
+
 /// The color drawn for a token reference that can't be resolved.
 inline constexpr Color kUnresolvedColor{1.0f, 0.0f, 1.0f, 1.0f};
 

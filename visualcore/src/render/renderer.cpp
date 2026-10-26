@@ -544,8 +544,19 @@ void Renderer::State::buildInstances() {
         append(scene.to);
         if(scene.smart) {
             const std::vector<DrawItem> from(drawItems.begin(),drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit));
-            const std::vector<DrawItem> to(drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit),drawItems.end());
-            if(auto interpolated=interpolateDrawLists(from,to,scene.progress)) {
+            std::vector<DrawItem> to(drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit),drawItems.end());
+            bool identitiesValid=true;
+            if(scene.from.size()==1 && scene.to.size()==1 && !scene.from.front().overlay && !scene.to.front().overlay &&
+               scene.from.front().screen!=scene.to.front().screen) {
+                const auto& before=scene.from.front();const auto& after=scene.to.front();
+                const auto& beforeDocument=before.document?*before.document:editor.prototypeDocument();
+                const auto& afterDocument=after.document?*after.document:editor.prototypeDocument();
+                auto matched=remapDrawListIdentities(beforeDocument,before.screen,afterDocument,after.screen,to);
+                identitiesValid=matched.has_value();
+                if(matched) to=std::move(*matched);
+            }
+            auto interpolated=identitiesValid?interpolateDrawLists(from,to,scene.progress):std::nullopt;
+            if(interpolated) {
                 drawItems=std::move(*interpolated);composing=false;compositionSplit=0;
             } else if(std::uint64_t(width)*height>16*1024*1024) {
                 editor.finishPrototypeTransition();scene=editor.prototypeScene();

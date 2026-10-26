@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <map>
 
 namespace vc {
 void transformDrawItem(DrawItem& item, Vec2 offset, double opacity, std::optional<Rect> viewport, double scale) {
@@ -53,6 +54,50 @@ std::optional<std::vector<DrawItem>> interpolateDrawLists(
         for(std::size_t j=0;j<item.points.size();++j) item.points[j]={mix(a.points[j].x,b.points[j].x),mix(a.points[j].y,b.points[j].y)};
         item.sigma=mix(a.sigma,b.sigma);item.strokeWidth=mix(a.strokeWidth,b.strokeWidth);
         item.color={float(mix(a.color.r,b.color.r)),float(mix(a.color.g,b.color.g)),float(mix(a.color.b,b.color.b)),float(mix(a.color.a,b.color.a))};
+    }
+    return result;
+}
+
+std::optional<std::vector<DrawItem>> remapDrawListIdentities(
+    const Document& from, const Id& fromRoot, const Document& to, const Id& toRoot,
+    const std::vector<DrawItem>& destination) {
+    // Components are expanded before matching: names address one occurrence,
+    // never a shared source/master node. Structured paths cannot collide when
+    // names contain separators or when branches reuse the same child name.
+    using Path=std::vector<std::pair<std::string,NodeType>>;
+    using Index=std::map<Path,Id>;
+    const auto index=[](const Document& document,const Id& root)->std::optional<Index> {
+        const auto* screen=document.view(root);
+        if(!screen || screen->type!=NodeType::Frame || !screen->parent.isNil()) return std::nullopt;
+        Index result;result.emplace(Path{},root);
+        std::set<Id> visited{root};
+        const auto collect=[&](auto&& self,const Id& parent,Path path)->bool {
+            std::set<std::string> siblings;
+            for(const auto& key:document.viewChildren(parent)) {
+                const auto* node=document.view(key);
+                if(!node || node->name.empty() || !siblings.emplace(node->name).second || !visited.emplace(key).second)
+                    return false;
+                auto child=path;child.emplace_back(node->name,node->type);
+                if(!result.emplace(child,key).second || !self(self,key,std::move(child))) return false;
+            }
+            return true;
+        };
+        if(!collect(collect,root,{})) return std::nullopt;
+        return result;
+    };
+    const auto source=index(from,fromRoot),target=index(to,toRoot);
+    if(!source || !target || source->size()!=target->size()) return std::nullopt;
+    std::map<Id,Id> identities;
+    for(const auto& [path,key]:*target) {
+        const auto corresponding=source->find(path);
+        if(corresponding==source->end()) return std::nullopt;
+        identities.emplace(key,corresponding->second);
+    }
+    auto result=destination;
+    for(auto& paint:result) {
+        const auto match=identities.find(paint.node);
+        if(match==identities.end()) return std::nullopt;
+        paint.node=match->second;
     }
     return result;
 }

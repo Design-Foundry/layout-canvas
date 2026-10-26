@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <limits>
 #include "vc/draw_list.hpp"
@@ -327,4 +328,112 @@ TEST_CASE("Smart Animate glyph identities retain original slots when clipping hi
         REQUIRE(paint.node==text.id);REQUIRE(paint.primitive<full.size());REQUIRE(same(paint.quad,full[paint.primitive].quad));
     }
     REQUIRE_FALSE(vc::interpolateDrawLists(full,clipped,.5).has_value());
+}
+
+namespace {
+void namedScreen(Document& doc,std::uint64_t base,double x=0) {
+    auto screen=rect(base,x,0,300,300);screen.type=NodeType::Frame;screen.name="Screen "+std::to_string(base);
+    auto group=rect(base+1,10,20,200,180,base);group.type=NodeType::Frame;group.name="Card/primary";
+    auto button=rect(base+2,10,15,50,30,base+1);button.name="Continue";
+    REQUIRE(doc.apply(CreateNode{screen}).has_value());REQUIRE(doc.apply(CreateNode{group}).has_value());
+    REQUIRE(doc.apply(CreateNode{button}).has_value());
+}
+std::vector<DrawItem> screenPaints(const Document& doc,std::uint64_t root) {
+    std::vector<DrawItem> items;vc::buildDrawList(doc,kView,vc::kDefaultModeId,items,idOf(root));return items;
+}
+}
+
+TEST_CASE("Cross-screen Smart Animate matches structured names while ignoring root names and geometry") {
+    Document source,target;namedScreen(source,1);namedScreen(target,11,500);
+    vc::NodePatch patch;patch.x=80.;patch.w=100.;patch.fill=vc::Oklch{.5,.1,120};
+    REQUIRE(target.apply(vc::SetProps{idOf(13),patch}).has_value());
+    const auto from=screenPaints(source,1),to=screenPaints(target,11);
+    REQUIRE_FALSE(vc::interpolateDrawLists(from,to,.5).has_value());
+    const auto remapped=vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),to);
+    REQUIRE(remapped.has_value());REQUIRE(remapped->size()==to.size());
+    REQUIRE(remapped->back().node==idOf(3));REQUIRE(to.back().node==idOf(13));
+    const auto animated=vc::interpolateDrawLists(from,*remapped,.5);REQUIRE(animated.has_value());
+    REQUIRE_THAT(animated->back().quad.x,WithinAbs((from.back().quad.x+to.back().quad.x)/2,.00001));
+    REQUIRE_THAT(animated->back().quad.w,WithinAbs(75.,.00001));
+    REQUIRE(source.find(idOf(3))->name=="Continue");REQUIRE(target.find(idOf(13))->name=="Continue");
+}
+
+TEST_CASE("Cross-screen matching refuses unnamed ambiguous renamed missing or differently typed hierarchy") {
+    for(const auto problem:{"empty","duplicate","rename","type","missing","source-duplicate"}) {
+        Document source,target;namedScreen(source,1);namedScreen(target,11);
+        if(std::string(problem)=="missing") REQUIRE(target.apply(vc::DeleteNode{idOf(13)}).has_value());
+        else if(std::string(problem)=="type") {
+            // Type conversion is intentionally restricted by the editing model;
+            // construct a genuinely different destination layer instead.
+            auto replacement=*target.find(idOf(13));replacement.type=NodeType::Ellipse;
+            REQUIRE(target.apply(vc::DeleteNode{idOf(13)}).has_value());
+            REQUIRE(target.apply(CreateNode{replacement}).has_value());
+        }
+        else if(std::string(problem)=="duplicate" || std::string(problem)=="source-duplicate") {
+            const bool before=std::string(problem)=="source-duplicate";
+            auto duplicate=rect(before?4:14,0,0,10,10,before?2:12);duplicate.name="Continue";
+            REQUIRE((before?source:target).apply(CreateNode{duplicate}).has_value());
+        } else {
+            vc::NodePatch patch;
+            patch.name=std::string(problem)=="empty"?"":"Changed";
+            REQUIRE(target.apply(vc::SetProps{idOf(13),patch}).has_value());
+        }
+        REQUIRE_FALSE(vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),screenPaints(target,11)).has_value());
+    }
+    Document source,target;namedScreen(source,1);namedScreen(target,11);
+    // Even nonpainting descendants are part of the identity contract.
+    auto hidden=rect(14,0,0,10,10,12);hidden.name="";hidden.visible=false;
+    REQUIRE(target.apply(CreateNode{hidden}).has_value());
+    REQUIRE_FALSE(vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),screenPaints(target,11)).has_value());
+    REQUIRE_FALSE(vc::remapDrawListIdentities(source,idOf(2),target,idOf(12),{}).has_value());
+}
+
+TEST_CASE("Cross-screen remapping retains paint order texture asset and topology safeguards") {
+    Document source,target;namedScreen(source,1);namedScreen(target,11);
+    const auto from=screenPaints(source,1),to=screenPaints(target,11);
+    auto remapped=vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),to);REQUIRE(remapped.has_value());
+    auto reordered=*remapped;std::swap(reordered[0],reordered[1]);
+    REQUIRE_FALSE(vc::interpolateDrawLists(from,reordered,.5).has_value());
+    for(const auto kind:{DrawKind::Glyph,DrawKind::Image,DrawKind::Path}) {
+        auto a=from,b=to;a.back().kind=kind;b.back().kind=kind;
+        vc::Raster asset{2,2,"AAAAAA==","same"},other=asset;
+        if(kind==DrawKind::Image) {a.back().image=&asset;b.back().image=&asset;}
+        auto matched=vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),b);REQUIRE(matched.has_value());
+        REQUIRE(vc::interpolateDrawLists(a,*matched,.5).has_value());
+        if(kind==DrawKind::Path) b.back().points={{0,0}};
+        else b.back().a.rect.x+=.1;
+        matched=vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),b);REQUIRE(matched.has_value());
+        REQUIRE_FALSE(vc::interpolateDrawLists(a,*matched,.5).has_value());
+        if(kind==DrawKind::Image) {
+            b=a;b.back().node=idOf(13);b[0].node=idOf(11);b[1].node=idOf(12);other.id="new";b.back().image=&other;
+            matched=vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),b);REQUIRE(matched.has_value());
+            REQUIRE_FALSE(vc::interpolateDrawLists(a,*matched,.5).has_value());
+        }
+    }
+    auto outside=to;outside.back().node=idOf(99);
+    REQUIRE_FALSE(vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),outside).has_value());
+}
+
+TEST_CASE("Cross-screen hierarchy resolves repeated child names in independent expanded instance paths") {
+    Document source,target;
+    const auto build=[](Document& doc,std::uint64_t base) {
+        auto root=rect(base,0,0,300,300);root.type=NodeType::Frame;
+        auto main=rect(base+1,500,0,60,60);main.type=NodeType::Component;main.name="Master";
+        auto child=rect(base+2,0,0,20,20,base+1);child.name="Icon";
+        REQUIRE(doc.apply(CreateNode{root}).has_value());REQUIRE(doc.apply(CreateNode{main}).has_value());
+        REQUIRE(doc.apply(CreateNode{child}).has_value());
+        for(std::uint64_t i=0;i<2;++i) {
+            auto instance=rect(base+3+i,double(i)*90,0,60,60,base);instance.type=NodeType::Instance;
+            instance.component=main.id;instance.name=i?"Secondary":"Primary";
+            REQUIRE(doc.apply(CreateNode{instance}).has_value());
+        }
+    };
+    build(source,1);build(target,11);
+    const auto from=screenPaints(source,1),to=screenPaints(target,11);
+    const auto matched=vc::remapDrawListIdentities(source,idOf(1),target,idOf(11),to);REQUIRE(matched.has_value());
+    REQUIRE(vc::interpolateDrawLists(from,*matched,.5).has_value());
+    const auto first=source.viewChildren(idOf(4)).front(),second=source.viewChildren(idOf(5)).front();
+    REQUIRE(first!=second);
+    REQUIRE(std::any_of(matched->begin(),matched->end(),[&](const auto& item){return item.node==first;}));
+    REQUIRE(std::any_of(matched->begin(),matched->end(),[&](const auto& item){return item.node==second;}));
 }
