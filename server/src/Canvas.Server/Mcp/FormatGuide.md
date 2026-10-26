@@ -144,3 +144,21 @@ A refused op reports `path` and `message`. Later ops that depend on it (children
 ## Checking the result
 
 Call `get_layout` on the frame you built: confirm sizes and positions, and look for `overflows`, which marks layers spilling outside their parent (clipped text, children wider than a fixed parent).
+
+### Named prototype flows
+
+Snapshot 22 adds `prototypeFlowName`, a single-line string up to 128 UTF-8 bytes,
+on authored top-level frames only. Empty string clears it. The label is independent
+of `prototypeStart`; disabling a start preserves its name. Only marked starts show
+the flow label in the starting-screen picker. Renaming the frame does not rename
+the flow. Root-only constraints apply even for explicit empty names. Overrides and
+variant rules cannot set the field. Old snapshots refuse explicit flow metadata,
+and portable component packages refuse it instead of stripping it. SetProps uses
+normal reversible operations; Play never writes flow metadata.
+
+Full-document `.canvas.json` files use the `canvas-document/1` envelope with name
+and native snapshot. They preserve flow names, all interactions and inline images.
+Reopening uses the existing atomic document import (2 MiB snapshot limit), creating
+a separate document on the configured server. This is local file delivery, not
+hosted sharing or a standalone HTML player. Component files keep their narrower
+portable contract.

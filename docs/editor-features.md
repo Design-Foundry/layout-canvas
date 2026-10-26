@@ -42,3 +42,11 @@ copies share content identity and may override crop/fit independently of the sou
 
 Fonts and third-party notices are in `visualcore/assets/fonts/` and
 `visualcore/third_party/stb/`. No externally loaded fonts or image URLs are needed.
+
+Prototyping also supports named root-frame flow entries (snapshot 22), visual
+hotspot-to-screen connection authoring with a keyboard alternative, focus-aware
+player controls and full-document `.canvas.json` export/reopen in Assets. The file
+preserves all authored screens, components, tokens and embedded images. Reopening
+uses the configured server's native validator to create a separate document;
+keep that server local for private local delivery. Hosted sharing, derived nested
+component states and cross-screen Smart Animate matching remain pending.

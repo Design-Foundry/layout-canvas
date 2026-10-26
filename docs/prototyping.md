@@ -209,3 +209,40 @@ portable component files continue refusing prototype metadata rather than droppi
 
 Variables, conditional actions, external URLs and hosted sharing are not implemented.
 See the [staged implementation plan](prototyping-plan.md) for sequencing and acceptance.
+
+## Named flows, connections and local delivery
+
+Select a root frame and enable **Flow starting screen** in Prototype. Give its
+**Flow name** a descriptive label, such as Checkout, independently of the layer
+name. The starting-screen picker displays that label for marked entries. Disabling
+the start keeps its name; clearing the label returns to the frame name. Names are
+single-line text up to 128 UTF-8 bytes and require snapshot **22**.
+
+Select a hotspot and drag its blue connection handle onto a root screen. The same
+handle opens a keyboard-accessible destination picker and **Add click connection**
+button. All selected hotspot navigation/overlay connections remain visible. Adding
+a link appends a click Navigate entry while preserving existing triggers/options.
+An existing click entry or 16-row list must be edited explicitly in the inspector.
+Use Undo/Redo normally. Escape cancels a pending drag.
+
+Play moves keyboard focus to the presentation controls and announces the current
+screen. Tab reaches Back, Restart, Close overlay when open, and Exit. Escape exits;
+Alt+Left goes back. Exit returns focus to the previous editing control when it is
+still present. Animation leaves Restart/Exit available.
+
+Open **Assets → Local document → Export document** to download a complete
+`.canvas.json` file. It contains the authored native snapshot: screens, components,
+variant definitions, independent overrides, tokens, flows, interactions and inline
+RGBA image pixels. Temporary Play state and Undo history are excluded. The snapshot
+limit is 2 MiB including images; oversized documents are refused explicitly.
+
+**Open document file** validates the envelope, then sends the snapshot to this
+app's configured Canvas server for native validation. Keep that server local for
+local delivery. A successful import creates a separate document and offers a link
+to open it in a new tab; the current document and its Undo history remain intact.
+Unsupported versions, malformed native content and invalid references are refused.
+This file needs Canvas to reopen; it is not a standalone offline HTML player.
+
+Derived nested component states and cross-screen Smart Animate identity matching
+remain pending. Variables, conditions, external URLs and hosted sharing also need
+separate contracts.

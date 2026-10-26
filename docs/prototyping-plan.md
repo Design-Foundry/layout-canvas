@@ -22,7 +22,7 @@ The native baseline is covered by model, runtime and browser regressions.
 | 3 | Scrollable screen and overlay viewports | Explicit overflow contract, wheel/touch scroll with clipping and consistent picking; fixed/sticky elements only after native layout semantics exist; reset and remote invalidation behavior tested | Complete |
 | 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | Complete |
 | 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | Complete |
-| 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | In progress |
+| 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | Complete |
 
 Variables, expressions, conditions and external URLs need separate contracts.
 Portable component files refuse document-local screen references rather than dropping them.
@@ -163,5 +163,10 @@ See the validation record. Stage 5 extends that baseline with isolated component
 Smart Animate.
 
 Stage 5 passed 602 automated checks and real browser component/image transition,
-text fallback, reset and persisted inspector/reload verification. Named flows and
-full-document local delivery are the next implementation stage.
+text fallback, reset and persisted inspector/reload verification. Named flows and full-document local delivery are completed in Stage 6.
+
+Stage 6 passed 634 automated checks and real browser drag connection, Undo/Redo,
+reload, Play navigation, focus entry/return and complete-file export/reopen checks.
+The original authored document and the imported copy remain independent. This
+completes the bounded delivery stage; nested states and cross-screen matching
+remain separate parity work, not a claim of full Figma parity.

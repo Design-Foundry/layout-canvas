@@ -1,3 +1,34 @@
+## Stage 6: named flows and local full-document delivery
+
+Validated the public branch with **634 automated checks**: 359 native, 155 Angular,
+50 Node file/integration, 38 server and 32 live localhost HTTP checks. Native,
+WASM release, bridge TypeScript, Angular production and server builds passed.
+Native/server DLL SHA256 matches:
+`2615CB925E60058FF5CACB3040890218184D38B0FEC2FEE899B68927F7DB1C01`.
+
+Native tests cover snapshot 22 names, explicit empty-name downgrade refusal,
+root-only placement, reversible clearing, text bounds and override/rule refusal.
+Portable component files accept plain version 22 while refusing flow metadata.
+Client tests cover named entry authoring, preserved trigger lists, pointer drop,
+selection cancellation, keyboard connection authoring, player controls and local
+file errors. HTTP tests reopen a complete file twice without changing any native
+content, including flow names, state actions, destinations and verified image
+pixels; corrupt assets and missing targets fail without creating partial documents.
+
+Real browser QA on localhost verified an edited flow label in the picker, pointer
+drag from a hotspot to a second screen, Undo/Redo, persisted reconstruction after
+reload and actual Play navigation through that link. Play moved focus into controls
+and Escape returned focus to Play. Browser warnings/errors were empty. A real
+exported `.canvas.json` reopened through the file chooser into a separate document;
+the stored native snapshot exactly matched the exported snapshot, preserving its
+image and named flow. The source operation head remained unchanged by Play/export/
+reopen, while the imported copy began at sequence 1. Local proof files/screenshots
+are excluded from Git and no private integration was published.
+
+The 2 MiB snapshot limit includes inline images. This deliverable needs a local
+Canvas server to reopen and is not standalone HTML or hosted sharing. Derived
+nested component states and cross-screen Smart Animate matching remain pending.
+
 # Prototyping validation
 
 ## Stage 2: complete scene composition and motion policy
