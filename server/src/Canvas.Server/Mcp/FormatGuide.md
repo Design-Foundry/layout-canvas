@@ -81,10 +81,12 @@ names up to 64 UTF-8 bytes, choices up to 128), no `target`, and only Instant,
 `dissolve` or `smart-animate` transitions. Existing duration bounds apply. Other
 actions refuse `values`; Navigate also accepts Smart, while Open overlay does not.
 
-The action resolves the nearest authored instance in the hotspot's ancestry and
+The action resolves the nearest expanded instance in the hotspot's ancestry and
 checks every choice against that component's declared variant axes. Invalid axes,
-choices, missing instance context and derived nested instances produce no state
-change. Syntactically valid relative actions may be stored on reusable source
+choices and missing instance context produce no state change. Nested copied
+instances use independent temporary values per expanded occurrence and effective
+component identity; swapped replacements cannot inherit another component's state.
+Syntactically valid relative actions may be stored on reusable source
 layers before they have a playback context. These actions do not set arbitrary
 properties, text properties or instance swaps.
 
@@ -95,8 +97,13 @@ does not alter source values, undo history or the outgoing operation log.
 Smart Animate requires matching expanded node/paint identities, paint order and
 topology. Compatible geometry, paint color and opacity interpolate; glyph/image
 UVs remain fixed. Changed text, image identity/crop, missing/reordered paints and
-incompatible paths use full-scene dissolve. Distinct screen roots have distinct
-identities and therefore use that fallback. Portable component files still refuse
+incompatible paths use full-scene dissolve. Between two single base screens,
+identities match by exact hierarchical layer name and type, ignoring root names.
+Every descendant must have a nonempty name unique among siblings, and complete
+expanded subtree paths (including nonpainting/hidden nodes) must agree. Ambiguous,
+renamed, missing or reordered content falls back to dissolve. Same-screen states
+retain their stable native identities. No persisted field/version is added.
+Portable component files still refuse
 prototype metadata. See the usage guide for the supported scope.
 
 ## Tokens

@@ -1,3 +1,37 @@
+# Prototyping validation
+
+## Stage 7: nested component states and cross-screen Smart Animate
+
+The public checkout passed **646 automated checks**: 370 native, 156 Angular,
+50 Node integration, 38 server and 32 live localhost HTTP checks. Native, WASM,
+bridge TypeScript, client production and server builds passed. Native/server DLL
+SHA256 matches:
+`6D8908B9686248605222439A7AA82A343E95629F1ECD987A5FAEC476AC99972D`.
+
+Native regressions cover sibling/outer occurrence isolation, three nesting levels,
+nearest-instance resolution, preserved overrides, invalid values, swapped effective
+component identities, immutable outgoing documents, navigation, Restart and remote
+invalidation. Cross-screen regressions cover moved geometry, expanded occurrences,
+ambiguous/empty names, hidden/missing/renamed/type-mismatched hierarchies, paint
+order and incompatible image assets/UVs, glyphs and paths. The inspector test checks
+axes from the nearest effective nested component. An HTTP fixture assertion was
+scoped to its unique document name so concurrent test files cannot produce false
+partial-import failures.
+
+Real browser QA activated one of four nested copies; only that copy grew and
+changed color. Restart restored all four. A second document navigated between
+same-hierarchy screens with an embedded RGBA image: an active-transition capture
+showed one moving/resizing image, followed by the final destination geometry.
+Both source documents retained operation head 1 after playback. Browser warnings
+and WebGPU errors were empty. Proof screenshots and native operation evidence stay
+local and are excluded from publication.
+
+No persistence version changed. Cross-screen matching requires identical complete
+expanded name/type paths with unique nonempty sibling names; incompatible scenes
+still dissolve. Partial-tree matching, paint reordering, variables, conditions and
+hosted sharing are not part of this increment. Earlier stage limitations below
+record the behavior at those stages; Stage 7 supersedes their nested/matching gaps.
+
 ## Stage 6: named flows and local full-document delivery
 
 Validated the public branch with **634 automated checks**: 359 native, 155 Angular,
@@ -29,7 +63,6 @@ The 2 MiB snapshot limit includes inline images. This deliverable needs a local
 Canvas server to reopen and is not standalone HTML or hosted sharing. Derived
 nested component states and cross-screen Smart Animate matching remain pending.
 
-# Prototyping validation
 
 ## Stage 2: complete scene composition and motion policy
 

@@ -177,14 +177,17 @@ files refuse lists even when empty, instead of dropping document-local behavior.
 Give a reusable component a variant axis, then select a source or copied hotspot
 and choose **Change component state** in Prototype. The inspector offers the
 nearest component's declared axes and choices. During Play the action changes
-the nearest authored instance independently; the component master and other
+the nearest expanded instance independently, including nested copies; the component master and other
 instances keep their authored values. A state action can use any existing trigger.
 
 The native action is `{trigger:"click",action:"change-state",values:{state:"active"}}`.
 It has no screen target and requires snapshot **21**. A values map contains 1–8
 nonempty string pairs. Syntax is bounded on storage; Play also checks every axis
 and choice against the actual component definition. Invalid choices, actions
-outside an authored screen instance and derived nested instances do nothing.
+outside an authored screen instance do nothing. Nested states belong to the exact
+expanded occurrence and effective component; sibling copies remain independent.
+If a component swap changes that identity, the previous component's temporary
+values do not apply to the replacement.
 Existing text, boolean, swap and independent copied-layer overrides are preserved;
 the action itself changes only declared variant-axis choices.
 
@@ -198,13 +201,18 @@ appears on Navigate; overlays keep their previous transition options. Compatible
 expanded node and paint identities interpolate geometry, clip rectangles, corner
 radii, path points, color and opacity linearly. Image pixels/crops and glyph UVs
 stay fixed. Changed text/glyphs, changed image assets/crops, reordered/missing paints
-or incompatible path topology use a complete-scene dissolve instead. Distinct
-screen roots have distinct identities, so cross-screen Navigate currently takes
-that fallback. This is a conservative matching policy, not name-based layer matching.
+or incompatible path topology use a complete-scene dissolve instead. Between two
+single base screens, Smart matches exact hierarchical layer names and types,
+ignoring the root screen names. Every descendant needs a nonempty name unique
+among siblings. The complete expanded hierarchies must agree, including hidden
+and nonpainting nodes. Ambiguous, renamed, missing or differently typed layers
+use dissolve. Reordering paints still uses dissolve. Reusing a child name under
+different uniquely named parents is supported. Same-screen state changes keep
+their stable native identities.
 
 Reduced motion skips animation while applying the destination state. Input remains
-blocked until a transition settles. Raw nested copied-instance states, conditional
-prototype rules and portable interactive-component packaging need further contracts;
+blocked until a transition settles. Conditional prototype rules and portable
+interactive-component packaging need further contracts;
 portable component files continue refusing prototype metadata rather than dropping it.
 
 Variables, conditional actions, external URLs and hosted sharing are not implemented.
@@ -243,6 +251,5 @@ to open it in a new tab; the current document and its Undo history remain intact
 Unsupported versions, malformed native content and invalid references are refused.
 This file needs Canvas to reopen; it is not a standalone offline HTML player.
 
-Derived nested component states and cross-screen Smart Animate identity matching
-remain pending. Variables, conditions, external URLs and hosted sharing also need
-separate contracts.
+Nested states and cross-screen matching use the bounded policies described above.
+Variables, conditions, external URLs and hosted sharing need separate contracts.

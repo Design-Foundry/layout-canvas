@@ -23,7 +23,7 @@ The native baseline is covered by model, runtime and browser regressions.
 | 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | Complete |
 | 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | Complete |
 | 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | Complete |
-| 7 | Nested component playback and screen matching | Independent temporary states for nested expanded instances; unambiguous hierarchical screen matching with tested dissolve fallback, no persisted format change | In progress |
+| 7 | Nested component playback and screen matching | Independent temporary states for nested expanded instances; unambiguous hierarchical screen matching with tested dissolve fallback, no persisted format change | Complete |
 
 Variables, expressions, conditions and external URLs need separate contracts.
 Portable component files refuse document-local screen references rather than dropping them.
@@ -48,7 +48,7 @@ topology checks still apply. Same-screen component animation keeps stable native
 identities. This conservative contract does not imply partial-tree matching,
 automatic layer reordering, conditional actions or hosted sharing.
 
-## Stage 5 contract
+## Stage 5 contract (extended by Stage 7)
 
 Snapshot 21 adds relative `change-state` with a nonempty `values` map of declared
 variant-axis choices. In Play it resolves the nearest authored instance in the
@@ -148,8 +148,7 @@ document through the configured local server. It never replaces the active
 document, imports remote code, hosts a public link or exports temporary Play state.
 This is a local document file, not a standalone offline HTML player.
 
-Derived nested component states and cross-screen Smart Animate identity matching
-remain explicit parity gaps after this delivery stage.
+Stage 7 extends this delivery baseline with nested states and cross-screen matching.
 
 ## Stage 4 contract
 
@@ -189,5 +188,11 @@ text fallback, reset and persisted inspector/reload verification. Named flows an
 Stage 6 passed 634 automated checks and real browser drag connection, Undo/Redo,
 reload, Play navigation, focus entry/return and complete-file export/reopen checks.
 The original authored document and the imported copy remain independent. This
-completes the bounded delivery stage; nested states and cross-screen matching
-remain separate parity work, not a claim of full Figma parity.
+completes the bounded delivery stage; Stage 7 adds nested states and cross-screen matching.
+
+Stage 7 passed 646 automated checks plus real native WebGPU playback in the browser.
+Four nested copies remained independent, Restart restored them, and an RGBA image
+moved/resized between two matched screens with one moving paint instead of ghosted
+dissolve images. Both local demo documents remained at operation sequence 1.
+Exact hierarchy matching is deliberately conservative; partial matching, changed
+paint order, conditional actions and hosted delivery are separate work.
