@@ -58,6 +58,7 @@ test('whole-document local package reopens native flows, links, states and inlin
 
 test('native local reopen rejects bad destinations and corrupt inline image content atomically', async () => {
   await using(fixture(), async (document) => {
+    const invalidName = `Invalid local delivery ${crypto.randomUUID()}`;
     const before = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
     const listBefore = await (await fetch(new URL('/api/documents', origin))).json();
     for (const corrupt of ['target', 'pixels']) {
@@ -65,14 +66,16 @@ test('native local reopen rejects bad destinations and corrupt inline image cont
       if (corrupt === 'target') invalid.nodes[1].interaction.target = id(999);
       else invalid.nodes.at(-1).image.pixels = 'AAAAAA==';
       // Envelope parsing deliberately delegates native semantics and asset hashes to visualcore.
-      const bundle = readDocument(JSON.stringify(exportDocument(invalid, 'Invalid local delivery')));
+      const bundle = readDocument(JSON.stringify(exportDocument(invalid, invalidName)));
       const response = await request('/api/documents/import', { name: bundle.name, snapshot: bundle.snapshot });
       assert.equal(response.status, 400, await response.text());
     }
     const after = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
     const listAfter = await (await fetch(new URL('/api/documents', origin))).json();
     assert.deepEqual(after, before);
-    assert.deepEqual(listAfter, listBefore, 'invalid imports must not create partial documents');
+    // Other HTTP test files create/delete their own fixtures concurrently.
+    const ownImports = (list) => list.filter((entry) => entry.name === invalidName);
+    assert.deepEqual(ownImports(listAfter), ownImports(listBefore), 'invalid imports must not create partial documents');
   });
 });
 

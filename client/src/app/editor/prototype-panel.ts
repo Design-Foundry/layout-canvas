@@ -163,7 +163,7 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
     @if (stateInteraction()) {
       <p>
         Change the nearest component instance during Play. Use its declared variant axes and values.
-        Nested copied instances are not supported.
+        Nested copies change independently; the component master and sibling instances stay unchanged.
       </p>
       @for (entry of stateEntries(); track $index) {
         <label

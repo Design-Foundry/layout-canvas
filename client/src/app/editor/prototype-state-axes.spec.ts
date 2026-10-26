@@ -4,6 +4,15 @@ import { findPrototypeStateAxes } from './prototype-state-axes';
 const axes: VariantAxis[] = [{ name: 'State', values: ['Idle', 'Active'], default: 'Idle' }];
 const node = (value: Partial<NodeProps>) => value as NodeProps;
 describe('prototype component axis context', () => {
+  it('uses the effective nested component rather than the outer component or original swap target', () => {
+    const nestedAxes: VariantAxis[] = [{ name: 'size', values: ['small', 'large'], default: 'small' }];
+    const nodes = new Map([
+      ['copy', node({ id: 'copy', type: 'instance', component: 'swapped-main', parent: 'outer', inInstance: true })],
+      ['swapped-main', node({ id: 'swapped-main', type: 'component', definition: { properties: [], axes: nestedAxes, rules: [] } })],
+      ['outer', node({ id: 'outer', type: 'instance', definition: { properties: [], axes, rules: [] } })],
+    ]);
+    expect(findPrototypeStateAxes(node({ id: 'hotspot', type: 'rect', parent: 'copy', inInstance: true }), (id) => nodes.get(id) ?? null)).toBe(nestedAxes);
+  });
   it('finds the source component when authoring a reusable child hotspot', () => {
     const main = node({ id: 'main', type: 'component', definition: { properties: [], axes, rules: [] } });
     expect(findPrototypeStateAxes(node({ id: 'child', type: 'rect', parent: 'main' }), (id) => id === 'main' ? main : null)).toBe(axes);
