@@ -32,6 +32,193 @@ async function setup(
   return { fixture, saved, select };
 }
 describe('document-local prototype authoring', () => {
+  it('offers declared state choices and keeps unavailable imported values until explicitly corrected', async () => {
+    const { fixture, saved, select } = await setup(true, {
+      id: 'copy', type: 'rect', inInstance: true,
+      interaction: { trigger: 'click', action: 'change-state', values: { State: 'Unavailable' } },
+    });
+    fixture.componentRef.setInput('stateAxes', [{ name: 'State', values: ['Idle', 'Active'], default: 'Idle' }]);
+    await fixture.whenStable();
+    const control=fixture.nativeElement.querySelector('[aria-label="State value 1"]') as HTMLSelectElement;
+    expect(control.tagName).toBe('SELECT');
+    expect([...control.options].map(option=>option.value)).toEqual(['Unavailable','Idle','Active']);
+    expect(control.options[0].disabled).toBe(true);expect(saved).toEqual([]);
+    await select('State value 1','Active');
+    expect(saved.at(-1)?.patch.interaction).toMatchObject({ values: { State: 'Active' } });
+  });
+  it('selects the new axis default when its declared choices differ and preserves the trigger', async () => {
+    const { fixture, saved, select } = await setup(true, {
+      id:'copy',type:'rect',inInstance:true,
+      interactions:[{trigger:'delay',delayMs:900,action:'change-state',values:{State:'Active'},transition:'smart-animate',durationMs:600}],
+    });
+    fixture.componentRef.setInput('stateAxes',[
+      {name:'State',values:['Idle','Active'],default:'Idle'},
+      {name:'Size',values:['Small','Large'],default:'Small'},
+    ]);
+    await fixture.whenStable();await select('State axis 1','Size');
+    expect(saved.at(-1)?.patch.interactions?.[0]).toMatchObject({trigger:'delay',delayMs:900,values:{Size:'Small'},transition:'smart-animate',durationMs:600});
+    await select('State value 1','Large');
+    expect(saved.at(-1)?.patch.interactions?.[0]).toMatchObject({values:{Size:'Large'}});
+  });
+  it('authors relative component state using suggested declared axes without screen destinations', async () => {
+    const { fixture, saved, select } = await setup(true, { id: 'main-layer', type: 'rect' }, []);
+    fixture.componentRef.setInput('stateAxes', [
+      { name: 'State', values: ['Idle', 'Pressed'], default: 'Idle' },
+    ]);
+    await fixture.whenStable();
+    await select('Prototype action', 'change-state');
+    expect(saved.at(-1)?.patch).toEqual({
+      interaction: { trigger: 'click', action: 'change-state', values: { State: 'Idle' } },
+    });
+    expect(fixture.nativeElement.querySelector('[aria-label="Prototype destination"]')).toBeNull();
+    const value = fixture.nativeElement.querySelector(
+      '[aria-label="State value 1"]',
+    ) as HTMLInputElement;
+    value.value = 'Pressed';
+    value.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    await select('Prototype transition', 'smart-animate');
+    expect(saved.at(-1)?.patch.interaction).toEqual({
+      trigger: 'click',
+      action: 'change-state',
+      values: { State: 'Pressed' },
+      transition: 'smart-animate',
+      durationMs: 300,
+    });
+  });
+  it('keeps delayed state action values and other ordered entries when editing Smart Animate and duration', async () => {
+    const other = { trigger: 'press' as const, action: 'back' as const };
+    const { fixture, saved, select } = await setup(true, {
+      id: 'copy',
+      type: 'rect',
+      inInstance: true,
+      interactions: [
+        { trigger: 'delay', delayMs: 1200, action: 'change-state', values: { State: 'Idle' } },
+        other,
+      ],
+    });
+    const value = fixture.nativeElement.querySelector(
+      '[aria-label="State value 1"]',
+    ) as HTMLInputElement;
+    value.value = 'Active';
+    value.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    await select('Prototype transition', 'smart-animate');
+    const duration = fixture.nativeElement.querySelector(
+      '[aria-label="Prototype duration"]',
+    ) as HTMLInputElement;
+    duration.value = '700';
+    duration.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    expect(saved.at(-1)?.patch.interactions).toEqual([
+      {
+        trigger: 'delay',
+        delayMs: 1200,
+        action: 'change-state',
+        values: { State: 'Active' },
+        transition: 'smart-animate',
+        durationMs: 700,
+      },
+      other,
+    ]);
+    expect(saved.at(-1)?.id).toBe('copy');
+    await select('Prototype trigger', 'hover');
+    expect(saved.at(-1)?.patch.interactions?.[0]).toEqual({
+      trigger: 'hover',
+      action: 'change-state',
+      values: { State: 'Active' },
+      transition: 'smart-animate',
+      durationMs: 700,
+    });
+  });
+  it('validates state pairs by native byte bounds and restores duplicate empty and refused edits', async () => {
+    const { fixture, saved } = await setup(false, {
+      id: 'copy',
+      type: 'rect',
+      inInstance: true,
+      interaction: {
+        trigger: 'click',
+        action: 'change-state',
+        values: { State: 'Idle', Size: 'Small' },
+      },
+    });
+    const name = fixture.nativeElement.querySelector(
+      '[aria-label="State axis 1"]',
+    ) as HTMLInputElement;
+    for (const invalid of ['', 'Size', 'a'.repeat(65), 'é'.repeat(33)]) {
+      name.value = invalid;
+      name.dispatchEvent(new Event('change'));
+      await fixture.whenStable();
+      expect(name.value).toBe('State');
+    }
+    const value = fixture.nativeElement.querySelector(
+      '[aria-label="State value 1"]',
+    ) as HTMLInputElement;
+    for (const invalid of ['', 'a'.repeat(129), 'é'.repeat(65)]) {
+      value.value = invalid;
+      value.dispatchEvent(new Event('change'));
+      await fixture.whenStable();
+      expect(value.value).toBe('Idle');
+    }
+    expect(saved).toEqual([]);
+    value.value = 'Active';
+    value.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    expect(value.value).toBe('Idle');
+    expect(fixture.nativeElement.querySelector('[role=alert]').textContent).toContain('refused');
+  });
+  it('exposes Smart Animate only for navigation or state, and refuses directional state transitions', async () => {
+    const { fixture, saved, select } = await setup();
+    await select('Prototype action', 'navigate');
+    await select('Prototype transition', 'smart-animate');
+    expect(saved.at(-1)?.patch.interaction).toMatchObject({
+      action: 'navigate',
+      transition: 'smart-animate',
+    });
+    await select('Prototype action', 'open-overlay');
+    expect(saved.at(-1)?.patch.interaction).toMatchObject({ action: 'open-overlay' });
+    expect((saved.at(-1)?.patch.interaction as { transition?: string }).transition).toBeUndefined();
+    expect(
+      fixture.nativeElement.querySelector(
+        'select[aria-label="Prototype transition"] option[value="smart-animate"]',
+      ),
+    ).toBeNull();
+    await select('Prototype action', 'change-state');
+    expect(
+      fixture.nativeElement.querySelector(
+        'select[aria-label="Prototype transition"] option[value="slide-left"]',
+      ),
+    ).toBeNull();
+    const count = saved.length;
+    await select('Prototype transition', 'slide-left');
+    expect(saved.length).toBe(count);
+  });
+  it('adds and removes bounded state axes while preserving one required pair', async () => {
+    const values = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`Axis${i}`, 'Idle']));
+    const { fixture, saved } = await setup(true, {
+      id: 'main',
+      type: 'rect',
+      interaction: { trigger: 'click', action: 'change-state', values },
+    });
+    fixture.nativeElement.querySelector('[aria-label="Add state axis"]').click();
+    await fixture.whenStable();
+    expect(
+      Object.keys((saved.at(-1)?.patch.interaction as { values: Record<string, string> }).values),
+    ).toHaveLength(8);
+    expect(fixture.nativeElement.querySelector('[aria-label="Add state axis"]').disabled).toBe(
+      true,
+    );
+    for (let i = 8; i > 1; i--) {
+      fixture.nativeElement.querySelector(`[aria-label="Remove state axis ${i}"]`).click();
+      await fixture.whenStable();
+    }
+    expect(fixture.nativeElement.querySelector('[aria-label="Remove state axis 1"]').disabled).toBe(
+      true,
+    );
+    expect((saved.at(-1)?.patch.interaction as { values: Record<string, string> }).values).toEqual({
+      Axis0: 'Idle',
+    });
+  });
   it('converts a legacy click only when adding an interaction and preserves its full action', async () => {
     const legacy = {
       trigger: 'click' as const,

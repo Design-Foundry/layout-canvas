@@ -186,7 +186,12 @@ export type PrototypeInteraction =
       readonly placement?: PrototypePlacement;
       readonly offset?: { readonly x: number; readonly y: number };
     } & PrototypeAnimation<PrototypeOverlayTransition>)
-  | { readonly trigger: 'click'; readonly action: 'back' | 'close-overlay' };
+  | { readonly trigger: 'click'; readonly action: 'back' | 'close-overlay' }
+  | ({
+      readonly trigger: 'click';
+      readonly action: 'change-state';
+      readonly values: Readonly<Record<string, string>>;
+    } & PrototypeAnimation<'dissolve' | 'smart-animate'>);
 export type PrototypeTrigger = 'click' | 'hover' | 'press' | 'delay';
 type Triggered<T> = T extends PrototypeInteraction
   ? Omit<T, 'trigger'> &
@@ -202,7 +207,12 @@ export type PrototypeSlideTransition = 'slide-left' | 'slide-right' | 'slide-up'
 export type PrototypeOverflow = 'none' | 'vertical' | 'horizontal' | 'both';
 export type PrototypeOverlayTransition = 'dissolve' | PrototypeSlideTransition;
 export type PrototypeTransition =
-  PrototypeOverlayTransition | 'push-left' | 'push-right' | 'push-up' | 'push-down';
+  | PrototypeOverlayTransition
+  | 'push-left'
+  | 'push-right'
+  | 'push-up'
+  | 'push-down'
+  | 'smart-animate';
 export type PrototypePlacement =
   | 'center'
   | 'top-left'

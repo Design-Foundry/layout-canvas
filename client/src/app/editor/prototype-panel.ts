@@ -10,6 +10,7 @@ import type {
   PrototypeOverlayTransition,
   PrototypePlacement,
   PrototypeOverflow,
+  VariantAxis,
 } from '@canvas/bridge';
 
 const OVERLAY_TRANSITIONS: readonly PrototypeOverlayTransition[] = [
@@ -25,7 +26,9 @@ const NAVIGATE_TRANSITIONS: readonly PrototypeTransition[] = [
   'push-right',
   'push-up',
   'push-down',
+  'smart-animate',
 ];
+const STATE_TRANSITIONS: readonly PrototypeTransition[] = ['dissolve', 'smart-animate'];
 const PLACEMENTS: readonly PrototypePlacement[] = [
   'center',
   'top-left',
@@ -137,6 +140,7 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
         <option value="back">Back</option>
         <option value="open-overlay" [disabled]="!screens().length">Open overlay</option>
         <option value="close-overlay">Close overlay</option>
+        <option value="change-state">Change component state</option>
       </select></label
     >
     @if (linked()) {
@@ -155,23 +159,79 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
           }
         </select></label
       >
+    }
+    @if (stateInteraction()) {
+      <p>
+        Change the nearest component instance during Play. Use its declared variant axes and values.
+        Nested copied instances are not supported.
+      </p>
+      @for (entry of stateEntries(); track $index) {
+        <label
+          >Variant axis
+          @if (stateAxes().length) {
+            <select [attr.aria-label]="'State axis ' + ($index + 1)" [value]="entry[0]"
+              [disabled]="!!node().swapBound" (change)="stateField($event, $index, 'name')">
+              @if (!stateAxis(entry[0])) { <option [value]="entry[0]" disabled>{{ entry[0] }} (unavailable)</option> }
+              @for (axis of stateAxes(); track axis.name) {
+                <option [value]="axis.name" [selected]="axis.name === entry[0]">{{ axis.name }}</option>
+              }
+            </select>
+          } @else {
+            <input [attr.aria-label]="'State axis ' + ($index + 1)" [value]="entry[0]"
+              [disabled]="!!node().swapBound" (change)="stateField($event, $index, 'name')" />
+          }
+        </label>
+        <label
+          >Value
+          @if (stateAxis(entry[0]); as axis) {
+            <select [attr.aria-label]="'State value ' + ($index + 1)" [value]="entry[1]"
+              [disabled]="!!node().swapBound" (change)="stateField($event, $index, 'value')">
+              @if (!axis.values.includes(entry[1])) { <option [value]="entry[1]" disabled>{{ entry[1] }} (unavailable)</option> }
+              @for (value of axis.values; track value) {
+                <option [value]="value" [selected]="value === entry[1]">{{ value }}</option>
+              }
+            </select>
+          } @else {
+            <input [attr.aria-label]="'State value ' + ($index + 1)" [value]="entry[1]"
+              [disabled]="!!node().swapBound" (change)="stateField($event, $index, 'value')" />
+          }
+        </label>
+        <button
+          type="button"
+          [attr.aria-label]="'Remove state axis ' + ($index + 1)"
+          [disabled]="!!node().swapBound || stateEntries().length <= 1"
+          (click)="removeStateAxis($index)"
+        >
+          Remove axis
+        </button>
+      }
+      <button
+        type="button"
+        aria-label="Add state axis"
+        [disabled]="!!node().swapBound || stateEntries().length >= 8"
+        (click)="addStateAxis()"
+      >
+        Add axis
+      </button>
+    }
+    @if (animated()) {
       <label
         >Transition
         <select
           aria-label="Prototype transition"
-          [value]="linked()?.transition ?? 'instant'"
+          [value]="animated()?.transition ?? 'instant'"
           [disabled]="!!node().swapBound"
           (change)="transition($event)"
         >
-          <option value="instant" [selected]="!linked()?.transition">Instant</option>
+          <option value="instant" [selected]="!animated()?.transition">Instant</option>
           @for (choice of transitions(); track choice) {
-            <option [value]="choice" [selected]="linked()?.transition === choice">
+            <option [value]="choice" [selected]="animated()?.transition === choice">
               {{ transitionLabel(choice) }}
             </option>
           }
         </select></label
       >
-      @if (linked()?.transition) {
+      @if (animated()?.transition) {
         <label
           >Duration (ms)
           <input
@@ -180,64 +240,64 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
             max="2000"
             step="1"
             aria-label="Prototype duration"
-            [value]="linked()?.durationMs ?? 300"
+            [value]="animated()?.durationMs ?? 300"
             [disabled]="!!node().swapBound"
             (change)="duration($event)"
           />
         </label>
       }
-      @if (linked()?.action === 'open-overlay') {
-        <label
-          >Placement
-          <select
-            aria-label="Overlay placement"
-            [value]="placementValue()"
-            [disabled]="!!node().swapBound"
-            (change)="placement($event)"
-          >
-            @for (choice of placements; track choice) {
-              <option [value]="choice" [selected]="placementValue() === choice">
-                {{ placementLabel(choice) }}
-              </option>
-            }
-          </select></label
+    }
+    @if (linked()?.action === 'open-overlay') {
+      <label
+        >Placement
+        <select
+          aria-label="Overlay placement"
+          [value]="placementValue()"
+          [disabled]="!!node().swapBound"
+          (change)="placement($event)"
         >
-        @if (placementValue() === 'manual') {
-          <label
-            >X (design units)<input
-              type="number"
-              step="any"
-              min="-100000"
-              max="100000"
-              aria-label="Overlay offset X"
-              [value]="overlayOffset().x"
-              [disabled]="!!node().swapBound"
-              (change)="offset($event, 'x')"
-          /></label>
-          <label
-            >Y (design units)<input
-              type="number"
-              step="any"
-              min="-100000"
-              max="100000"
-              aria-label="Overlay offset Y"
-              [value]="overlayOffset().y"
-              [disabled]="!!node().swapBound"
-              (change)="offset($event, 'y')"
-          /></label>
-          <p>Position from the base screen's top-left corner.</p>
-        }
+          @for (choice of placements; track choice) {
+            <option [value]="choice" [selected]="placementValue() === choice">
+              {{ placementLabel(choice) }}
+            </option>
+          }
+        </select></label
+      >
+      @if (placementValue() === 'manual') {
         <label
-          ><input
-            type="checkbox"
-            aria-label="Dismiss overlay outside"
-            [checked]="outsideDismiss()"
+          >X (design units)<input
+            type="number"
+            step="any"
+            min="-100000"
+            max="100000"
+            aria-label="Overlay offset X"
+            [value]="overlayOffset().x"
             [disabled]="!!node().swapBound"
-            (change)="dismiss($event)"
-          />
-          Dismiss when clicking outside</label
-        >
+            (change)="offset($event, 'x')"
+        /></label>
+        <label
+          >Y (design units)<input
+            type="number"
+            step="any"
+            min="-100000"
+            max="100000"
+            aria-label="Overlay offset Y"
+            [value]="overlayOffset().y"
+            [disabled]="!!node().swapBound"
+            (change)="offset($event, 'y')"
+        /></label>
+        <p>Position from the base screen's top-left corner.</p>
       }
+      <label
+        ><input
+          type="checkbox"
+          aria-label="Dismiss overlay outside"
+          [checked]="outsideDismiss()"
+          [disabled]="!!node().swapBound"
+          (change)="dismiss($event)"
+        />
+        Dismiss when clicking outside</label
+      >
     }
     @if (rootFrame()) {
       <label
@@ -336,6 +396,8 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
 export class PrototypePanel {
   readonly node = input.required<NodeProps>();
   readonly screens = input<readonly PrototypeScreen[]>([]);
+  /** Optional suggestions from the enclosing component; values remain native-validated. */
+  readonly stateAxes = input<readonly VariantAxis[]>([]);
   readonly save = input.required<(id: string, patch: NodePatch) => boolean>();
   private readonly pending = signal<NodePatch | null>(null);
   protected readonly error = signal('');
@@ -370,6 +432,14 @@ export class PrototypePanel {
       ? interaction
       : null;
   });
+  protected readonly stateInteraction = computed(() => {
+    const value = this.editingInteraction();
+    return value?.action === 'change-state' ? value : null;
+  });
+  protected readonly stateEntries = computed(() =>
+    Object.entries(this.stateInteraction()?.values ?? {}),
+  );
+  protected readonly animated = computed(() => this.linked() ?? this.stateInteraction());
   protected readonly destination = computed(() => {
     return this.linked()?.target ?? '';
   });
@@ -378,7 +448,11 @@ export class PrototypePanel {
     return interaction?.action !== 'open-overlay' || interaction.dismissOutside !== false;
   });
   protected readonly transitions = computed<readonly PrototypeTransition[]>(() =>
-    this.linked()?.action === 'open-overlay' ? OVERLAY_TRANSITIONS : NAVIGATE_TRANSITIONS,
+    this.linked()?.action === 'open-overlay'
+      ? OVERLAY_TRANSITIONS
+      : this.stateInteraction()
+        ? STATE_TRANSITIONS
+        : NAVIGATE_TRANSITIONS,
   );
   protected readonly placements = PLACEMENTS;
   protected readonly placementValue = computed(() => {
@@ -422,7 +496,15 @@ export class PrototypePanel {
     if (value === 'none') interaction = null;
     else if (value === 'back' || value === 'close-overlay')
       interaction = { trigger: 'click', action: value };
-    else if ((value === 'navigate' || value === 'open-overlay') && this.screens().length) {
+    else if (value === 'change-state') {
+      const axis = this.stateAxes()[0];
+      const previous = this.stateInteraction();
+      interaction = previous ?? {
+        trigger: 'click',
+        action: 'change-state',
+        values: { [axis?.name ?? 'state']: axis?.default ?? axis?.values[0] ?? 'default' },
+      };
+    } else if ((value === 'navigate' || value === 'open-overlay') && this.screens().length) {
       const previous = this.linked(),
         target = previous?.target ?? this.screens()[0].id;
       if (value === 'open-overlay') {
@@ -463,7 +545,7 @@ export class PrototypePanel {
   }
   protected transition(event: Event): void {
     const control = event.target as HTMLSelectElement,
-      interaction = this.linked();
+      interaction = this.animated();
     if (
       !interaction ||
       this.node().swapBound ||
@@ -491,7 +573,7 @@ export class PrototypePanel {
   }
   protected duration(event: Event): void {
     const control = event.target as HTMLInputElement,
-      interaction = this.linked(),
+      interaction = this.animated(),
       durationMs = Number(control.value);
     if (
       !interaction ||
@@ -554,6 +636,53 @@ export class PrototypePanel {
     if (!this.change({ interaction: control.checked ? base : { ...base, dismissOutside: false } }))
       control.checked = interaction.dismissOutside !== false;
   }
+  protected stateField(event: Event, index: number, field: 'name' | 'value'): void {
+    const control = event.target as HTMLInputElement;
+    const entries = this.stateEntries().map(([name, value]) => [name, value] as [string, string]);
+    const current = entries[index];
+    if (!current || this.node().swapBound) return;
+    const old = current[field === 'name' ? 0 : 1];
+    current[field === 'name' ? 0 : 1] = control.value;
+    const axis=this.stateAxis(current[0]);
+    if(field==='name' && axis && !axis.values.includes(current[1])) current[1]=axis.default;
+    if (!this.saveStateEntries(entries)) control.value = old;
+  }
+  protected stateAxis(name: string): VariantAxis | undefined {
+    return this.stateAxes().find((axis)=>axis.name===name);
+  }
+  protected addStateAxis(): void {
+    const entries = this.stateEntries();
+    if (this.node().swapBound || !this.stateInteraction() || entries.length >= 8) return;
+    const suggested = this.stateAxes().find(
+      (axis) => !entries.some(([name]) => name === axis.name),
+    );
+    let name = suggested?.name ?? 'state';
+    for (let n = 2; entries.some(([existing]) => existing === name); n++) name = `state${n}`;
+    this.saveStateEntries([
+      ...entries,
+      [name, suggested?.default ?? suggested?.values[0] ?? 'default'],
+    ]);
+  }
+  protected removeStateAxis(index: number): void {
+    if (this.node().swapBound || this.stateEntries().length <= 1) return;
+    this.saveStateEntries(this.stateEntries().filter((_, at) => at !== index));
+  }
+  private saveStateEntries(entries: readonly [string, string][]): boolean {
+    const interaction = this.stateInteraction();
+    const bytes = (value: string) => new TextEncoder().encode(value).length;
+    if (
+      !interaction ||
+      this.node().swapBound ||
+      entries.length < 1 ||
+      entries.length > 8 ||
+      new Set(entries.map(([name]) => name)).size !== entries.length ||
+      entries.some(
+        ([name, value]) => !name.length || bytes(name) > 64 || !value.length || bytes(value) > 128,
+      )
+    )
+      return false;
+    return this.change({ interaction: { ...interaction, values: Object.fromEntries(entries) } });
+  }
   protected start(event: Event): void {
     const checkbox = event.target as HTMLInputElement;
     if (!this.rootFrame() || !this.change({ prototypeStart: checkbox.checked }))
@@ -580,6 +709,7 @@ export class PrototypePanel {
       back: 'Back',
       'open-overlay': 'Open overlay',
       'close-overlay': 'Close overlay',
+      'change-state': 'Change state',
     }[action];
   }
   protected selectInteraction(event: Event): void {

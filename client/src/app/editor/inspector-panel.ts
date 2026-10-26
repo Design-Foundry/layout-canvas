@@ -138,6 +138,7 @@ function replaceAt<T>(items: Four<T>, index: number, value: T): Four<T> {
 })
 export class InspectorPanel {
   readonly prototypeScreens = input<readonly import('@canvas/bridge').PrototypeScreen[]>([]);
+  readonly prototypeStateAxes = input<readonly import('@canvas/bridge').VariantAxis[]>([]);
   protected readonly mode = signal<'design' | 'prototype'>('design');
   readonly saveLine = input<(id: string, patch: NodePatch) => boolean>(() => false);
   readonly saveStyleBinding = input<(id: string, patch: NodePatch) => boolean>(() => false);

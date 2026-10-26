@@ -18,7 +18,7 @@
 </div>
 @if (mode() === 'prototype') {
   @if (node(); as n) {
-    <app-prototype-panel [node]="n" [screens]="prototypeScreens()" [save]="saveStyleBinding()" />
+    <app-prototype-panel [node]="n" [screens]="prototypeScreens()" [stateAxes]="prototypeStateAxes()" [save]="saveStyleBinding()" />
   } @else {
     <p class="section">Select a layer to add a click interaction.</p>
   }

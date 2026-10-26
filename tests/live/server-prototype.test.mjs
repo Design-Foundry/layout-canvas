@@ -6,6 +6,51 @@ const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const navigate = (target) => ({ trigger: 'click', action: 'navigate', target });
 const back = { trigger: 'click', action: 'back' };
 
+test('snapshot21 preserves relative component states, Smart Animate and independent overrides', async () => {
+  const snapshot=fixture();snapshot.version=21;
+  const state={trigger:'click',action:'change-state',values:{state:'active'},transition:'smart-animate',durationMs:700};
+  snapshot.nodes.find(n=>n.id===id(30)).definition={properties:[],axes:[{name:'state',values:['idle','active'],default:'idle'}],rules:[]};
+  snapshot.nodes.find(n=>n.id===id(31)).interaction=state;
+  snapshot.nodes.find(n=>n.id===id(32)).overrides=[{node:id(31),patch:{interactions:[{...state,trigger:'hover'}]}}];
+  await using(snapshot,async(document)=>{
+    const detail=await (await fetch(new URL(`/api/documents/${document}`,origin))).json();
+    assert.equal(detail.snapshot.data.version,21);
+    assert.deepEqual(detail.snapshot.data.nodes.find(n=>n.id===id(31)).interaction,state);
+    assert.deepEqual(detail.snapshot.data.nodes.find(n=>n.id===id(32)).overrides[0].patch.interactions,[{...state,trigger:'hover'}]);
+    accept(await append(document,'SetProps',{id:id(11),patch:{interaction:{...navigate(id(20)),transition:'smart-animate',durationMs:500}}}));
+    accept(await append(document,'SetOverride',{id:id(32),node:id(31),patch:{interaction:{...state,values:{state:'idle'},transition:'dissolve'}}}));
+    const result=await (await fetch(new URL(`/api/documents/${document}/ops?after=1`,origin))).json();
+    assert.equal(result.ops.length,2);
+    assert.equal(result.ops[0].data.patch.interaction.transition,'smart-animate');
+    assert.deepEqual(result.ops[1].data.patch.interaction.values,{state:'idle'});
+  });
+});
+
+test('state actions reject malformed values, unsupported options and snapshot21 downgrades', async () => {
+  const state={trigger:'click',action:'change-state',values:{state:'active'}};
+  await using(fixture(),async(document)=>{
+    for(const interaction of [
+      {...state,target:id(20)}, {...state,values:{}}, {...state,values:{state:true}},
+      {...state,values:{'':'active'}}, {...state,values:{state:''}},
+      {...state,values:{['x'.repeat(65)]:'active'}}, {...state,values:{state:'x'.repeat(129)}},
+      {...state,values:Object.fromEntries(Array.from({length:9},(_,n)=>[`axis${n}`,'active']))},
+      {...state,transition:'slide-left'}, {...state,transition:'push-left'},
+      {...state,transition:'instant',durationMs:100},
+      {...navigate(id(20)),values:{state:'active'}},
+      {trigger:'click',action:'open-overlay',target:id(20),transition:'smart-animate'},
+    ]) refuse(await append(document,'SetProps',{id:id(31),patch:{interaction}}));
+    const ops=await (await fetch(new URL(`/api/documents/${document}/ops?after=1`,origin))).json();
+    assert.equal(ops.ops.length,0);
+  });
+  for(const overrideOnly of [false,true]) {
+    const snapshot=fixture();snapshot.version=20;
+    if(overrideOnly) snapshot.nodes.find(n=>n.id===id(32)).overrides=[{node:id(31),patch:{interaction:state}}];
+    else snapshot.nodes.find(n=>n.id===id(31)).interaction=state;
+    const response=await request('/api/documents/import',{name:'Invalid state downgrade QA',snapshot});
+    assert.equal(response.status,400,await response.text());
+  }
+});
+
 test('snapshot20 preserves ordered triggers and independent copied lists through HTTP', async () => {
   const snapshot = fixture();
   snapshot.version = 20;

@@ -31,6 +31,7 @@ import {
   RasterImage,
   PrototypeState,
   PrototypeScreen,
+  VariantAxis,
 } from '@canvas/bridge';
 import { LucentButton, LucentTab, LucentTabList } from '@designfoundry/lucent-angular';
 import { Api } from '../api/api';
@@ -38,6 +39,7 @@ import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';
 import { watchPrototypeMotion } from './prototype-motion';
 import { followTheme } from './canvas-background';
+import { findPrototypeStateAxes } from './prototype-state-axes';
 import { ComponentCommand, EditorTool, LayerKind, LayerRow } from './editor-model';
 import { EditorToolbar } from './editor-toolbar';
 import { InspectorPanel } from './inspector-panel';
@@ -135,6 +137,7 @@ export class EditorPage {
     transitioning: false,
   });
   protected readonly prototypeScreens = signal<readonly PrototypeScreen[]>([]);
+  protected readonly prototypeStateAxes = signal<readonly VariantAxis[]>([]);
   protected readonly prototypeChoice = signal('');
   protected readonly prototypeStart = computed(() => {
     const screens = this.prototypeScreens(),
@@ -531,7 +534,9 @@ export class EditorPage {
           this.prototypeScreens.set(core.prototypeScreens());
           const selection = core.selection();
           this.selectedIds.set(new Set(selection));
-          this.selectedNode.set(selection.length === 1 ? core.node(selection[0]) : null);
+          const selectedNode = selection.length === 1 ? core.node(selection[0]) : null;
+          this.selectedNode.set(selectedNode);
+          this.prototypeStateAxes.set(findPrototypeStateAxes(selectedNode, (id) => core.node(id)));
           this.tool.set(core.tool);
         }
         let wire = '';

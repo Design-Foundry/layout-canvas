@@ -73,6 +73,32 @@ All five fields are required when `layout` is present. Typical card: a `column` 
 - Entry or reveal through Back/Close resets the active screen's timer clock. Viewport resizing restarts the full delay epoch; incoming document edits cancel pending timers until explicit navigation or Restart. These timers are temporary playback state and produce no document operations. See [prototyping usage](../../../../docs/prototyping.md) for the full lifecycle.
 - Portable component files refuse document-local lists even when empty, and snapshots older than version 20 refuse list metadata rather than silently dropping it. These actions do not add external URL navigation, conditions or variables.
 
+### Component playback state and Smart Animate
+
+Snapshot 21 adds `action: "change-state"` to legacy and ordered interactions. It
+requires `values: { "axis": "choice" }` with 1–8 nonempty string entries (axis
+names up to 64 UTF-8 bytes, choices up to 128), no `target`, and only Instant,
+`dissolve` or `smart-animate` transitions. Existing duration bounds apply. Other
+actions refuse `values`; Navigate also accepts Smart, while Open overlay does not.
+
+The action resolves the nearest authored instance in the hotspot's ancestry and
+checks every choice against that component's declared variant axes. Invalid axes,
+choices, missing instance context and derived nested instances produce no state
+change. Syntactically valid relative actions may be stored on reusable source
+layers before they have a playback context. These actions do not set arbitrary
+properties, text properties or instance swaps.
+
+Play uses an isolated document copy. Instance states persist through navigation,
+Back and overlays, and reset on Restart, Exit or incoming document edits. Playback
+does not alter source values, undo history or the outgoing operation log.
+
+Smart Animate requires matching expanded node/paint identities, paint order and
+topology. Compatible geometry, paint color and opacity interpolate; glyph/image
+UVs remain fixed. Changed text, image identity/crop, missing/reordered paints and
+incompatible paths use full-scene dissolve. Distinct screen roots have distinct
+identities and therefore use that fallback. Portable component files still refuse
+prototype metadata. See the usage guide for the supported scope.
+
 ## Tokens
 
 `{ "id", "type", "identifier", "order", "value" | "source", "modifiers" }`
