@@ -437,23 +437,23 @@ bool Editor::changePrototypeState(const Interaction& interaction,Id source) {
         const auto* node=document.view(key);
         if(!node) return false;
         if(node->type==NodeType::Instance) {
-            // A derived nested instance has no independent authored values address.
-            const auto* authored=document.find(key);
-            if(!authored || authored->type!=NodeType::Instance) return false;
             instance=key;break;
         }
         key=node->parent;
     }
     if(instance.isNil()) return false;
     const auto* authored=document.find(instance);
-    for(auto parent=authored->parent;!parent.isNil();) {
+    const auto* effective=document.view(instance);
+    const auto* owner=document.find(document.ownerOf(instance));
+    if(!effective || !owner || owner->type!=NodeType::Instance) return false;
+    for(auto parent=owner->parent;!parent.isNil();) {
         const auto* node=document.find(parent);
         if(!node || node->type==NodeType::Component || node->type==NodeType::Instance) return false;
         parent=node->parent;
     }
-    const auto* component=document.find(authored->component);
+    const auto* component=document.find(effective->component);
     if(!component) return false;
-    auto values=authored->componentValues;
+    auto values=authored?authored->componentValues:effective->componentValues;
     bool changed=false;
     for(const auto& [name,value]:interaction.stateValues) {
         const auto axis=std::find_if(component->definition.axes.begin(),component->definition.axes.end(),[&](const auto& entry){return entry.name==name;});
@@ -466,7 +466,9 @@ bool Editor::changePrototypeState(const Interaction& interaction,Id source) {
     if(!changed) return false;
     auto next=document.detachedCopy();
     NodePatch patch;patch.componentValues=std::move(values);
-    if(!next->apply(SetProps{instance,patch})) return false;
+    if(authored) {
+        if(!next->apply(SetProps{instance,patch})) return false;
+    } else if(!next->setPlaybackState(instance,interaction.stateValues)) return false;
     auto outgoing=prototypeLayers();
     const auto oldCamera=camera_;
     const auto oldBounds=worldBounds(document,prototypeScreen_,activeMode_);

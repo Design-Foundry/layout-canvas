@@ -768,4 +768,116 @@ TEST_CASE("Derived nested instance state actions cannot mutate the shared author
     REQUIRE(f.editor.startPrototype(f.a,{448,248}));
     const auto nestedKey=f.editor.prototypeDocument().viewChildren(outerInstance).front();REQUIRE(nestedKey!=nested);
     f.click({140,250});REQUIRE(f.editor.prototypeDocument().find(nested)->componentValues.empty());REQUIRE_FALSE(f.active(f.one));
+    REQUIRE(std::get<std::string>(f.editor.prototypeDocument().view(nestedKey)->componentValues.at("state"))=="active");
+}
+
+namespace {
+struct NestedPrototype : InteractivePrototype {
+    Id outer,left,right,first,second;
+    NestedPrototype() {
+        outer=add(NodeType::Component,{},1400,0,90,80);
+        left=instance(main,outer,0,"a0");right=instance(main,outer,45,"a1");
+        NodePatch size;size.w=40.;patch(left,size);patch(right,size);
+        first=instance(outer,a,0,"a3");second=instance(outer,a,100,"a4");
+    }
+    Id nested(Id owner,Id source) const {
+        for(const auto& key:editor.prototypeDocument().viewChildren(owner))
+            if(editor.prototypeDocument().sourceOf(key)==source) return key;
+        return {};
+    }
+    bool activeNested(Id key) const {
+        const auto& values=editor.prototypeDocument().view(key)->componentValues;
+        const auto value=values.find("state");return value!=values.end() && std::get<std::string>(value->second)=="active";
+    }
+};
+}
+
+TEST_CASE("Nested component states isolate sibling occurrences and outer instances without any serialized state") {
+    NestedPrototype f;const auto before=snapshotToJson(f.session.document());
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    const auto left=f.nested(f.first,f.left),right=f.nested(f.first,f.right),other=f.nested(f.second,f.left);
+    REQUIRE_FALSE(left.isNil());REQUIRE(left!=right);REQUIRE(left!=other);
+    f.click({120,240});REQUIRE(f.activeNested(left));REQUIRE_FALSE(f.activeNested(right));REQUIRE_FALSE(f.activeNested(other));
+    f.click({165,240});REQUIRE(f.activeNested(left));REQUIRE(f.activeNested(right));REQUIRE_FALSE(f.activeNested(other));
+    REQUIRE(f.editor.prototypeDocument().find(f.left)->componentValues.empty());
+    REQUIRE(f.editor.prototypeDocument().find(f.first)->componentValues.empty());
+    REQUIRE(snapshotToJson(f.editor.prototypeDocument())==before);
+    REQUIRE(snapshotToJson(f.session.document())==before);REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+    const auto detached=f.editor.prototypeDocument().detachedCopy();
+    REQUIRE(std::get<std::string>(detached->view(left)->componentValues.at("state"))=="active");
+    REQUIRE(f.editor.restartPrototype());REQUIRE_FALSE(f.activeNested(left));REQUIRE_FALSE(f.activeNested(right));
+}
+
+TEST_CASE("Nested component state uses the nearest declared axes and preserves independent outer overrides") {
+    NestedPrototype f;NodePatch override;override.x=12.;
+    // The existing addressing contract lets the outer occurrence override a nested visual.
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    const auto nested=f.nested(f.first,f.left);
+    const auto visual=f.editor.prototypeDocument().viewChildren(nested).front();
+    const auto address=f.editor.prototypeDocument().overrideKeyOf(visual);f.editor.stopPrototype();
+    REQUIRE(f.session.applyRemote(SetOverride{f.first,address,override}));
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click({120,240});
+    REQUIRE(f.activeNested(nested));REQUIRE(f.editor.prototypeDocument().box(visual).x==12.);
+    auto invalid=f.session.document().find(f.main)->interaction;invalid.stateValues={{"missing","active"}};
+    NodePatch p;p.interaction=invalid;f.patch(f.main,p);f.editor.advancePrototype(1);
+    f.click({120,240});REQUIRE_FALSE(f.activeNested(nested));
+    REQUIRE(f.editor.prototypeDocument().find(f.first)->componentValues.empty());
+}
+
+TEST_CASE("Nested state transitions capture immutable scenes and reset on remote interruption") {
+    NestedPrototype f;NodePatch p;auto action=f.session.document().find(f.main)->interaction;
+    action.transition=PrototypeTransition::SmartAnimate;action.durationMs=400;p.interaction=action;f.patch(f.main,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto key=f.nested(f.first,f.left);
+    f.click({120,240});REQUIRE(f.activeNested(key));REQUIRE(f.editor.prototypeTransitioning());
+    auto scene=f.editor.prototypeScene();REQUIRE(scene.smart);REQUIRE(scene.from.front().document->view(key)->componentValues.empty());
+    REQUIRE(std::get<std::string>(scene.to.front().document->view(key)->componentValues.at("state"))=="active");
+    f.editor.advancePrototype(200);REQUIRE(f.activeNested(key));
+    p={};p.name="Remote nested source";f.patch(f.visual,p);f.editor.advancePrototype(1);
+    REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE_FALSE(f.activeNested(key));
+    f.editor.setPrototypeReducedMotion(true);f.click({120,240});REQUIRE(f.activeNested(key));REQUIRE_FALSE(f.editor.prototypeTransitioning());
+    REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Nested playback state persists through navigation but is dropped on exit and fresh entry") {
+    NestedPrototype f;NodePatch nav;nav.interaction=Interaction{PrototypeAction::Navigate,f.b};f.patch(f.a,nav);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto key=f.nested(f.first,f.left);
+    f.click({120,240});REQUIRE(f.activeNested(key));f.click({295,298});
+    REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.editor.prototypeBack());REQUIRE(f.activeNested(key));
+    f.editor.stopPrototype();REQUIRE(f.editor.startPrototype(f.a,{448,248}));REQUIRE_FALSE(f.activeNested(key));
+}
+
+TEST_CASE("Nested temporary choices do not leak into a different effective swapped component") {
+    NestedPrototype f;const auto alternate=f.add(NodeType::Component,{},1800,0,40,80);
+    ComponentDefinition definition;definition.swaps.push_back({"kind",f.left,f.main,{f.main,alternate}});
+    REQUIRE(f.session.applyRemote(SetComponentDefinition{f.outer,definition}));
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto key=f.nested(f.first,f.left);
+    f.click({120,240});REQUIRE(f.activeNested(key));
+    auto swapped=f.editor.prototypeDocument().detachedCopy();NodePatch p;p.componentValues=ComponentValues{{"kind",alternate.toString()}};
+    REQUIRE(swapped->apply(SetProps{f.first,p}).has_value());
+    REQUIRE(swapped->view(key)->component==alternate);REQUIRE(swapped->view(key)->componentValues.empty());
+    REQUIRE_FALSE(swapped->setPlaybackState(key,{{"state","active"}}));
+    REQUIRE(f.activeNested(key));REQUIRE(f.session.document().find(f.first)->componentValues.empty());
+}
+
+TEST_CASE("Nested temporary state validation is atomic and copies retain fresh expansion caches") {
+    NestedPrototype f;REQUIRE(f.editor.startPrototype(f.a,{448,248}));const auto key=f.nested(f.first,f.left);
+    auto detached=f.editor.prototypeDocument().detachedCopy();const auto* before=detached->view(key);
+    REQUIRE_FALSE(detached->setPlaybackState(key,{{"state","active"},{"unknown","active"}}));
+    REQUIRE(detached->view(key)==before);REQUIRE(detached->view(key)->componentValues.empty());
+    REQUIRE(detached->setPlaybackState(key,{{"state","active"}}));
+    REQUIRE_FALSE(detached->setPlaybackState(key,{{"state","active"}}));
+    REQUIRE_FALSE(detached->setPlaybackState(f.a,{{"state","active"}}));
+    REQUIRE(snapshotToJson(*detached)==snapshotToJson(f.session.document()));
+    REQUIRE_FALSE(f.activeNested(key));
+}
+
+TEST_CASE("State actions resolve the deepest nested instance across multiple expansion levels") {
+    NestedPrototype f;const auto grand=f.add(NodeType::Component,{},2000,0,90,80);
+    const auto middle=f.instance(f.outer,grand,0,"a0"),top=f.instance(grand,f.a,0,"a5");
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    const auto middleKey=f.nested(top,middle),deep=f.nested(middleKey,f.left);
+    REQUIRE_FALSE(deep.isNil());f.click({120,245});REQUIRE(f.activeNested(deep));
+    REQUIRE(f.editor.prototypeDocument().view(middleKey)->componentValues.empty());
+    REQUIRE(f.editor.prototypeDocument().find(top)->componentValues.empty());
+    REQUIRE_FALSE(f.activeNested(f.nested(f.first,f.left)));
 }

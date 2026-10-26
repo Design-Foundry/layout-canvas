@@ -40,8 +40,12 @@ public:
         auto copy=std::make_shared<Document>();
         copy->nodes_=nodes_;copy->children_=children_;
         copy->tokens_=tokens_;copy->modes_=modes_;
+        copy->playbackValues_=playbackValues_;
         return copy;
     }
+    /// Ephemeral variant axes on one expanded instance occurrence. Never serialized or
+    /// applied as an authored operation; presentation uses this only on detached documents.
+    bool setPlaybackState(const Id& key, const std::map<std::string,std::string>& values);
 
     /// Applies `op` and returns its inverse, or nothing if the op is invalid for the current state
     /// (unknown node, cycle, deleting a node with children). Invalid ops leave the document untouched.
@@ -171,6 +175,8 @@ private:
     std::unordered_map<Id, std::vector<Id>> children_;
     std::unordered_map<Id, Token> tokens_;
     std::unordered_map<Id, Mode> modes_;
+    struct PlaybackValues { Id component; ComponentValues values; };
+    std::unordered_map<Id, PlaybackValues> playbackValues_;
 
     struct TreeEntry {
         const Node* node = nullptr;

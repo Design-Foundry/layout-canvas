@@ -820,6 +820,27 @@ Id Document::sourceOf(const Id& key) const {
     return it == tree_.end() ? Id{} : it->second.source;
 }
 
+bool Document::setPlaybackState(const Id& key,const std::map<std::string,std::string>& choices) {
+    Interaction interaction;interaction.action=PrototypeAction::ChangeState;interaction.stateValues=choices;
+    if(!validInteractionSettings(interaction)) return false;
+    const auto* node=view(key);
+    if(!node || node->type!=NodeType::Instance) return false;
+    const auto* component=find(node->component);
+    if(!component || component->type!=NodeType::Component) return false;
+    auto values=node->componentValues;
+    bool changed=false;
+    for(const auto& [name,value]:choices) {
+        const auto axis=std::find_if(component->definition.axes.begin(),component->definition.axes.end(),[&](const auto& entry){return entry.name==name;});
+        if(axis==component->definition.axes.end() || std::find(axis->values.begin(),axis->values.end(),value)==axis->values.end()) return false;
+        const auto existing=values.find(name);
+        const auto current=existing==values.end()?axis->defaultValue:std::get<std::string>(existing->second);
+        changed=changed || current!=value;values[name]=value;
+    }
+    if(!changed) return false;
+    playbackValues_[key]={component->id,std::move(values)};
+    treeDirty_=true;layoutDirty_=true;return true;
+}
+
 void Document::buildTree() const {
     if (!treeDirty_) {
         return;
@@ -890,9 +911,12 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
     Node reference = original;
     if (original.type == NodeType::Instance) applyLayers(reference);
     const Node* component = original.type == NodeType::Instance ? find(reference.component) : nullptr;
+    const auto temporary=playbackValues_.find(key);
+    const ComponentValues& values=component && temporary!=playbackValues_.end() && temporary->second.component==component->id
+        ? temporary->second.values : original.componentValues;
     if (component && depth < kMaxInstanceDepth) {
         effective = *component;
-        applyDefinition(effective, component->id, {nullptr, {}, &component->definition, &original.componentValues});
+        applyDefinition(effective, component->id, {nullptr, {}, &component->definition, &values});
         if (const NodePatch* patch = findOverride(original.overrides, original.component)) applyPatch(effective, *patch);
         effective.x = original.x;
         effective.y = original.y;
@@ -907,7 +931,7 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
         effective.name = original.name;
         effective.order = original.order;
         applyLayers(effective);
-        inner = {{&original.overrides, {}, &component->definition, &original.componentValues}};
+        inner = {{&original.overrides, {}, &component->definition, &values}};
         for (const OverrideLayer& layer : layers) inner.push_back({layer.overrides, keyIn(layer), layer.definition, layer.values});
         childrenOf = component->id;
     } else {
@@ -921,6 +945,7 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
     if (original.type == NodeType::Instance) {
         effective.type = NodeType::Instance;
         effective.component = reference.component;
+        effective.componentValues = values;
     }
     effective.id = key;
     effective.parent = parent;
