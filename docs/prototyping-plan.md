@@ -21,11 +21,35 @@ The native baseline is covered by model, runtime and browser regressions.
 | 2 | Offscreen composition and transition polish | Correct group alpha for overlapping paints/images/text; preserved outgoing viewport across unequal screens; reduced-motion preference and consistent interrupted transition policy | Complete |
 | 3 | Scrollable screen and overlay viewports | Explicit overflow contract, wheel/touch scroll with clipping and consistent picking; fixed/sticky elements only after native layout semantics exist; reset and remote invalidation behavior tested | Complete |
 | 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | Complete |
-| 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | Planned |
+| 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | In progress |
 | 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | Planned |
 
 Variables, expressions, conditions and external URLs need separate contracts.
 Portable component files refuse document-local screen references rather than dropping them.
+
+## Stage 5 contract
+
+Snapshot 21 adds relative `change-state` with a nonempty `values` map of declared
+variant-axis choices. In Play it resolves the nearest authored instance in the
+hotspot's ancestry and validates every choice against that component. Derived
+nested instances and actions outside an authored screen instance fail closed.
+The inspector suggests axes from the nearest component context. Stored syntax is
+bounded independently of the runtime context so source hotspots remain reusable.
+
+Play owns a detached document with fresh layout/expansion caches. Temporary state
+is independent per authored instance, persists through navigation/Back and modal
+use, and resets on Restart, Exit or incoming authored edits. No Session operations,
+undo entries, snapshots or outgoing synchronization are changed by playback.
+
+`smart-animate` matches stable expanded node/primitive identities, with unchanged
+paint order and topology. Geometry, clips, radii, compatible paths, paint color
+and opacity interpolate linearly; glyph/image UVs remain immutable. Missing or
+reordered identities, changed glyphs, image assets/crops or path topology use
+whole-scene dissolve. Distinct screen roots have distinct identities, so navigation
+between them also uses dissolve. Change-state accepts Instant/Dissolve/Smart;
+Navigate accepts Smart, while overlays retain their existing transition options.
+Reduced motion and interruptions keep the established settling policy. Portable
+component files continue refusing prototype metadata until their contract expands.
 
 ## Stage 1 contract
 
