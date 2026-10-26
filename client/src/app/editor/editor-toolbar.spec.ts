@@ -81,4 +81,15 @@ describe('EditorToolbar', () => {
     choice.dispatchEvent(new Event('change'));
     expect(selected).toBe('screen');
   });
+  it('labels marked starting screens with flow names and keeps ordinary frame names',async()=>{
+    fixture.componentRef.setInput('prototypeScreens',[
+      {id:'a',name:'Home',start:true,flowName:'Checkout',w:300,h:500},
+      {id:'b',name:'Details',start:false,flowName:'Dormant',w:300,h:500},
+      {id:'c',name:'Other',start:true,flowName:'',w:300,h:500},
+    ]);await fixture.whenStable();
+    const options=fixture.nativeElement.querySelectorAll('select option') as NodeListOf<HTMLOptionElement>;
+    expect([...options].map(option=>option.textContent?.trim())).toEqual(['Checkout','Details','Other']);
+    expect([...options].map(option=>option.value)).toEqual(['a','b','c']);
+  });
+
 });

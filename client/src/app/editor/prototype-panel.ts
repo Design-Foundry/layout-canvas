@@ -335,6 +335,16 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
         />
         Flow starting screen</label
       >
+      <label>Flow name
+        <input
+          type="text"
+          aria-label="Flow name"
+          maxlength="128"
+          [value]="value().prototypeFlowName ?? ''"
+          (change)="flowName($event)"
+        />
+      </label>
+      <p>Names label starting screens in the Play menu. Turn on Flow starting screen to use this name.</p>
     }
     <p>
       Interactions navigate between root frames, position overlays, close them or go back. Play the
@@ -687,6 +697,13 @@ export class PrototypePanel {
     const checkbox = event.target as HTMLInputElement;
     if (!this.rootFrame() || !this.change({ prototypeStart: checkbox.checked }))
       checkbox.checked = !!this.value().prototypeStart;
+  }
+  protected flowName(event: Event): void {
+    const control = event.target as HTMLInputElement;
+    if (!this.rootFrame() || new TextEncoder().encode(control.value).length > 128 ||
+        /[\u0000-\u001f\u007f]/.test(control.value) ||
+        !this.change({ prototypeFlowName: control.value }))
+      control.value = this.value().prototypeFlowName ?? '';
   }
   protected overflow(event: Event): void {
     const control = event.target as HTMLSelectElement;

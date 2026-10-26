@@ -875,3 +875,24 @@ describe('document-local prototype authoring', () => {
     ).toEqual({ x: -100000, y: 0 });
   });
 });
+
+describe('named flow entries',()=>{
+  it('authors and clears a root flow name without changing the start flag',async()=>{
+    const {fixture,saved}=await setup(true,{id:'frame-a',type:'frame',prototypeStart:true,prototypeFlowName:'Checkout'});
+    const control=fixture.nativeElement.querySelector('[aria-label="Flow name"]') as HTMLInputElement;
+    expect(control.value).toBe('Checkout');control.value='Compra rápida';control.dispatchEvent(new Event('change'));await fixture.whenStable();
+    expect(saved.at(-1)?.patch).toEqual({prototypeFlowName:'Compra rápida'});
+    control.value='';control.dispatchEvent(new Event('change'));await fixture.whenStable();expect(saved.at(-1)?.patch).toEqual({prototypeFlowName:''});
+  });
+  it('restores a refused or byte-oversized flow label',async()=>{
+    const {fixture,saved}=await setup(false,{id:'frame-a',type:'frame',prototypeFlowName:'Saved'});
+    const control=fixture.nativeElement.querySelector('[aria-label="Flow name"]') as HTMLInputElement;
+    control.value='Changed';control.dispatchEvent(new Event('change'));await fixture.whenStable();expect(control.value).toBe('Saved');
+    control.value='é'.repeat(65);control.dispatchEvent(new Event('change'));await fixture.whenStable();expect(control.value).toBe('Saved');expect(saved).toHaveLength(1);
+  });
+  it('does not offer names on component, nested or copied frames',async()=>{
+    for(const node of [{id:'main',type:'component'},{id:'nested',type:'frame',parent:'root'},{id:'copy',type:'frame',inInstance:true}] as Partial<NodeProps>[]){
+      const {fixture}=await setup(true,node);expect(fixture.nativeElement.querySelector('[aria-label="Flow name"]')).toBeNull();fixture.destroy();TestBed.resetTestingModule();
+    }
+  });
+});

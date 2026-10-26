@@ -49,7 +49,7 @@ import { EDITOR_TOOLS, EditorTool } from './editor-model';
           (change)="chooseStart($event)"
         >
           @for (screen of prototypeScreens(); track screen.id) {
-            <option [value]="screen.id">{{ screen.name || 'Untitled frame' }}</option>
+            <option [value]="screen.id">{{ (screen.start && screen.flowName) || screen.name || 'Untitled frame' }}</option>
           }
         </select>
       } @else {
