@@ -100,3 +100,20 @@
   border-top: 1px solid var(--color--semantic--border-subtle);
   color: var(--color--semantic--text-muted);
 }
+
+[hidden] {
+  display: none !important;
+}
+.stage.presenting {
+  grid-area: 1 / 1 / -1 / -1;
+  z-index: 10;
+  background: #151515;
+}
+.prototype-error {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 8px;
+  background: #242424;
+  color: #ffbd83;
+}

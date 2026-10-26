@@ -29,12 +29,17 @@ import {
   Rect,
   TextRun,
   RasterImage,
+  PrototypeState,
+  PrototypeScreen,
+  VariantAxis,
 } from '@canvas/bridge';
 import { LucentButton, LucentTab, LucentTabList } from '@designfoundry/lucent-angular';
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';
+import { watchPrototypeMotion } from './prototype-motion';
 import { followTheme } from './canvas-background';
+import { findPrototypeStateAxes } from './prototype-state-axes';
 import { ComponentCommand, EditorTool, LayerKind, LayerRow } from './editor-model';
 import { EditorToolbar } from './editor-toolbar';
 import { InspectorPanel } from './inspector-panel';
@@ -45,6 +50,9 @@ import { ComponentsPanel } from './components-panel';
 import { componentOptions } from './component-options';
 import { InlineTextEditor } from './inline-text-editor';
 import { ImageImport } from './image-import';
+import { PrototypeControls } from './prototype-controls';
+import { DocumentDelivery } from './document-delivery';
+import { PrototypeConnections, type PrototypeConnectionTarget } from './prototype-connections';
 import type { ComponentSnapshot } from './component-package';
 
 const STATS_INTERVAL_MS = 500;
@@ -98,6 +106,9 @@ const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
     ComponentsPanel,
     InlineTextEditor,
     ImageImport,
+    PrototypeControls,
+    DocumentDelivery,
+    PrototypeConnections,
   ],
   templateUrl: './editor-page.html',
   styleUrl: './editor-page.scss',
@@ -123,10 +134,84 @@ export class EditorPage {
   protected readonly layers = signal<readonly LayerRow[]>([]);
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   protected readonly selectedNode = signal<NodeProps | null>(null);
+  protected readonly presentation = signal<PrototypeState>({
+    active: false,
+    screen: null,
+    start: null,
+    canBack: false,
+    overlay: null,
+    transitioning: false,
+  });
+  protected readonly prototypeScreens = signal<readonly PrototypeScreen[]>([]);
+  protected readonly prototypeStateAxes = signal<readonly VariantAxis[]>([]);
+  protected readonly prototypeChoice = signal('');
+  protected readonly prototypeStart = computed(() => {
+    const screens = this.prototypeScreens(),
+      chosen = this.prototypeChoice(),
+      selected = this.selectedNode();
+    return (
+      screens.find((screen) => screen.id === chosen)?.id ??
+      screens.find((screen) => screen.id === selected?.id)?.id ??
+      screens.find((screen) => screen.start)?.id ??
+      screens[0]?.id ??
+      ''
+    );
+  });
+  protected readonly prototypeName = computed(
+    () =>
+      this.prototypeScreens().find(
+        (screen) => screen.id === (this.presentation().overlay ?? this.presentation().screen),
+      )?.name || 'Prototype',
+  );
+  protected readonly prototypeError = signal('');
+  protected readonly connectionSource = signal<Rect | null>(null);
+  protected readonly connectionTargets = signal<readonly PrototypeConnectionTarget[]>([]);
+  protected readonly saveConnection = (id: string, patch: NodePatch): boolean =>
+    !this.presentation().active && !this.inlineText() &&
+    (this.core()?.setProps(id, patch) ?? false);
+  protected playPrototype(): void {
+    this.prototypeError.set('');
+    if (this.inlineText()) {
+      this.prototypeError.set('Finish or cancel the text edit before playing.');
+      return;
+    }
+    const core = this.core();
+    if (!core || !this.prototypeStart() || !core.startPrototype(this.prototypeStart())) {
+      this.prototypeError.set('Create a visible root frame (F), then choose a starting screen.');
+      return;
+    }
+    this.presentation.set(core.prototypeState());
+  }
+  protected exitPrototype(): void {
+    const core = this.core();
+    core?.stopPrototype();
+    if (core) this.presentation.set(core.prototypeState());
+  }
+  protected backPrototype(): void {
+    const core = this.core();
+    core?.prototypeBack();
+    if (core) this.presentation.set(core.prototypeState());
+  }
+  protected restartPrototype(): void {
+    const core = this.core();
+    core?.restartPrototype();
+    if (core) this.presentation.set(core.prototypeState());
+  }
+  protected closePrototypeOverlay(): void {
+    const core = this.core();
+    core?.closePrototypeOverlay();
+    if (core) this.presentation.set(core.prototypeState());
+  }
   protected readonly inlineText = signal<NodeProps | null>(null);
   protected readonly inlineBounds = signal<Rect | null>(null);
   protected beginInlineText(): void {
-    if (this.inlineText() || this.core()?.drawingPath() || this.tool() === 'pen') return;
+    if (
+      this.presentation().active ||
+      this.inlineText() ||
+      this.core()?.drawingPath() ||
+      this.tool() === 'pen'
+    )
+      return;
     const core = this.core(),
       selected = core?.selection();
     const node = selected?.length === 1 ? core?.node(selected[0]) : null;
@@ -326,7 +411,33 @@ export class EditorPage {
 
   protected onKeydown(event: KeyboardEvent): void {
     const core = this.core();
-    if (!core || event.defaultPrevented || isTyping(event.target)) return;
+    if (!core || event.defaultPrevented) return;
+    if (this.presentation().active) {
+      const key = event.key.toLowerCase(),
+        command = event.ctrlKey || event.metaKey;
+      if (key === 'escape') {
+        this.exitPrototype();
+        event.preventDefault();
+      } else if (event.altKey && key === 'arrowleft') {
+        this.backPrototype();
+        event.preventDefault();
+      } else if (
+        isTyping(event.target) ||
+        key === 'tab' ||
+        (event.target instanceof HTMLButtonElement && ['enter', ' '].includes(key))
+      )
+        return;
+      else {
+        const editing = command
+          ? ['z', 'y'].includes(key) || (event.altKey && ['k', 'b'].includes(key))
+          : ['delete', 'backspace', 'enter', 'f2'].includes(key) ||
+            !!NUDGE_DIRECTIONS[key] ||
+            (!event.altKey && !!TOOL_SHORTCUTS[key]);
+        if (editing) event.preventDefault();
+      }
+      return;
+    }
+    if (isTyping(event.target)) return;
 
     const key = event.key.toLowerCase();
     const command = event.ctrlKey || event.metaKey;
@@ -388,12 +499,21 @@ export class EditorPage {
         return;
       }
       this.core.set(core);
+      const stopMotionPreference = watchPrototypeMotion(
+        core,
+        typeof window.matchMedia === 'function'
+          ? window.matchMedia('(prefers-reduced-motion: reduce)')
+          : undefined,
+      );
       let revision = -1;
       let structure = -1;
       let tokenRevision = -1;
       let mode = '';
       let frame = 0;
       const tick = () => {
+        const presentation = core.prototypeState();
+        if (JSON.stringify(this.presentation()) !== JSON.stringify(presentation))
+          this.presentation.set(presentation);
         const editing = this.inlineText();
         if (editing) {
           const bounds = core.screenBounds(editing.id);
@@ -421,11 +541,25 @@ export class EditorPage {
         const next = core.revision();
         if (next !== revision) {
           revision = next;
+          this.prototypeScreens.set(core.prototypeScreens());
           const selection = core.selection();
           this.selectedIds.set(new Set(selection));
-          this.selectedNode.set(selection.length === 1 ? core.node(selection[0]) : null);
+          const selectedNode = selection.length === 1 ? core.node(selection[0]) : null;
+          this.selectedNode.set(selectedNode);
+          this.prototypeStateAxes.set(findPrototypeStateAxes(selectedNode, (id) => core.node(id)));
           this.tool.set(core.tool);
         }
+        const selected = this.selectedNode();
+        const source = !presentation.active && selected ? core.screenBounds(selected.id) : null;
+        if (JSON.stringify(source) !== JSON.stringify(this.connectionSource()))
+          this.connectionSource.set(source);
+        const targets = !presentation.active && selected
+          ? this.prototypeScreens().flatMap((screen) => {
+              const bounds = core.screenBounds(screen.id);
+              return bounds ? [{ id: screen.id, name: screen.name, bounds }] : [];
+            }) : [];
+        if (JSON.stringify(targets) !== JSON.stringify(this.connectionTargets()))
+          this.connectionTargets.set(targets);
         frame = requestAnimationFrame(tick);
       };
       frame = requestAnimationFrame(tick);
@@ -435,6 +569,7 @@ export class EditorPage {
       );
 
       this.destroyRef.onDestroy(() => {
+        stopMotionPreference();
         cancelAnimationFrame(frame);
         clearInterval(timer);
         void sync.close();

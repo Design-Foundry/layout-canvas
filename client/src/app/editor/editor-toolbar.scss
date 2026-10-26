@@ -19,3 +19,21 @@
   min-width: 0;
   max-width: 280px;
 }
+
+.end {
+  justify-content: flex-end;
+}
+.end select {
+  min-width: 0;
+  max-width: 150px;
+  background: var(--color--semantic--surface-default);
+  color: inherit;
+  border: 1px solid var(--color--semantic--border-subtle);
+  padding: 5px;
+}
+
+.prototype-hint {
+  color: var(--color--semantic--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}

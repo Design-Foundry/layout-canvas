@@ -1,7 +1,70 @@
 #include "vc/node.hpp"
 #include <cmath>
+#include <algorithm>
 
 namespace vc {
+bool validPrototypeFlowName(const std::string& name) {
+    if(name.size()>128 || std::any_of(name.begin(),name.end(),[](unsigned char c){return c<32 || c==127;})) return false;
+    TextRun text;text.content=name;return !textProblem(text);
+}
+
+bool validInteractionSettings(const Interaction& i) {
+    const bool destination=i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay || i.action==PrototypeAction::ChangeState;
+    switch(i.action) {
+        case PrototypeAction::None: case PrototypeAction::Back: case PrototypeAction::CloseOverlay: case PrototypeAction::ChangeState:
+            if(!i.target.isNil()) return false;
+            break;
+        case PrototypeAction::Navigate: case PrototypeAction::OpenOverlay:
+            if(i.target.isNil()) return false;
+            break;
+        default: return false;
+    }
+    if(i.action==PrototypeAction::ChangeState) {
+        if(i.stateValues.empty() || i.stateValues.size()>8) return false;
+        for(const auto& [name,value]:i.stateValues) {
+            if(name.empty() || name.size()>64 || value.empty() || value.size()>128) return false;
+            TextRun test;test.content=name;if(textProblem(test)) return false;
+            test.content=value;if(textProblem(test)) return false;
+        }
+    } else if(!i.stateValues.empty()) return false;
+    if(i.action!=PrototypeAction::OpenOverlay && !i.dismissOutside) return false;
+    switch(i.placement) {
+        case OverlayPlacement::Center: case OverlayPlacement::TopLeft: case OverlayPlacement::TopCenter: case OverlayPlacement::TopRight:
+        case OverlayPlacement::CenterLeft: case OverlayPlacement::CenterRight: case OverlayPlacement::BottomLeft:
+        case OverlayPlacement::BottomCenter: case OverlayPlacement::BottomRight: case OverlayPlacement::Manual: break;
+        default: return false;
+    }
+    if(i.action!=PrototypeAction::OpenOverlay && i.placement!=OverlayPlacement::Center) return false;
+    if(!std::isfinite(i.overlayOffset.x) || !std::isfinite(i.overlayOffset.y) || std::abs(i.overlayOffset.x)>100000 || std::abs(i.overlayOffset.y)>100000) return false;
+    if(i.placement!=OverlayPlacement::Manual && i.overlayOffset!=OverlayOffset{}) return false;
+    if(i.transition==PrototypeTransition::Instant) return i.durationMs==300;
+    if(!destination || i.durationMs<1 || i.durationMs>2000) return false;
+    switch(i.transition) {
+        case PrototypeTransition::Dissolve: return true;
+        case PrototypeTransition::SmartAnimate: return i.action==PrototypeAction::Navigate || i.action==PrototypeAction::ChangeState;
+        case PrototypeTransition::SlideLeft: case PrototypeTransition::SlideRight:
+        case PrototypeTransition::SlideUp: case PrototypeTransition::SlideDown: return i.action!=PrototypeAction::ChangeState;
+        case PrototypeTransition::PushLeft: case PrototypeTransition::PushRight: case PrototypeTransition::PushUp:
+        case PrototypeTransition::PushDown: return i.action==PrototypeAction::Navigate;
+        default: return false;
+    }
+}
+bool validTriggeredInteractions(const std::vector<TriggeredInteraction>& interactions) {
+    if(interactions.size()>16) return false;
+    for(const auto& entry:interactions) {
+        if(!validInteractionSettings(entry.interaction) || entry.interaction.action==PrototypeAction::None) return false;
+        switch(entry.trigger) {
+            case PrototypeTrigger::Click: case PrototypeTrigger::Hover: case PrototypeTrigger::Press:
+                if(entry.delayMs!=0) return false;
+                break;
+            case PrototypeTrigger::Delay:
+                if(entry.delayMs<1 || entry.delayMs>60000) return false;
+                break;
+            default: return false;
+        }
+    }
+    return true;
+}
 namespace {
 
 template <typename T>
@@ -32,6 +95,15 @@ bool validPath(const Path& path) {
 
 NodePatch applyPatch(Node& node, const NodePatch& patch) {
     NodePatch inverse;
+    if(patch.interaction || patch.interactions) {
+        inverse.interaction=node.interaction;
+        if(patch.interactions || !node.interactions.empty()) inverse.interactions=node.interactions;
+        node.interaction=patch.interaction.value_or(Interaction{});
+        node.interactions=patch.interactions.value_or(std::vector<TriggeredInteraction>{});
+    }
+    swapIn(inverse.prototypeStart,patch.prototypeStart,node.prototypeStart);
+    swapIn(inverse.prototypeFlowName,patch.prototypeFlowName,node.prototypeFlowName);
+    swapIn(inverse.prototypeOverflow,patch.prototypeOverflow,node.prototypeOverflow);
     swapIn(inverse.image,patch.image,node.image);
     swapIn(inverse.imageFit,patch.imageFit,node.imageFit);
     swapIn(inverse.imageCrop,patch.imageCrop,node.imageCrop);
@@ -77,6 +149,14 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
 
 NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
     NodePatch out = base;
+    if(top.interaction || top.interactions) {
+        out.interaction=top.interaction.value_or(Interaction{});
+        if(top.interactions || base.interactions) out.interactions=top.interactions.value_or(std::vector<TriggeredInteraction>{});
+        else out.interactions.reset();
+    }
+    if(top.prototypeStart) out.prototypeStart=top.prototypeStart;
+    if(top.prototypeFlowName) out.prototypeFlowName=top.prototypeFlowName;
+    if(top.prototypeOverflow) out.prototypeOverflow=top.prototypeOverflow;
     if(top.image) out.image=top.image;
     if(top.imageFit) out.imageFit=top.imageFit;
     if(top.imageCrop) out.imageCrop=top.imageCrop;
@@ -132,6 +212,11 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
 
 NodePatch fullPatch(const Node& n) {
     NodePatch p;
+    if(n.interaction!=Interaction{}) p.interaction=n.interaction;
+    if(!n.interactions.empty()) p.interactions=n.interactions;
+    if(n.prototypeStart) p.prototypeStart=true;
+    if(!n.prototypeFlowName.empty()) p.prototypeFlowName=n.prototypeFlowName;
+    if(n.prototypeOverflow!=PrototypeOverflow::None) p.prototypeOverflow=n.prototypeOverflow;
     if(n.type==NodeType::Image){p.image=n.image;p.imageFit=n.imageFit;p.imageCrop=n.imageCrop;}
     if (n.type == NodeType::Line || n.type == NodeType::Path) p.lineWidth=n.lineWidth;
     if (n.type == NodeType::Line) p.lineReverse=n.lineReverse;

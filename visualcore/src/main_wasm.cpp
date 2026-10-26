@@ -45,13 +45,14 @@ void attach(const std::string& selector) {
 
 void detach() {
     if (rt) {
+        rt->editor.stopPrototype();
         rt->renderer.stop();
         emscripten_html5_remove_all_event_listeners();
     }
 }
 
 void addRandomShapes(int count, int seed) {
-    if (rt) {
+    if (rt && !rt->editor.presenting()) {
         vc::addRandomNodes(rt->session, static_cast<std::size_t>(count), {-5000, -5000, 10000, 10000},
                            static_cast<std::uint64_t>(seed));
     }
@@ -61,6 +62,7 @@ bool loadDocument(const std::string& snapshot) {
     if (!rt) {
         return false;
     }
+    rt->editor.stopPrototype();
     rt->editor.pointerCancel();
     rt->editor.clearSelection();
     rt->session = vc::Session{};
@@ -109,7 +111,58 @@ std::string layers() {
 }
 
 std::string frameLabels() {
-    return rt ? vc::frameLabelsToJson(rt->session.document(), rt->camera, rt->editor.activeMode()) : "[]";
+    return rt && !rt->editor.presenting() ? vc::frameLabelsToJson(rt->session.document(), rt->camera, rt->editor.activeMode()) : "[]";
+}
+
+std::string jsonString(const std::string& value) {
+    std::string out="\"";
+    constexpr char hex[]="0123456789abcdef";
+    for(const unsigned char ch:value) {
+        if(ch=='"' || ch=='\\') {out+='\\';out+=char(ch);}
+        else if(ch<32) {out+="\\u00";out+=hex[ch>>4];out+=hex[ch&15];}
+        else out+=char(ch);
+    }
+    return out+'"';
+}
+
+vc::Vec2 prototypeViewport() {
+    double width=0,height=0;
+    if(rt) emscripten_get_element_css_size(attachedSelector.c_str(),&width,&height);
+    return {width,height};
+}
+
+bool startPrototype(const std::string& id) {
+    const auto parsed=vc::Id::parse(id);
+    return rt && parsed && rt->editor.startPrototype(*parsed,prototypeViewport());
+}
+void stopPrototype() {if(rt)rt->editor.stopPrototype();}
+bool prototypeBack() {return rt && rt->editor.prototypeBack();}
+bool restartPrototype() {return rt && rt->editor.restartPrototype();}
+bool closePrototypeOverlay() {return rt && rt->editor.closePrototypeOverlay();}
+void setPrototypeReducedMotion(bool reduced) {if(rt) rt->editor.setPrototypeReducedMotion(reduced);}
+
+std::string prototypeState() {
+    if(!rt) return "{\"active\":false,\"screen\":null,\"start\":null,\"canBack\":false,\"overlay\":null,\"transitioning\":false}";
+    rt->editor.resizePrototype(prototypeViewport());
+    const auto& editor=rt->editor;
+    if(!editor.presenting()) return "{\"active\":false,\"screen\":null,\"start\":null,\"canBack\":false,\"overlay\":null,\"transitioning\":false}";
+    return "{\"active\":true,\"screen\":"+jsonString(editor.prototypeScreen().toString())+
+        ",\"start\":"+jsonString(editor.prototypeStart().toString())+",\"canBack\":"+(editor.canPrototypeBack()?"true":"false")+
+        ",\"overlay\":"+(editor.prototypeOverlay().isNil()?"null":jsonString(editor.prototypeOverlay().toString()))+
+        ",\"transitioning\":"+(editor.prototypeTransitioning()?"true":"false")+"}";
+}
+
+std::string prototypeScreens() {
+    std::string out="[";
+    if(rt) for(const auto& id:rt->session.document().children(vc::Id{})) {
+        if(!rt->editor.prototypeEligible(id)) continue;
+        const auto* node=rt->session.document().find(id);
+        const auto box=rt->session.document().box(id,rt->editor.activeMode());
+        if(out.size()>1) out+=',';
+        out+="{\"id\":"+jsonString(id.toString())+",\"name\":"+jsonString(node->name)+",\"flowName\":"+jsonString(node->prototypeFlowName)+
+            ",\"start\":"+(node->prototypeStart?"true":"false")+",\"w\":"+std::to_string(box.w)+",\"h\":"+std::to_string(box.h)+"}";
+    }
+    return out+"]";
 }
 
 std::string selection() {
@@ -417,6 +470,14 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("layers", &layers);
     function("selection", &selection);
     function("frameLabels", &frameLabels);
+    function("startPrototype", &startPrototype);
+    function("stopPrototype", &stopPrototype);
+    function("prototypeBack", &prototypeBack);
+    function("restartPrototype", &restartPrototype);
+    function("closePrototypeOverlay", &closePrototypeOverlay);
+    function("setPrototypeReducedMotion", &setPrototypeReducedMotion);
+    function("prototypeState", &prototypeState);
+    function("prototypeScreens", &prototypeScreens);
     function("select", &select);
     function("setTool", &setTool);
     function("toggleSelection", &toggleSelection);

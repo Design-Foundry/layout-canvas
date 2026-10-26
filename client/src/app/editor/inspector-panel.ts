@@ -38,6 +38,7 @@ import { TextPanel } from './text-panel';
 import { LinePanel } from './line-panel';
 import { PathPanel } from './path-panel';
 import { ImagePanel } from './image-panel';
+import { PrototypePanel } from './prototype-panel';
 
 /**
  * Identifies one bindable property so a single picker can serve them all: corner0..3 (top-start,
@@ -117,6 +118,7 @@ function replaceAt<T>(items: Four<T>, index: number, value: T): Four<T> {
     LinePanel,
     PathPanel,
     ImagePanel,
+    PrototypePanel,
     CdkConnectedOverlay,
     LucentButton,
     LucentCheckbox,
@@ -135,6 +137,9 @@ function replaceAt<T>(items: Four<T>, index: number, value: T): Four<T> {
   styleUrls: ['./panel.scss', './inspector-panel.scss'],
 })
 export class InspectorPanel {
+  readonly prototypeScreens = input<readonly import('@canvas/bridge').PrototypeScreen[]>([]);
+  readonly prototypeStateAxes = input<readonly import('@canvas/bridge').VariantAxis[]>([]);
+  protected readonly mode = signal<'design' | 'prototype'>('design');
   readonly saveLine = input<(id: string, patch: NodePatch) => boolean>(() => false);
   readonly saveStyleBinding = input<(id: string, patch: NodePatch) => boolean>(() => false);
   readonly saveWrap = input<(id: string, wrap: boolean) => boolean>(() => false);

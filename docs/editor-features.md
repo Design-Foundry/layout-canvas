@@ -13,14 +13,21 @@ contracts. This is an editor foundation increment, not a claim of full Figma par
 | Drawing | Pen click/drag, Pencil, five-sided Polygon, five-point Star, Shift constraints, Alt-centered shapes, gesture cancellation | Pencil reduces to 64 samples and does not retain pressure or smooth; polygons/stars become editable paths without parametric controls |
 | Images | Local static PNG/JPEG import, native RGBA pixels, SHA-256 identity, fixed geometry, contain/cover/stretch, normalized crop, opacity and clipping | 4 MB input, 4096 px source side, explicit downsample to 512 px, eight identities and 1,400,000 encoded pixel characters per document; no original-resolution recovery, animation or effects |
 | Exchange | Portable `canvas-component/1` files with native validation and dependent mains/tokens; atomic import into a new document | 2 MB files; malformed/unsupported data refuses instead of silent substitution |
+| Prototyping | Root-frame screens, starting screen selection, Navigate/Back/Open/Close overlay, positioned modals, scene-composited dissolve/slide/push, preserved outgoing viewports, reduced motion, scrollable screen/modal viewports, inherited hotspot overrides, ordered click/hover/press/delay interactions, isolated nested component states, hierarchical cross-screen Smart Animate and native playback | No partial-tree matching, fixed/sticky or nested scroll containers, variables, URLs or hosted sharing; directional transitions use dissolve across mismatched viewport shapes; portable files refuse document-local links |
 
 ## Persistence and rendering
 
 Snapshots remain versioned by the features they contain. Text starts at version 5;
 independent metrics, wrapping, face selection and shared typography progressively
 require versions 6–11. Lines use 12, straight unfilled paths 13, curved/filled paths
-14 and raster images 15. Earlier documents retain their minimum version. Downlevel
+14, raster images 15, click prototypes 16, overlay/dissolve options 17 and directional
+transitions/overlay placement 18. Earlier documents retain their minimum version. Downlevel
 snapshots containing unsupported newer data are refused.
+
+Prototype playback uses the same native renderer and does not produce document
+operations or modify Undo/Redo. Referenced screen deletion, nesting and promotion
+are refused until incoming links are removed. See [native click prototypes](prototyping.md)
+for authoring, keyboard controls and persistence details.
 
 Curves use normalized absolute controls in a shared control-hull box. Adaptive
 flattening targets 0.25 world units with a six-level subdivision cap, so extreme
@@ -35,3 +42,10 @@ copies share content identity and may override crop/fit independently of the sou
 
 Fonts and third-party notices are in `visualcore/assets/fonts/` and
 `visualcore/third_party/stb/`. No externally loaded fonts or image URLs are needed.
+
+Prototyping also supports named root-frame flow entries (snapshot 22), visual
+hotspot-to-screen connection authoring with a keyboard alternative, focus-aware
+player controls and full-document `.canvas.json` export/reopen in Assets. The file
+preserves all authored screens, components, tokens and embedded images. Reopening
+uses the configured server's native validator to create a separate document;
+keep that server local for private local delivery. Hosted sharing and partial-tree Smart Animate matching remain pending.

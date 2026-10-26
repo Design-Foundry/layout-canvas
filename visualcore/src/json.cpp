@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <unordered_map>
 #include <unordered_set>
 #include <nlohmann/json.hpp>
@@ -12,7 +13,16 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 15;
+constexpr int kSnapshotVersion = 22;
+
+bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
+
+bool extendedPrototype(const Interaction& interaction) {
+    return interaction.action==PrototypeAction::OpenOverlay || interaction.action==PrototypeAction::CloseOverlay || interaction.transition!=PrototypeTransition::Instant;
+}
+bool positionedPrototype(const Interaction& interaction) {
+    return (interaction.transition!=PrototypeTransition::Instant && interaction.transition!=PrototypeTransition::Dissolve) || interaction.placement!=OverlayPlacement::Center;
+}
 
 constexpr std::array<std::pair<NodeType, std::string_view>, 9> kNodeTypes{{
     {NodeType::Frame, "frame"},
@@ -57,8 +67,26 @@ std::optional<E> valueOf(const std::array<std::pair<E, std::string_view>, N>& na
     return std::nullopt;
 }
 
+constexpr std::array<std::pair<PrototypeTrigger,std::string_view>,4> kPrototypeTriggers{{
+    {PrototypeTrigger::Click,"click"},{PrototypeTrigger::Hover,"hover"},{PrototypeTrigger::Press,"press"},{PrototypeTrigger::Delay,"delay"}
+}};
 constexpr std::array<std::pair<ColorChannel, std::string_view>, 4> kChannels{{
     {ColorChannel::L, "l"}, {ColorChannel::C, "c"}, {ColorChannel::H, "h"}, {ColorChannel::Alpha, "alpha"}}};
+constexpr std::array<std::pair<PrototypeOverflow, std::string_view>, 4> kPrototypeOverflows{{
+    {PrototypeOverflow::None,"none"}, {PrototypeOverflow::Vertical,"vertical"},
+    {PrototypeOverflow::Horizontal,"horizontal"}, {PrototypeOverflow::Both,"both"}}};
+constexpr std::array<std::pair<PrototypeTransition, std::string_view>, 11> kPrototypeTransitions{{
+    {PrototypeTransition::Instant,"instant"}, {PrototypeTransition::Dissolve,"dissolve"},
+    {PrototypeTransition::SlideLeft,"slide-left"}, {PrototypeTransition::SlideRight,"slide-right"},
+    {PrototypeTransition::SlideUp,"slide-up"}, {PrototypeTransition::SlideDown,"slide-down"},
+    {PrototypeTransition::PushLeft,"push-left"}, {PrototypeTransition::PushRight,"push-right"},
+    {PrototypeTransition::PushUp,"push-up"}, {PrototypeTransition::PushDown,"push-down"}, {PrototypeTransition::SmartAnimate,"smart-animate"}}};
+constexpr std::array<std::pair<OverlayPlacement, std::string_view>, 10> kOverlayPlacements{{
+    {OverlayPlacement::Center,"center"}, {OverlayPlacement::TopLeft,"top-left"},
+    {OverlayPlacement::TopCenter,"top-center"}, {OverlayPlacement::TopRight,"top-right"},
+    {OverlayPlacement::CenterLeft,"center-left"}, {OverlayPlacement::CenterRight,"center-right"},
+    {OverlayPlacement::BottomLeft,"bottom-left"}, {OverlayPlacement::BottomCenter,"bottom-center"},
+    {OverlayPlacement::BottomRight,"bottom-right"}, {OverlayPlacement::Manual,"manual"}}};
 constexpr std::array<std::pair<ColorOp, std::string_view>, 3> kColorOps{{
     {ColorOp::Set, "set"}, {ColorOp::Delta, "delta"}, {ColorOp::Factor, "factor"}}};
 constexpr std::array<std::pair<MagnitudeOp, std::string_view>, 4> kMagnitudeOps{{
@@ -151,6 +179,36 @@ json writeValues(const ComponentValues& values) {
 }
 
 void writePatch(json& out, const NodePatch& p) {
+    if(p.prototypeStart) out["prototypeStart"]=*p.prototypeStart;
+    if(p.prototypeFlowName) out["prototypeFlowName"]=*p.prototypeFlowName;
+    if(p.prototypeOverflow) out["prototypeOverflow"]=nameOf(kPrototypeOverflows,*p.prototypeOverflow);
+    if(p.interaction) {
+        switch(p.interaction->action) {
+            case PrototypeAction::None: out["interaction"]=nullptr;break;
+            case PrototypeAction::Navigate: out["interaction"]={{"trigger","click"},{"action","navigate"},{"target",p.interaction->target.toString()}};break;
+            case PrototypeAction::Back: out["interaction"]={{"trigger","click"},{"action","back"}};break;
+            case PrototypeAction::OpenOverlay: out["interaction"]={{"trigger","click"},{"action","open-overlay"},{"target",p.interaction->target.toString()}};break;
+            case PrototypeAction::CloseOverlay: out["interaction"]={{"trigger","click"},{"action","close-overlay"}};break;
+            case PrototypeAction::ChangeState: out["interaction"]={{"trigger","click"},{"action","change-state"},{"values",p.interaction->stateValues}};break;
+        }
+        if(p.interaction->transition!=PrototypeTransition::Instant) {
+            out["interaction"]["transition"]=nameOf(kPrototypeTransitions,p.interaction->transition);
+            out["interaction"]["durationMs"]=p.interaction->durationMs;
+        }
+        if(p.interaction->action==PrototypeAction::OpenOverlay && !p.interaction->dismissOutside) out["interaction"]["dismissOutside"]=false;
+        if(p.interaction->action==PrototypeAction::OpenOverlay && p.interaction->placement!=OverlayPlacement::Center) out["interaction"]["placement"]=nameOf(kOverlayPlacements,p.interaction->placement);
+        if(p.interaction->action==PrototypeAction::OpenOverlay && p.interaction->placement==OverlayPlacement::Manual) out["interaction"]["offset"]={{"x",p.interaction->overlayOffset.x},{"y",p.interaction->overlayOffset.y}};
+    }
+    if(p.interactions) {
+        out["interactions"]=json::array();
+        for(const auto& entry:*p.interactions) {
+            json action;NodePatch patch;patch.interaction=entry.interaction;writePatch(action,patch);
+            auto encoded=action["interaction"];
+            encoded["trigger"]=nameOf(kPrototypeTriggers,entry.trigger);
+            if(entry.trigger==PrototypeTrigger::Delay) encoded["delayMs"]=entry.delayMs;
+            out["interactions"].push_back(std::move(encoded));
+        }
+    }
     if(p.image) out["image"]={{"width",p.image->width},{"height",p.image->height},{"pixels",p.image->pixels},{"id",p.image->id}};
     if(p.imageFit) out["imageFit"]=*p.imageFit;
     if(p.imageCrop) out["imageCrop"]={{"x",p.imageCrop->x},{"y",p.imageCrop->y},{"w",p.imageCrop->w},{"h",p.imageCrop->h}};
@@ -528,6 +586,107 @@ std::optional<TextStyle> readTextStyle(const json& v) {
 
 std::optional<NodePatch> readPatch(const json& j) {
     NodePatch p;
+    if(!readField(j,"prototypeStart",p.prototypeStart,readBool)) return std::nullopt;
+    if(!readField(j,"prototypeFlowName",p.prototypeFlowName,readString)) return std::nullopt;
+    if(p.prototypeFlowName && !validPrototypeFlowName(*p.prototypeFlowName)) {DiagnosticScope field{"prototypeFlowName"};return refused("flow name must be single-line text of at most 128 UTF-8 bytes");}
+    if(j.contains("prototypeOverflow")) {
+        DiagnosticScope field{"prototypeOverflow"};
+        const auto value=valueOf(kPrototypeOverflows,j["prototypeOverflow"]);
+        if(!value) return refused("prototypeOverflow must be none, vertical, horizontal or both");
+        p.prototypeOverflow=*value;
+    }
+    if(j.contains("interaction")) {
+        DiagnosticScope interactionField{"interaction"};
+        const auto& i=j["interaction"];
+        if(i.is_null()) p.interaction=Interaction{};
+        else {
+            if(!i.is_object()) return refused("interaction must be an object or null");
+            if(!i.contains("trigger") || i["trigger"]!="click") { DiagnosticScope field{"trigger"};return refused("only click triggers are supported"); }
+            if(!i.contains("action") || !i["action"].is_string()) { DiagnosticScope field{"action"};return refused("an action is required"); }
+            if((i["action"]=="back" || i["action"]=="close-overlay") && i.size()==2) p.interaction=Interaction{i["action"]=="back"?PrototypeAction::Back:PrototypeAction::CloseOverlay,{}};
+            else if(((i["action"]=="navigate" || i["action"]=="open-overlay") && i.contains("target")) || i["action"]=="change-state") {
+                Interaction interaction;
+                if(i["action"]=="change-state") {
+                    interaction.action=PrototypeAction::ChangeState;
+                    if(i.contains("target")) {DiagnosticScope field{"target"};return refused("change-state resolves its own instance and takes no target");}
+                    if(!i.contains("values")) {DiagnosticScope field{"values"};return refused("change-state needs variant axis values");}
+                } else {
+                    const auto id=[&] {DiagnosticScope field{"target"};return readId(i["target"]);}();
+                    if(!id||id->isNil()) {DiagnosticScope field{"target"};return refused("target must be a non-nil frame UUID");}
+                    interaction.action=i["action"]=="navigate"?PrototypeAction::Navigate:PrototypeAction::OpenOverlay;interaction.target=*id;
+                }
+                for(auto field=i.begin();field!=i.end();++field) {
+                    if(field.key()=="trigger" || field.key()=="action" || field.key()=="target") continue;
+                    DiagnosticScope option{field.key()};
+                    if(field.key()=="values" && interaction.action==PrototypeAction::ChangeState) {
+                        if(!field->is_object() || field->empty() || field->size()>8) return refused("values must hold 1 to 8 variant axis selections");
+                        for(auto value=field->begin();value!=field->end();++value) {
+                            DiagnosticScope axis{value.key()};
+                            if(!value->is_string()) return refused("variant selections must be strings");
+                            interaction.stateValues.emplace(value.key(),value->get<std::string>());
+                        }
+                    } else if(field.key()=="transition") {
+                        const auto transition=valueOf(kPrototypeTransitions,*field);
+                        if(!transition) return refused("transition must be instant, dissolve, smart-animate, slide-left/right/up/down or push-left/right/up/down");
+                        interaction.transition=*transition;
+                    } else if(field.key()=="durationMs") {
+                        if(!field->is_number_integer()) return refused("durationMs must be an integer from 1 to 2000");
+                        const auto number=readNumber(*field);
+                        if(!number || *number<1 || *number>2000) return refused("durationMs must be an integer from 1 to 2000");
+                        interaction.durationMs=int(*number);
+                    } else if(field.key()=="dismissOutside" && interaction.action==PrototypeAction::OpenOverlay) {
+                        if(!field->is_boolean()) return refused("dismissOutside must be a boolean");
+                        interaction.dismissOutside=field->get<bool>();
+                    } else if(field.key()=="placement" && interaction.action==PrototypeAction::OpenOverlay) {
+                        const auto placement=valueOf(kOverlayPlacements,*field);
+                        if(!placement) return refused("placement must be center, top-left/center/right, center-left/right, bottom-left/center/right or manual");
+                        interaction.placement=*placement;
+                    } else if(field.key()=="offset" && interaction.action==PrototypeAction::OpenOverlay) {
+                        if(!field->is_object() || field->size()!=2 || !field->contains("x") || !field->contains("y")) return refused("offset must contain exactly numeric x and y");
+                        for(const auto* key:{"x","y"}) {
+                            DiagnosticScope axis{key};
+                            const auto number=readNumber((*field)[key]);
+                            if(!number || !std::isfinite(*number) || *number < -100000 || *number > 100000) return refused("overlay offset must be finite and between -100000 and 100000");
+                            if(std::string_view(key)=="x") interaction.overlayOffset.x=*number;
+                            else interaction.overlayOffset.y=*number;
+                        }
+                    } else return refused("unsupported option for this interaction action");
+                }
+                if(i.contains("durationMs") && interaction.transition==PrototypeTransition::Instant) {DiagnosticScope field{"durationMs"};return refused("durationMs requires a non-instant transition");}
+                if(interaction.action==PrototypeAction::OpenOverlay) {
+                    if(interaction.placement==OverlayPlacement::Manual && !i.contains("offset")) {DiagnosticScope field{"offset"};return refused("manual overlay placement requires an offset");}
+                    if(interaction.placement!=OverlayPlacement::Manual && i.contains("offset")) {DiagnosticScope field{"offset"};return refused("offset requires manual overlay placement");}
+                }
+                if(interaction.action==PrototypeAction::OpenOverlay && interaction.transition>=PrototypeTransition::PushLeft && interaction.transition<=PrototypeTransition::PushDown) {DiagnosticScope field{"transition"};return refused("push transitions are supported only for navigate actions");}
+                if(!validInteractionSettings(interaction)) return refused("invalid prototype action settings");
+                p.interaction=interaction;
+            } else return refused("use navigate/open-overlay with a target, change-state with values, or back/close-overlay without options");
+        }
+    }
+    if(j.contains("interactions")) {
+        DiagnosticScope scope{"interactions"};const auto& list=j["interactions"];
+        if(!list.is_array() || list.size()>16) return refused("interactions must be an ordered array with at most 16 entries");
+        p.interactions=std::vector<TriggeredInteraction>{};
+        for(std::size_t index=0;index<list.size();++index) {
+            DiagnosticScope entryScope{slot(index)};auto entry=list[index];
+            if(!entry.is_object() || !entry.contains("trigger")) return refused("an interaction entry needs a trigger and action");
+            const auto trigger=valueOf(kPrototypeTriggers,entry["trigger"]);
+            if(!trigger) {DiagnosticScope field{"trigger"};return refused("trigger must be click, hover, press or delay");}
+            int delay=0;
+            if(*trigger==PrototypeTrigger::Delay) {
+                DiagnosticScope field{"delayMs"};
+                if(!entry.contains("delayMs") || !entry["delayMs"].is_number_integer()) return refused("delay trigger needs integer delayMs from 1 to 60000");
+                const auto number=readNumber(entry["delayMs"]);
+                if(!number || *number<1 || *number>60000) return refused("delayMs must be from 1 to 60000");
+                delay=int(*number);entry.erase("delayMs");
+            } else if(entry.contains("delayMs")) {DiagnosticScope field{"delayMs"};return refused("delayMs is only supported with a delay trigger");}
+            entry["trigger"]="click";
+            const auto parsed=readPatch(json{{"interaction",entry}});
+            if(!parsed || !parsed->interaction || parsed->interaction->action==PrototypeAction::None) return refused("an interaction entry needs a supported action");
+            p.interactions->push_back({*trigger,*parsed->interaction,delay});
+        }
+    }
+    if(p.interaction && p.interaction->action!=PrototypeAction::None && p.interactions && !p.interactions->empty()) return refused("interaction and interactions cannot both be active");
     if(j.contains("image")) {
         DiagnosticScope scope{"image"};
         const auto& v=j["image"];
@@ -785,6 +944,10 @@ std::optional<Node> readNode(const json& j) {
     if (*type != NodeType::Image && patch->image) return misplaced("image", "only image nodes take an image");
     if (*type != NodeType::Image && patch->imageFit) return misplaced("imageFit", "only image nodes take imageFit");
     if (*type != NodeType::Image && patch->imageCrop) return misplaced("imageCrop", "only image nodes take imageCrop");
+    if (*type == NodeType::Instance && (patch->interaction || patch->interactions)) return misplaced("interaction", "instance interactions use component-root overrides");
+    if (patch->prototypeFlowName && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeFlowName", "only root frames take flow names");
+    if (patch->prototypeStart && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeStart", "only root frames take flow starting flags");
+    if (patch->prototypeOverflow && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeOverflow", "only root frames take prototype overflow");
     if (patch->textStyle) return misplaced("textStyle", "nodes store their full text, use text instead of textStyle");
     if (*type == NodeType::Text && !patch->text) return misplaced("text", "text nodes need text");
     if (*type != NodeType::Text && patch->text) return misplaced("text", "only text nodes take text");
@@ -1371,6 +1534,13 @@ std::string snapshotToJson(const Document& document) {
     bool path = false;
     bool curved = false;
     bool image = false;
+    bool prototype = false;
+    bool extended = false;
+    bool positioned = false;
+    bool scrolling = false;
+    bool multipleInteractions = false;
+    bool componentStates = false;
+    bool namedFlows = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
     document.forEachInPaintOrder([&](const Node& node) {
@@ -1380,6 +1550,13 @@ std::string snapshotToJson(const Document& document) {
         path = path || node.type == NodeType::Path;
         curved = curved || node.path.filled || !node.path.inHandles.empty();
         image = image || node.type==NodeType::Image;
+        prototype = prototype || node.interaction!=Interaction{} || node.prototypeStart;
+        extended = extended || extendedPrototype(node.interaction);
+        positioned = positioned || positionedPrototype(node.interaction);
+        namedFlows = namedFlows || !node.prototypeFlowName.empty();
+        scrolling = scrolling || node.prototypeOverflow!=PrototypeOverflow::None;
+        multipleInteractions = multipleInteractions || !node.interactions.empty();
+        componentStates = componentStates || statePrototype(node.interaction) || std::any_of(node.interactions.begin(),node.interactions.end(),[](const auto& e){return statePrototype(e.interaction);});
         swaps = swaps || !node.definition.swaps.empty();
         text = text || node.type == NodeType::Text;
         wrapping = wrapping || node.textWrap;
@@ -1389,6 +1566,13 @@ std::string snapshotToJson(const Document& document) {
         const auto styleVersion = [&](const NodePatch& patch) {
             path = path || patch.path.has_value();
             image = image || patch.image || patch.imageFit || patch.imageCrop;
+            prototype = prototype || patch.interaction.has_value() || patch.prototypeStart.has_value();
+            extended = extended || (patch.interaction && extendedPrototype(*patch.interaction));
+            positioned = positioned || (patch.interaction && positionedPrototype(*patch.interaction));
+            namedFlows = namedFlows || patch.prototypeFlowName.has_value();
+            scrolling = scrolling || patch.prototypeOverflow.has_value();
+            multipleInteractions = multipleInteractions || patch.interactions.has_value();
+            componentStates = componentStates || (patch.interaction && statePrototype(*patch.interaction)) || (patch.interactions && std::any_of(patch.interactions->begin(),patch.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));
             curved = curved || (patch.path && (patch.path->filled || !patch.path->inHandles.empty()));
             oblique = oblique || (patch.text && slanted(patch.text->font)) || (patch.textStyle && patch.textStyle->font && slanted(*patch.textStyle->font));
             wrapping = wrapping || patch.textWrap.has_value();
@@ -1400,7 +1584,7 @@ std::string snapshotToJson(const Document& document) {
         for (const auto& o : node.overrides) styleVersion(o.patch);
         for (const auto& r : node.definition.rules) styleVersion(r.patch);
     });
-    return json{{"version", image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
+    return json{{"version", namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
 }
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
@@ -1456,6 +1640,7 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
     std::vector<Node> nodes;
     std::vector<SetComponentDefinition> definitions;
     std::vector<SetProps> values;
+    std::vector<SetProps> prototypeProps;
     std::vector<SetOverride> overrides;
     std::unordered_map<Id, std::size_t> indexOf;
     DiagnosticScope nodeList{"nodes"};
@@ -1463,6 +1648,27 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         DiagnosticScope entry{slot(index)};
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
+        if(version<22 && (j["nodes"][index].contains("prototypeFlowName") || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.prototypeFlowName.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.prototypeFlowName.has_value();}))) return refused("named flows need snapshot version 22 or later");
+        const auto statePatch=[](const NodePatch& p){return (p.interaction && statePrototype(*p.interaction)) || (p.interactions && std::any_of(p.interactions->begin(),p.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));};
+        if(version<21 && (statePrototype(node->interaction) || std::any_of(node->interactions.begin(),node->interactions.end(),[](const auto& e){return statePrototype(e.interaction);}) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return statePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return statePatch(r.patch);}))) return refused("component state actions and smart-animate need snapshot version 21 or later");
+        const auto multiplePatch=[](const NodePatch& p){return p.interactions.has_value();};
+        if(version<20 && (j["nodes"][index].contains("interactions") || !node->interactions.empty() ||
+            std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return multiplePatch(o.patch);}) ||
+            std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return multiplePatch(r.patch);}))) return refused("ordered interactions need snapshot version 20 or later");
+        if(version<19 && (node->prototypeOverflow!=PrototypeOverflow::None || j["nodes"][index].contains("prototypeOverflow"))) return refused("prototype overflow needs snapshot version 19 or later");
+        const auto prototypePatch=[](const NodePatch& p){return p.interaction.has_value() || p.prototypeStart.has_value();};
+        const auto extendedPatch=[](const NodePatch& p){return p.interaction && extendedPrototype(*p.interaction);};
+        const auto positionedPatch=[](const NodePatch& p){return p.interaction && positionedPrototype(*p.interaction);};
+        if(version<18 && (positionedPrototype(node->interaction) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return positionedPatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& rule){return positionedPatch(rule.patch);}))) return refused("slide, push and positioned overlay interactions need snapshot version 18 or later");
+        if(version<17 && (extendedPrototype(node->interaction) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return extendedPatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& rule){return extendedPatch(rule.patch);}))) return refused("overlay and dissolve interactions need snapshot version 17 or later");
+        if(version<16 && (node->interaction!=Interaction{} || node->prototypeStart || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return prototypePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& rule){return prototypePatch(rule.patch);}))) return refused("prototype metadata needs snapshot version 16 or later");
+        if(node->interaction!=Interaction{} || !node->interactions.empty() || node->prototypeStart) {
+            NodePatch p;
+            if(node->interaction!=Interaction{}) p.interaction=node->interaction;
+            if(!node->interactions.empty()) p.interactions=node->interactions;
+            if(node->prototypeStart) p.prototypeStart=true;
+            prototypeProps.push_back({node->id,p});node->interaction={};node->interactions.clear();node->prototypeStart=false;
+        }
         const auto imagePatch=[](const NodePatch& p){return p.image || p.imageFit || p.imageCrop;};
         if(version<15 && (node->type==NodeType::Image || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return imagePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return imagePatch(r.patch);}))) return refused("image layers need snapshot version 15 or later");
         const auto curvedPath=[](const Path& path){return path.filled || !path.inHandles.empty();};
@@ -1537,6 +1743,7 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         ops.push_back(CreateNode{std::move(nodes[i])});
     };
     for (std::size_t i = 0; i < nodes.size(); ++i) emit(i, emit);
+    for(const auto& props:prototypeProps) ops.push_back(props);
     for (const auto& definition : definitions) ops.push_back(definition);
     for (const auto& value : values) ops.push_back(value);
     for (const auto& o : overrides) ops.push_back(o);

@@ -2,6 +2,7 @@ import { Component, effect, input, model, output } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { LucentIconButton, LucentInlineInput, LucentTooltip } from '@designfoundry/lucent-angular';
+import type { PrototypeScreen } from '@canvas/bridge';
 import { EDITOR_TOOLS, EditorTool } from './editor-model';
 
 @Component({
@@ -41,6 +42,32 @@ import { EDITOR_TOOLS, EditorTool } from './editor-model';
       }
     </div>
     <div class="end">
+      @if (prototypeScreens().length) {
+        <select
+          aria-label="Starting screen"
+          [value]="prototypeStart()"
+          (change)="chooseStart($event)"
+        >
+          @for (screen of prototypeScreens(); track screen.id) {
+            <option [value]="screen.id">{{ (screen.start && screen.flowName) || screen.name || 'Untitled frame' }}</option>
+          }
+        </select>
+      } @else {
+        <span class="prototype-hint">Frame (F) to play</span>
+      }
+      <lucent-icon-button
+        icon="play_arrow"
+        variant="text"
+        size="sm"
+        ariaLabel="Play prototype"
+        [disabled]="!prototypeScreens().length"
+        [lucentTooltip]="
+          prototypeScreens().length
+            ? 'Play prototype'
+            : 'Create a root frame with F to play a prototype'
+        "
+        (clicked)="play.emit()"
+      />
       <lucent-icon-button
         icon="widgets"
         variant="text"
@@ -61,6 +88,13 @@ export class EditorToolbar {
   readonly canCreateComponent = input(false);
   readonly rename = output<string>();
   readonly createComponent = output<void>();
+  readonly prototypeScreens = input<readonly PrototypeScreen[]>([]);
+  readonly prototypeStart = input('');
+  readonly choosePrototypeStart = output<string>();
+  readonly play = output<void>();
+  protected chooseStart(event: Event): void {
+    this.choosePrototypeStart.emit((event.target as HTMLSelectElement).value);
+  }
 
   protected readonly tools = EDITOR_TOOLS;
   protected readonly nameControl = new FormControl('', { nonNullable: true });

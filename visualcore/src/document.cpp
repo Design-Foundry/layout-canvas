@@ -27,6 +27,11 @@ bool nonNegative(const Value<double>& value) {
 constexpr std::string_view kFrameStyling = "text, lines, paths and images take no stroke, shadows, corner radius or auto layout";
 
 bool isValidPatch(const NodePatch& patch) {
+    if(patch.prototypeFlowName && !validPrototypeFlowName(*patch.prototypeFlowName)) return refuse("prototypeFlowName must be single-line text of at most 128 UTF-8 bytes");
+    if(patch.interactions && !validTriggeredInteractions(*patch.interactions)) return refuse("interactions needs at most 16 valid trigger actions");
+    if(patch.interaction && patch.interaction->action!=PrototypeAction::None && patch.interactions && !patch.interactions->empty()) return refuse("interaction and interactions cannot both be active");
+    if(patch.prototypeOverflow && (*patch.prototypeOverflow<PrototypeOverflow::None || *patch.prototypeOverflow>PrototypeOverflow::Both)) return refuse("prototypeOverflow must be none, vertical, horizontal or both");
+    if(patch.interaction && !validInteractionSettings(*patch.interaction)) return refuse("interaction has an invalid action, target, transition, duration or outside-dismiss setting");
     if(patch.image && !validRaster(*patch.image)) return refuse("image pixels do not match its width, height and id");
     if(patch.imageFit && *patch.imageFit!="cover" && *patch.imageFit!="contain" && *patch.imageFit!="stretch") return refuse("imageFit must be cover, contain or stretch");
     if(patch.imageCrop) {const auto& c=*patch.imageCrop;
@@ -174,8 +179,38 @@ bool Document::isAncestorOrSelf(const Id& ancestor, const Id& id) const {
     return false;
 }
 
+bool Document::validInteraction(const Interaction& interaction) const {
+    if(!validInteractionSettings(interaction)) return refuse("interaction has an invalid action, target, transition, duration or outside-dismiss setting");
+    if(interaction.action==PrototypeAction::None || interaction.action==PrototypeAction::Back || interaction.action==PrototypeAction::CloseOverlay || interaction.action==PrototypeAction::ChangeState) return true;
+    const Node* target=find(interaction.target);
+    return (target && target->type==NodeType::Frame && target->parent.isNil()) || refuse("a prototype destination must be an existing root frame");
+}
+bool Document::prototypeReferences(const Id& target) const {
+    const auto refers=[&](const Interaction& i){return (i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay) && i.target==target;};
+    for(const auto& [id,node]:nodes_) {
+        if(refers(node.interaction)) return true;
+        for(const auto& entry:node.interactions) if(refers(entry.interaction)) return true;
+        for(const auto& o:node.overrides) {
+            if(o.patch.interaction && refers(*o.patch.interaction)) return true;
+            if(o.patch.interactions) for(const auto& entry:*o.patch.interactions) if(refers(entry.interaction)) return true;
+        }
+    }
+    return false;
+}
+
 std::optional<OpBody> Document::create(const CreateNode& op) {
     const Node& node = op.node;
+    if(!validInteraction(node.interaction)) return std::nullopt;
+    if(!validTriggeredInteractions(node.interactions)) return refused("invalid interactions list");
+    if(node.interaction.action!=PrototypeAction::None && !node.interactions.empty()) return refused("interaction and interactions cannot both be active");
+    for(const auto& entry:node.interactions) if(!validInteraction(entry.interaction)) return std::nullopt;
+    if(node.type==NodeType::Instance && !node.interactions.empty()) return refused("instance interactions use component-root overrides");
+    if(node.prototypeOverflow<PrototypeOverflow::None || node.prototypeOverflow>PrototypeOverflow::Both) return refused("invalid prototypeOverflow");
+    if(node.prototypeOverflow!=PrototypeOverflow::None && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeOverflow applies only to root frames");
+    if(node.type==NodeType::Instance && node.interaction!=Interaction{}) return refused("an instance interaction is set as an override on its main component root");
+    if(!validPrototypeFlowName(node.prototypeFlowName)) return refused("invalid prototypeFlowName");
+    if(!node.prototypeFlowName.empty() && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeFlowName applies only to root frames");
+    if(node.prototypeStart && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeStart applies only to root frames");
     if(node.type!=NodeType::Image && (node.image!=Raster{} || node.imageFit!="cover" || node.imageCrop!=ImageCrop{})) return refused("only image nodes take image, imageFit or imageCrop");
     if(node.type==NodeType::Image && !validRaster(node.image)) return refused("image pixels do not match its width, height and id");
     if (node.type != NodeType::Path && node.path != Path{}) return refused("only path nodes take a path");
@@ -206,6 +241,11 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
     for (const Override& o : node.overrides) {
         if (!isValidPatch(o.patch) || !isValidPatchRefs(o.patch)) return std::nullopt;
         if (o.patch.type || o.patch.component || o.patch.componentValues || o.patch.typography) return refused("overrides cannot change type, component, componentValues or typography");
+        if(o.patch.interaction && !validInteraction(*o.patch.interaction)) return std::nullopt;
+        if(o.patch.interactions) for(const auto& entry:*o.patch.interactions) if(!validInteraction(entry.interaction)) return std::nullopt;
+        if(o.patch.prototypeOverflow) return refused("overrides cannot set prototypeOverflow");
+        if(o.patch.prototypeFlowName) return refused("overrides cannot set prototypeFlowName");
+        if(o.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
     }
     if (!node.overrides.empty()) {
         Document preview = *this;
@@ -219,6 +259,7 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
 
 std::optional<OpBody> Document::remove(const DeleteNode& op) {
     if (definitionTargets(op.id)) return refused("a component definition refers to this node; change the definition first");
+    if(prototypeReferences(op.id)) return refused("prototype interactions refer to this frame; remove their links first");
     const auto it = nodes_.find(op.id);
     if (it == nodes_.end()) return refused("no node has this id");
     if (!children(op.id).empty()) return refused("delete the node's children first");
@@ -235,6 +276,27 @@ std::optional<OpBody> Document::setProps(const SetProps& op) {
     if (it == nodes_.end()) return refused("no node has this id");
     if (!isValidPatch(op.patch) || !isValidPatchRefs(op.patch)) return std::nullopt;
     const Node& current = it->second;
+    const auto nextType=op.patch.type.value_or(current.type);
+    if(op.patch.interaction) {
+        const auto& interaction=*op.patch.interaction;
+        if(current.type==NodeType::Instance) return refused("an instance interaction is set as an override on its main component root");
+        if((interaction.action==PrototypeAction::Navigate || interaction.action==PrototypeAction::OpenOverlay) && interaction.target==op.id) {
+            if(nextType!=NodeType::Frame || !current.parent.isNil()) return refused("a prototype destination must remain a root frame");
+        } else if(!validInteraction(interaction)) return std::nullopt;
+    }
+    if(op.patch.interactions) {
+        if(current.type==NodeType::Instance) return refused("instance interactions use component-root overrides");
+        for(const auto& entry:*op.patch.interactions) {
+            const auto& interaction=entry.interaction;
+            if((interaction.action==PrototypeAction::Navigate || interaction.action==PrototypeAction::OpenOverlay) && interaction.target==op.id) {
+                if(nextType!=NodeType::Frame || !current.parent.isNil()) return refused("a prototype destination must remain a root frame");
+            } else if(!validInteraction(interaction)) return std::nullopt;
+        }
+    }
+    if(op.patch.prototypeOverflow && (nextType!=NodeType::Frame || !current.parent.isNil())) return refused("prototypeOverflow applies only to root frames");
+    if(op.patch.prototypeFlowName && (nextType!=NodeType::Frame || !current.parent.isNil())) return refused("prototypeFlowName applies only to root frames");
+    if(op.patch.prototypeStart && (nextType!=NodeType::Frame || !current.parent.isNil())) return refused("prototypeStart applies only to root frames");
+    if(nextType!=NodeType::Frame && (current.prototypeStart || !current.prototypeFlowName.empty() || current.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame cannot change its type");
     if((op.patch.image || op.patch.imageFit || op.patch.imageCrop) && current.type!=NodeType::Image) return refused("only image nodes take image, imageFit or imageCrop");
     if (op.patch.path && current.type != NodeType::Path) return refused("only path nodes take a path");
     if (op.patch.lineReverse && current.type != NodeType::Line) return refused("only line nodes take lineReverse");
@@ -305,6 +367,7 @@ std::optional<OpBody> Document::setProps(const SetProps& op) {
 std::optional<OpBody> Document::move(const MoveNode& op) {
     const auto it = nodes_.find(op.id);
     if (it == nodes_.end()) return refused("no node has this id");
+    if(!op.parent.isNil() && (it->second.prototypeStart || !it->second.prototypeFlowName.empty() || it->second.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame must stay at the document root");
     if (!isValidParent(op.parent)) return refused("the parent does not exist or cannot have children");
     if (!op.parent.isNil() && isAncestorOrSelf(op.id, op.parent)) {
         return refused("a node cannot move into itself or its descendants");
@@ -406,8 +469,14 @@ std::optional<OpBody> Document::setOverride(const SetOverride& op) {
     if (op.patch.type || op.patch.component || op.patch.componentValues || op.patch.typography) {
         return refused("overrides cannot change type, component, componentValues or typography");
     }
+    if(op.patch.prototypeOverflow) return refused("overrides cannot set prototypeOverflow");
+    if(op.patch.prototypeFlowName) return refused("overrides cannot set prototypeFlowName");
+    if(op.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
+    if(op.patch.interaction && !validInteraction(*op.patch.interaction)) return std::nullopt;
+    if(op.patch.interactions) for(const auto& entry:*op.patch.interactions) if(!validInteraction(entry.interaction)) return std::nullopt;
     if (isSwapTarget(op.instance) && op.node != it->second.component && op.patch != NodePatch{}) return refused("an instance swap property controls this instance; override its root only");
     buildTree();
+    if((op.patch.interaction || op.patch.interactions) && op.node!=it->second.component && !std::any_of(tree_.begin(),tree_.end(),[&](const auto& entry){return entry.second.owner==op.instance && entry.second.overrideKey==op.node;})) return refused("an interaction override targets the instance root or an existing copied layer");
     const auto targetIs = [&](NodeType type) {
         return std::any_of(tree_.begin(), tree_.end(), [&](const auto& entry) {
             return entry.second.owner == op.instance && entry.second.overrideKey == op.node && entry.second.node->type == type;
@@ -571,6 +640,7 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
             if (std::find(axis->values.begin(), axis->values.end(), value) == axis->values.end()) return refuse("when uses a value the axis does not declare: " + value);
         }
         const DiagnosticScope patchScope{"patch"};
+        if(p.interaction || p.interactions || p.prototypeStart || p.prototypeFlowName || p.prototypeOverflow) return refuse("variant rules cannot set prototype interactions, starting screens or overflow");
         const bool lineTarget = target->type == NodeType::Line;
         const bool pathTarget = target->type == NodeType::Path;
         const bool imageTarget = target->type == NodeType::Image;
@@ -750,6 +820,27 @@ Id Document::sourceOf(const Id& key) const {
     return it == tree_.end() ? Id{} : it->second.source;
 }
 
+bool Document::setPlaybackState(const Id& key,const std::map<std::string,std::string>& choices) {
+    Interaction interaction;interaction.action=PrototypeAction::ChangeState;interaction.stateValues=choices;
+    if(!validInteractionSettings(interaction)) return false;
+    const auto* node=view(key);
+    if(!node || node->type!=NodeType::Instance) return false;
+    const auto* component=find(node->component);
+    if(!component || component->type!=NodeType::Component) return false;
+    auto values=node->componentValues;
+    bool changed=false;
+    for(const auto& [name,value]:choices) {
+        const auto axis=std::find_if(component->definition.axes.begin(),component->definition.axes.end(),[&](const auto& entry){return entry.name==name;});
+        if(axis==component->definition.axes.end() || std::find(axis->values.begin(),axis->values.end(),value)==axis->values.end()) return false;
+        const auto existing=values.find(name);
+        const auto current=existing==values.end()?axis->defaultValue:std::get<std::string>(existing->second);
+        changed=changed || current!=value;values[name]=value;
+    }
+    if(!changed) return false;
+    playbackValues_[key]={component->id,std::move(values)};
+    treeDirty_=true;layoutDirty_=true;return true;
+}
+
 void Document::buildTree() const {
     if (!treeDirty_) {
         return;
@@ -820,9 +911,12 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
     Node reference = original;
     if (original.type == NodeType::Instance) applyLayers(reference);
     const Node* component = original.type == NodeType::Instance ? find(reference.component) : nullptr;
+    const auto temporary=playbackValues_.find(key);
+    const ComponentValues& values=component && temporary!=playbackValues_.end() && temporary->second.component==component->id
+        ? temporary->second.values : original.componentValues;
     if (component && depth < kMaxInstanceDepth) {
         effective = *component;
-        applyDefinition(effective, component->id, {nullptr, {}, &component->definition, &original.componentValues});
+        applyDefinition(effective, component->id, {nullptr, {}, &component->definition, &values});
         if (const NodePatch* patch = findOverride(original.overrides, original.component)) applyPatch(effective, *patch);
         effective.x = original.x;
         effective.y = original.y;
@@ -837,7 +931,7 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
         effective.name = original.name;
         effective.order = original.order;
         applyLayers(effective);
-        inner = {{&original.overrides, {}, &component->definition, &original.componentValues}};
+        inner = {{&original.overrides, {}, &component->definition, &values}};
         for (const OverrideLayer& layer : layers) inner.push_back({layer.overrides, keyIn(layer), layer.definition, layer.values});
         childrenOf = component->id;
     } else {
@@ -851,6 +945,7 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
     if (original.type == NodeType::Instance) {
         effective.type = NodeType::Instance;
         effective.component = reference.component;
+        effective.componentValues = values;
     }
     effective.id = key;
     effective.parent = parent;

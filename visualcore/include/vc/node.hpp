@@ -13,6 +13,9 @@
 
 namespace vc {
 
+/// Empty clears a flow label; names are bounded single-line bundled-font text.
+bool validPrototypeFlowName(const std::string& name);
+
 enum class NodeType {
     Frame,
     Rect,
@@ -111,12 +114,48 @@ struct Path {
 /// Why `validPath` refuses `path`, or null when it accepts it.
 [[nodiscard]] const char* pathProblem(const Path& path);
 
+enum class PrototypeAction { None, Navigate, Back, OpenOverlay, CloseOverlay, ChangeState };
+enum class PrototypeOverflow { None, Vertical, Horizontal, Both };
+enum class PrototypeTransition { Instant, Dissolve, SlideLeft, SlideRight, SlideUp, SlideDown, PushLeft, PushRight, PushUp, PushDown, SmartAnimate };
+enum class OverlayPlacement { Center, TopLeft, TopCenter, TopRight, CenterLeft, CenterRight, BottomLeft, BottomCenter, BottomRight, Manual };
+struct OverlayOffset {
+    double x = 0;
+    double y = 0;
+    friend bool operator==(const OverlayOffset&,const OverlayOffset&) = default;
+};
+struct Interaction {
+    PrototypeAction action = PrototypeAction::None;
+    Id target;
+    PrototypeTransition transition = PrototypeTransition::Instant;
+    int durationMs = 300;
+    bool dismissOutside = true;
+    OverlayPlacement placement = OverlayPlacement::Center;
+    OverlayOffset overlayOffset;
+    std::map<std::string,std::string> stateValues;
+    friend bool operator==(const Interaction&,const Interaction&) = default;
+};
+[[nodiscard]] bool validInteractionSettings(const Interaction& interaction);
+
+enum class PrototypeTrigger { Click, Hover, Press, Delay };
+struct TriggeredInteraction {
+    PrototypeTrigger trigger = PrototypeTrigger::Click;
+    Interaction interaction;
+    int delayMs = 0;
+    friend bool operator==(const TriggeredInteraction&,const TriggeredInteraction&) = default;
+};
+[[nodiscard]] bool validTriggeredInteractions(const std::vector<TriggeredInteraction>& interactions);
+
 struct ImageCrop : Rect {
     ImageCrop() : Rect{0,0,1,1} {}
     ImageCrop(double x,double y,double w,double h) : Rect{x,y,w,h} {}
     friend bool operator==(const ImageCrop& a,const ImageCrop& b){return a.x==b.x&&a.y==b.y&&a.w==b.w&&a.h==b.h;}
 };
 struct NodePatch {
+    std::optional<Interaction> interaction;
+    std::optional<std::vector<TriggeredInteraction>> interactions;
+    std::optional<bool> prototypeStart;
+    std::optional<std::string> prototypeFlowName;
+    std::optional<PrototypeOverflow> prototypeOverflow;
     std::optional<Raster> image;
     std::optional<std::string> imageFit;
     std::optional<ImageCrop> imageCrop;
@@ -212,6 +251,11 @@ struct Override {
 };
 
 struct Node {
+    Interaction interaction;
+    std::vector<TriggeredInteraction> interactions;
+    bool prototypeStart = false;
+    std::string prototypeFlowName;
+    PrototypeOverflow prototypeOverflow = PrototypeOverflow::None;
     Raster image;
     std::string imageFit = "cover";
     ImageCrop imageCrop;

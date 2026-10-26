@@ -23,23 +23,12 @@ export type Tool =
   | 'star';
 
 export type NodeType =
-  | 'frame'
-  | 'rect'
-  | 'ellipse'
-  | 'component'
-  | 'instance'
-  | 'text'
-  | 'line'
-  | 'path'
-  | 'image';
+  'frame' | 'rect' | 'ellipse' | 'component' | 'instance' | 'text' | 'line' | 'path' | 'image';
 
 export interface TextRun {
   readonly content: string;
   readonly font:
-    | 'inter-regular-v1'
-    | 'inter-bold-v1'
-    | 'inter-oblique-v1'
-    | 'inter-bold-oblique-v1';
+    'inter-regular-v1' | 'inter-bold-v1' | 'inter-oblique-v1' | 'inter-bold-oblique-v1';
   readonly fontSize: number;
   readonly lineHeight: number;
   readonly letterSpacing: number;
@@ -183,7 +172,85 @@ export interface ImageCrop {
 }
 
 /** The properties a node stores. */
+export type PrototypeInteraction =
+  | ({
+      readonly trigger: 'click';
+      readonly action: 'navigate';
+      readonly target: string;
+    } & PrototypeAnimation)
+  | ({
+      readonly trigger: 'click';
+      readonly action: 'open-overlay';
+      readonly target: string;
+      readonly dismissOutside?: boolean;
+      readonly placement?: PrototypePlacement;
+      readonly offset?: { readonly x: number; readonly y: number };
+    } & PrototypeAnimation<PrototypeOverlayTransition>)
+  | { readonly trigger: 'click'; readonly action: 'back' | 'close-overlay' }
+  | ({
+      readonly trigger: 'click';
+      readonly action: 'change-state';
+      readonly values: Readonly<Record<string, string>>;
+    } & PrototypeAnimation<'dissolve' | 'smart-animate'>);
+export type PrototypeTrigger = 'click' | 'hover' | 'press' | 'delay';
+type Triggered<T> = T extends PrototypeInteraction
+  ? Omit<T, 'trigger'> &
+      (
+        | { readonly trigger: 'click' | 'hover' | 'press'; readonly delayMs?: never }
+        | { readonly trigger: 'delay'; readonly delayMs: number }
+      )
+  : never;
+/** Ordered document-local interactions. Delay is measured in milliseconds. */
+export type PrototypeTriggeredInteraction = Triggered<PrototypeInteraction>;
+export type PrototypeSlideTransition = 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down';
+/** Scrollable axes of an authored root screen or overlay during playback. */
+export type PrototypeOverflow = 'none' | 'vertical' | 'horizontal' | 'both';
+export type PrototypeOverlayTransition = 'dissolve' | PrototypeSlideTransition;
+export type PrototypeTransition =
+  | PrototypeOverlayTransition
+  | 'push-left'
+  | 'push-right'
+  | 'push-up'
+  | 'push-down'
+  | 'smart-animate';
+export type PrototypePlacement =
+  | 'center'
+  | 'top-left'
+  | 'top-center'
+  | 'top-right'
+  | 'center-left'
+  | 'center-right'
+  | 'bottom-left'
+  | 'bottom-center'
+  | 'bottom-right'
+  | 'manual';
+export interface PrototypeAnimation<T extends PrototypeTransition = PrototypeTransition> {
+  readonly transition?: T;
+  readonly durationMs?: number;
+}
+export interface PrototypeScreen {
+  readonly flowName?: string;
+  readonly id: string;
+  readonly name: string;
+  readonly start: boolean;
+  readonly w: number;
+  readonly h: number;
+}
+export interface PrototypeState {
+  readonly active: boolean;
+  readonly screen: string | null;
+  readonly start: string | null;
+  readonly canBack: boolean;
+  readonly overlay: string | null;
+  readonly transitioning: boolean;
+}
+
 export interface NodeFields {
+  readonly interaction?: PrototypeInteraction | null;
+  readonly interactions?: readonly PrototypeTriggeredInteraction[];
+  readonly prototypeStart?: boolean;
+  readonly prototypeFlowName?: string;
+  readonly prototypeOverflow?: PrototypeOverflow;
   readonly image?: RasterImage;
   readonly imageFit?: ImageFit;
   readonly imageCrop?: ImageCrop;
@@ -255,14 +322,7 @@ export type NodePatch = Partial<NodeFields> & {
 };
 
 export type TokenType =
-  | 'color'
-  | 'dimension'
-  | 'duration'
-  | 'ratio'
-  | 'opacity'
-  | 'border'
-  | 'shadow'
-  | 'typography';
+  'color' | 'dimension' | 'duration' | 'ratio' | 'opacity' | 'border' | 'shadow' | 'typography';
 
 export type TypographyValue = Omit<TextRun, 'content'>;
 
@@ -363,11 +423,7 @@ export interface ResolvedShadow {
 /** A token as the tokens panel shows it: its definition, its value in the active mode, and whether it is in use. */
 export interface TokenRow extends TokenDef {
   readonly resolved?:
-    | ResolvedColor
-    | TokenMagnitude
-    | ResolvedBorder
-    | ResolvedShadow
-    | TypographyValue;
+    ResolvedColor | TokenMagnitude | ResolvedBorder | ResolvedShadow | TypographyValue;
   readonly referenced: boolean;
 }
 
@@ -506,6 +562,31 @@ export class VisualCore {
 
   set tool(tool: Tool) {
     this.module.setTool(tool);
+  }
+
+  startPrototype(id: string): boolean {
+    return this.module.startPrototype(id);
+  }
+  stopPrototype(): void {
+    this.module.stopPrototype();
+  }
+  prototypeBack(): boolean {
+    return this.module.prototypeBack();
+  }
+  restartPrototype(): boolean {
+    return this.module.restartPrototype();
+  }
+  closePrototypeOverlay(): boolean {
+    return this.module.closePrototypeOverlay();
+  }
+  setPrototypeReducedMotion(reduced: boolean): void {
+    this.module.setPrototypeReducedMotion(reduced);
+  }
+  prototypeState(): PrototypeState {
+    return JSON.parse(this.module.prototypeState());
+  }
+  prototypeScreens(): readonly PrototypeScreen[] {
+    return JSON.parse(this.module.prototypeScreens());
   }
 
   importImage(image: RasterImage, name: string): string {

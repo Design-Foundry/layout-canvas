@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -33,6 +34,18 @@ struct ResolvedShadow {
 class Document {
 public:
     Document();
+    /// Independent authored data with fresh expansion/layout caches. Presentation
+    /// can resolve temporary instance values without modifying the source document.
+    [[nodiscard]] std::shared_ptr<Document> detachedCopy() const {
+        auto copy=std::make_shared<Document>();
+        copy->nodes_=nodes_;copy->children_=children_;
+        copy->tokens_=tokens_;copy->modes_=modes_;
+        copy->playbackValues_=playbackValues_;
+        return copy;
+    }
+    /// Ephemeral variant axes on one expanded instance occurrence. Never serialized or
+    /// applied as an authored operation; presentation uses this only on detached documents.
+    bool setPlaybackState(const Id& key, const std::map<std::string,std::string>& values);
 
     /// Applies `op` and returns its inverse, or nothing if the op is invalid for the current state
     /// (unknown node, cycle, deleting a node with children). Invalid ops leave the document untouched.
@@ -113,6 +126,8 @@ private:
     [[nodiscard]] bool validDefinition(const Id& component, const ComponentDefinition& definition) const;
     [[nodiscard]] bool validComponentValues(const ComponentDefinition& definition, const ComponentValues& values) const;
     [[nodiscard]] bool definitionTargets(const Id& id) const;
+    [[nodiscard]] bool validInteraction(const Interaction& interaction) const;
+    [[nodiscard]] bool prototypeReferences(const Id& target) const;
     [[nodiscard]] bool hasDependentOverrides(const Id& component) const;
     [[nodiscard]] bool swapValuesWouldStrandOverrides(const Node& instance, const ComponentValues& values) const;
 
@@ -160,6 +175,8 @@ private:
     std::unordered_map<Id, std::vector<Id>> children_;
     std::unordered_map<Id, Token> tokens_;
     std::unordered_map<Id, Mode> modes_;
+    struct PlaybackValues { Id component; ComponentValues values; };
+    std::unordered_map<Id, PlaybackValues> playbackValues_;
 
     struct TreeEntry {
         const Node* node = nullptr;

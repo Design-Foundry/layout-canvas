@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -24,6 +25,30 @@ struct Modifiers {
     bool deep = false;
 };
 
+/// A scoped screen mapped by point*scale+offset into the current camera's world.
+/// Viewport clips in that output space; layers are back to front.
+struct PrototypeLayer {
+    Id screen;
+    Vec2 offset;
+    double opacity = 1;
+    bool overlay = false;
+    double scale = 1;
+    std::optional<Rect> viewport;
+    /// Content-only translation, before the screen affine transform.
+    Vec2 scroll{};
+    /// Owns immutable outgoing scene data while temporary component states change.
+    std::shared_ptr<const Document> document;
+};
+
+/// Complete native scenes to mix after each has been painted at full opacity.
+struct PrototypeScene {
+    std::vector<PrototypeLayer> from;
+    std::vector<PrototypeLayer> to;
+    double progress = 1;
+    bool dissolve = false;
+    bool smart = false;
+};
+
 /// A resize handle: which vertical edge (-1 left, 1 right, 0 none) and which horizontal edge
 /// (-1 top, 1 bottom, 0 none) it moves. Corners move both.
 struct Handle {
@@ -45,12 +70,41 @@ public:
 
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const { return tool_; }
+    /// Presentation is ephemeral: no document operations, selection changes or undo entries.
+    bool startPrototype(const Id& screen, Vec2 viewport);
+    void stopPrototype();
+    bool prototypeBack();
+    bool restartPrototype();
+    void resizePrototype(Vec2 viewport);
+    void advancePrototype(double deltaMs);
+    bool closePrototypeOverlay();
+    [[nodiscard]] std::vector<PrototypeLayer> prototypeLayers() const;
+    [[nodiscard]] PrototypeScene prototypeScene() const;
+    void setPrototypeReducedMotion(bool reduced);
+    void finishPrototypeTransition();
+    [[nodiscard]] Id prototypeOverlay() const;
+    [[nodiscard]] bool prototypeTransitioning() const { return prototypeDuration_>0; }
+    [[nodiscard]] bool presenting() const { return presenting_; }
+    [[nodiscard]] Id prototypeScreen() const { return prototypeScreen_; }
+    [[nodiscard]] Id prototypeStart() const { return prototypeStart_; }
+    [[nodiscard]] bool canPrototypeBack() const { return presenting_ && (!prototypeHistory_.empty() || !prototypeOverlays_.empty()); }
+    [[nodiscard]] bool prototypeEligible(const Id& id) const;
+    [[nodiscard]] const Document& prototypeDocument() const {
+        return prototypeDocument_?*prototypeDocument_:session_.document();
+    }
+    [[nodiscard]] Vec2 prototypeScroll(const Id& screen) const;
+    bool scrollPrototype(Vec2 screen, Vec2 delta);
+    bool prototypeTouchStart(Vec2 screen);
+    void prototypeTouchMove(Vec2 screen);
+    void prototypeTouchEnd();
 
     void pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers = {});
     void pointerMove(Vec2 screen, Modifiers modifiers = {});
     /// Modifier keys changed without the pointer moving. Updates the gesture in progress.
     void setModifiers(Modifiers modifiers);
     void pointerUp();
+    /// Release coordinates without synthesizing a hover/move event.
+    void pointerUpAt(Vec2 screen);
     /// Selects the child of the selected node under the pointer, which is how nodes inside an
     /// instance are reached.
     void doubleClick(Vec2 screen);
@@ -61,7 +115,7 @@ public:
     void cancelPath();
     bool popPathPoint();
     [[nodiscard]] bool drawingPath() const { return !penPoints_.empty(); }
-    void wheel(Vec2 screen, double deltaY);
+    void wheel(Vec2 screen, double deltaY, double deltaX = 0);
     /// Applies `patch` to `id` as one undo step, for edits made outside the canvas.
     bool setProps(const Id& id, const NodePatch& patch);
     bool setComponentDefinition(const Id& component, const ComponentDefinition& definition);
@@ -183,6 +237,21 @@ private:
     [[nodiscard]] double snap(double world) const;
     [[nodiscard]] Vec2 originOf(const Id& parent) const;
     void touch() { ++revision_; }
+    void fitPrototype();
+    [[nodiscard]] Id prototypeHotspot(Vec2 screen, PrototypeTrigger trigger = PrototypeTrigger::Click) const;
+    bool activatePrototype(Vec2 screen, PrototypeTrigger trigger = PrototypeTrigger::Click);
+    bool runPrototypeInteraction(Interaction interaction, Id source = {});
+    bool changePrototypeState(const Interaction& interaction, Id source);
+    void resetPrototypeTriggers();
+    void cancelPrototypeTriggers();
+    void advancePrototypeTriggers(double deltaMs);
+    [[nodiscard]] std::vector<Id> prototypeVisibleNodes() const;
+    [[nodiscard]] Vec2 prototypeOffset(const Id& screen) const;
+    [[nodiscard]] bool prototypeOutsideOverlay(Vec2 screen) const;
+    void cancelPrototypeTransition();
+    [[nodiscard]] Id prototypeScrollRoot(Vec2 screen) const;
+    [[nodiscard]] Vec2 clampPrototypeScroll(const Id& root, Vec2 value) const;
+    bool setPrototypeScroll(const Id& root, Vec2 value);
 
     Session& session_;
     Camera& camera_;
@@ -217,6 +286,44 @@ private:
     std::vector<Vec2> penOutHandles_;
     bool penClosed_ = false;
     std::vector<Vec2> pencilPoints_;
+    bool presenting_ = false;
+    std::shared_ptr<Document> prototypeDocument_;
+    Camera prototypeSavedCamera_;
+    Id prototypeScreen_;
+    Id prototypeStart_;
+    Vec2 prototypeViewport_{};
+    struct PrototypeVisit { Id screen; Vec2 scroll; };
+    std::vector<PrototypeVisit> prototypeHistory_;
+    Vec2 prototypeBaseScroll_{};
+    std::uint64_t prototypeDocumentRevision_ = 0;
+    bool prototypeTouch_ = false;
+    bool prototypeTouchDragged_ = false;
+    Id prototypeTouchRoot_;
+    Vec2 prototypeTouchPrevious_{};
+    bool prototypeClick_ = false;
+    Id prototypePressed_;
+    Id prototypeHovered_;
+    bool prototypeMouseDown_ = false;
+    bool prototypeTimersEnabled_ = false;
+    double prototypeTriggerElapsed_ = 0;
+    std::unordered_set<Id> prototypeDelayFired_;
+    struct PrototypeOverlay {
+        Id screen;
+        bool dismissOutside = true;
+        OverlayPlacement placement = OverlayPlacement::Center;
+        OverlayOffset offset{};
+        Vec2 scroll{};
+    };
+    std::vector<PrototypeOverlay> prototypeOverlays_;
+    bool prototypeOutsidePressed_ = false;
+    std::vector<PrototypeLayer> prototypeOutgoing_;
+    double prototypeDuration_ = 0;
+    double prototypeElapsed_ = 0;
+    bool prototypeOverlayTransition_ = false;
+    PrototypeTransition prototypeTransition_ = PrototypeTransition::Instant;
+    bool prototypeReducedMotion_ = false;
+    std::optional<Rect> prototypeTransitionBase_;
+    std::optional<Rect> prototypeTransitionTarget_;
 };
 
 [[nodiscard]] std::optional<Tool> toolFromName(std::string_view name);

@@ -150,3 +150,21 @@
   flex-direction: column;
   gap: var(--dimension--primitive--spacing-2);
 }
+
+.inspector-modes {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--color--semantic--border-subtle);
+}
+.inspector-modes button {
+  background: none;
+  border: 0;
+  color: inherit;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.inspector-modes [aria-selected='true'] {
+  background: var(--color--semantic--surface-base);
+  border-radius: 4px;
+}

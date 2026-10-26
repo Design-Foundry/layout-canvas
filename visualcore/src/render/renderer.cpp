@@ -91,7 +91,7 @@ struct Renderer::State {
     std::string selector;
     const Camera& camera;
     const Document& document;
-    const Editor& editor;
+    Editor& editor;
     std::string cursor;
 
     wgpu::Instance instance;
@@ -108,6 +108,16 @@ struct Renderer::State {
     wgpu::BindGroupLayout bindGroupLayout;
     wgpu::RenderPipeline gridPipeline;
     wgpu::RenderPipeline shapesPipeline;
+    wgpu::RenderPipeline compositePipeline;
+    wgpu::BindGroupLayout compositeLayout;
+    wgpu::BindGroup compositeGroup;
+    wgpu::Buffer compositeUniform;
+    wgpu::Texture fromTexture,toTexture;
+    wgpu::TextureView fromView,toView;
+    uint32_t compositeWidth=0,compositeHeight=0;
+    std::size_t compositionSplit=0;
+    bool composing=false;
+    float compositionProgress=1;
     wgpu::Buffer frameBuffer;
     std::array<float, 4> background{0.12f, 0.12f, 0.13f, 1.0f};
     wgpu::Buffer shapesBuffer;
@@ -133,13 +143,15 @@ struct Renderer::State {
     double lastTime = 0.0;
     FrameStats stats;
 
-    State(std::string selector, const Camera& camera, const Document& document, const Editor& editor)
+    State(std::string selector, const Camera& camera, const Document& document, Editor& editor)
         : selector(std::move(selector)), camera(camera), document(document), editor(editor) {}
 
     void requestAdapter();
     void requestDevice();
     void onDevice();
     void createPipelines();
+    void ensureComposition();
+    void releaseComposition();
     void ensureShapesCapacity(std::size_t count,std::size_t pointCount = 1);
     void startLoop();
     bool resizeIfNeeded();
@@ -151,7 +163,7 @@ struct Renderer::State {
     bool frame(double time);
 };
 
-Renderer::Renderer(std::string canvasSelector, const Camera& camera, const Document& document, const Editor& editor)
+Renderer::Renderer(std::string canvasSelector, const Camera& camera, const Document& document, Editor& editor)
     : state_(std::make_unique<State>(std::move(canvasSelector), camera, document, editor)) {}
 
 Renderer::~Renderer() = default;
@@ -185,6 +197,7 @@ void Renderer::setBackground(float r, float g, float b, float a) {
 
 void Renderer::stop() {
     state_->running = false;
+    state_->releaseComposition();
 }
 
 FrameStats Renderer::stats() const {
@@ -333,10 +346,61 @@ void Renderer::State::createPipelines() {
     gridPipeline = createPipeline(kGridWgsl, wgpu::PrimitiveTopology::TriangleList);
     shapesPipeline = createPipeline(kShapesWgsl, wgpu::PrimitiveTopology::TriangleStrip);
 
+    wgpu::BindGroupLayoutEntry compositeEntries[3]{};
+    compositeEntries[0].binding=0;compositeEntries[0].visibility=wgpu::ShaderStage::Fragment;
+    compositeEntries[0].buffer.type=wgpu::BufferBindingType::Uniform;
+    for(uint32_t i=1;i<3;++i) {
+        compositeEntries[i].binding=i;compositeEntries[i].visibility=wgpu::ShaderStage::Fragment;
+        compositeEntries[i].texture.sampleType=wgpu::TextureSampleType::Float;
+        compositeEntries[i].texture.viewDimension=wgpu::TextureViewDimension::e2D;
+    }
+    wgpu::BindGroupLayoutDescriptor compositeLayoutDesc{};
+    compositeLayoutDesc.entryCount=3;compositeLayoutDesc.entries=compositeEntries;
+    compositeLayout=device.CreateBindGroupLayout(&compositeLayoutDesc);
+    wgpu::PipelineLayoutDescriptor compositePipelineLayout{};
+    compositePipelineLayout.bindGroupLayoutCount=1;compositePipelineLayout.bindGroupLayouts=&compositeLayout;
+    const auto compositeShader=createShader(device,kPrototypeCompositeWgsl);
+    wgpu::BlendState premultiplied{};
+    premultiplied.color={wgpu::BlendOperation::Add,wgpu::BlendFactor::One,wgpu::BlendFactor::OneMinusSrcAlpha};
+    premultiplied.alpha=premultiplied.color;
+    wgpu::ColorTargetState compositeTarget{};compositeTarget.format=format;compositeTarget.blend=&premultiplied;
+    wgpu::FragmentState compositeFragment{};compositeFragment.module=compositeShader;compositeFragment.entryPoint="fs";
+    compositeFragment.targetCount=1;compositeFragment.targets=&compositeTarget;
+    wgpu::RenderPipelineDescriptor compositeDesc{};
+    compositeDesc.layout=device.CreatePipelineLayout(&compositePipelineLayout);
+    compositeDesc.vertex.module=compositeShader;compositeDesc.vertex.entryPoint="vs";
+    compositeDesc.primitive.topology=wgpu::PrimitiveTopology::TriangleList;compositeDesc.fragment=&compositeFragment;
+    compositePipeline=device.CreateRenderPipeline(&compositeDesc);
+    wgpu::BufferDescriptor compositeBufferDesc{};compositeBufferDesc.size=16;
+    compositeBufferDesc.usage=wgpu::BufferUsage::Uniform|wgpu::BufferUsage::CopyDst;
+    compositeUniform=device.CreateBuffer(&compositeBufferDesc);
+
     wgpu::BufferDescriptor frameDesc{};
     frameDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
     frameDesc.size = sizeof(FrameUniform);
     frameBuffer = device.CreateBuffer(&frameDesc);
+}
+
+void Renderer::State::releaseComposition() {
+    compositeGroup=wgpu::BindGroup{};fromView=wgpu::TextureView{};toView=wgpu::TextureView{};
+    if(fromTexture) fromTexture.Destroy();
+    if(toTexture) toTexture.Destroy();
+    fromTexture=wgpu::Texture{};toTexture=wgpu::Texture{};compositeWidth=compositeHeight=0;
+}
+
+void Renderer::State::ensureComposition() {
+    if(compositeWidth==width && compositeHeight==height) return;
+    releaseComposition();
+    wgpu::TextureDescriptor desc{};desc.size={width,height,1};desc.format=format;
+    desc.usage=wgpu::TextureUsage::RenderAttachment|wgpu::TextureUsage::TextureBinding;
+    fromTexture=device.CreateTexture(&desc);toTexture=device.CreateTexture(&desc);
+    fromView=fromTexture.CreateView();toView=toTexture.CreateView();
+    wgpu::BindGroupEntry entries[3]{};
+    entries[0].binding=0;entries[0].buffer=compositeUniform;
+    entries[1].binding=1;entries[1].textureView=fromView;
+    entries[2].binding=2;entries[2].textureView=toView;
+    wgpu::BindGroupDescriptor group{};group.layout=compositeLayout;group.entryCount=3;group.entries=entries;
+    compositeGroup=device.CreateBindGroup(&group);compositeWidth=width;compositeHeight=height;
 }
 
 void Renderer::State::ensureShapesCapacity(std::size_t count,std::size_t pointCount) {
@@ -374,6 +438,7 @@ void Renderer::State::startLoop() {
 
 bool Renderer::State::resizeIfNeeded() {
     emscripten_get_element_css_size(selector.c_str(), &cssWidth, &cssHeight);
+    editor.resizePrototype({cssWidth,cssHeight});
     dpr = emscripten_get_device_pixel_ratio();
 
     const auto newWidth = static_cast<uint32_t>(std::lround(cssWidth * dpr));
@@ -448,8 +513,61 @@ void Renderer::State::uploadImages() {
 void Renderer::State::buildInstances() {
     view = camera.visibleWorld({cssWidth, cssHeight});
     origin = camera.position();
-    stats.visible = buildDrawList(document, view, editor.activeMode(), drawItems);
-    addSelectionOutlines();
+    stats.visible=0;composing=false;compositionSplit=0;
+    if(editor.presenting()) {
+        auto scene=editor.prototypeScene();
+        // Bound two full-resolution scene targets to 128 MiB total.
+        if(scene.dissolve && std::uint64_t(width)*height>16*1024*1024) {
+            editor.finishPrototypeTransition();scene=editor.prototypeScene();
+        }
+        composing=scene.dissolve || scene.smart;compositionProgress=static_cast<float>(scene.progress);
+        drawItems.clear();
+        std::vector<DrawItem> layerItems;
+        const auto append=[&](const std::vector<PrototypeLayer>& layers) {
+            for(const auto& layer:layers) {
+                if(layer.overlay) {
+                    DrawItem scrim;scrim.quad=layer.viewport.value_or(view);scrim.a.rect=scrim.quad;scrim.clip=scrim.quad;
+                    scrim.node=layer.screen;scrim.primitive=UINT32_MAX;
+                    scrim.color={0,0,0,.35f};drawItems.push_back(std::move(scrim));
+                }
+                const Rect sourceView{(view.x-layer.offset.x)/layer.scale,(view.y-layer.offset.y)/layer.scale,
+                                      view.w/layer.scale,view.h/layer.scale};
+                const auto& sourceDocument=layer.document?*layer.document:editor.prototypeDocument();
+                stats.visible+=buildDrawList(sourceDocument,sourceView,editor.activeMode(),layerItems,layer.screen,layer.scroll);
+                for(auto& item:layerItems) {
+                    transformDrawItem(item,layer.offset,1,layer.viewport,layer.scale);
+                    drawItems.push_back(std::move(item));
+                }
+            }
+        };
+        if(composing) {append(scene.from);compositionSplit=drawItems.size();}
+        append(scene.to);
+        if(scene.smart) {
+            const std::vector<DrawItem> from(drawItems.begin(),drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit));
+            std::vector<DrawItem> to(drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit),drawItems.end());
+            bool identitiesValid=true;
+            if(scene.from.size()==1 && scene.to.size()==1 && !scene.from.front().overlay && !scene.to.front().overlay &&
+               scene.from.front().screen!=scene.to.front().screen) {
+                const auto& before=scene.from.front();const auto& after=scene.to.front();
+                const auto& beforeDocument=before.document?*before.document:editor.prototypeDocument();
+                const auto& afterDocument=after.document?*after.document:editor.prototypeDocument();
+                auto matched=remapDrawListIdentities(beforeDocument,before.screen,afterDocument,after.screen,to);
+                identitiesValid=matched.has_value();
+                if(matched) to=std::move(*matched);
+            }
+            auto interpolated=identitiesValid?interpolateDrawLists(from,to,scene.progress):std::nullopt;
+            if(interpolated) {
+                drawItems=std::move(*interpolated);composing=false;compositionSplit=0;
+            } else if(std::uint64_t(width)*height>16*1024*1024) {
+                editor.finishPrototypeTransition();scene=editor.prototypeScene();
+                drawItems.clear();stats.visible=0;composing=false;compositionSplit=0;append(scene.to);
+            }
+        }
+    } else {
+        releaseComposition();
+        stats.visible=buildDrawList(document,view,editor.activeMode(),drawItems);
+    }
+    if(!editor.presenting()) addSelectionOutlines();
     uploadImages();
 
     instances.clear();
@@ -600,6 +718,7 @@ bool Renderer::State::frame(double time) {
         return false;
     }
 
+    const double deltaMs=lastTime>0.0?std::max(0.,time-lastTime):0.;
     if (lastTime > 0.0) {
         stats.frameMs += (time - lastTime - stats.frameMs) * kStatsSmoothing;
     }
@@ -611,6 +730,7 @@ bool Renderer::State::frame(double time) {
     if (!resizeIfNeeded()) {
         return true;
     }
+    editor.advancePrototype(deltaMs);
 
     wgpu::SurfaceTexture surfaceTexture;
     surface.GetCurrentTexture(&surfaceTexture);
@@ -621,6 +741,23 @@ bool Renderer::State::frame(double time) {
 
     writeFrameUniform();
     buildInstances();
+    wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
+    if(composing) {
+        ensureComposition();
+        const std::array<float,4> settings{compositionProgress,0,0,0};
+        device.GetQueue().WriteBuffer(compositeUniform,0,settings.data(),sizeof(settings));
+        const auto paint=[&](const wgpu::TextureView& target,std::size_t first,std::size_t count) {
+            wgpu::RenderPassColorAttachment attachment{};attachment.view=target;
+            attachment.loadOp=wgpu::LoadOp::Clear;attachment.storeOp=wgpu::StoreOp::Store;
+            attachment.clearValue={0,0,0,0};
+            wgpu::RenderPassDescriptor desc{};desc.colorAttachmentCount=1;desc.colorAttachments=&attachment;
+            auto pass=encoder.BeginRenderPass(&desc);pass.SetBindGroup(0,bindGroup);pass.SetPipeline(shapesPipeline);
+            if(count) pass.Draw(4,static_cast<uint32_t>(count),0,static_cast<uint32_t>(first));
+            pass.End();
+        };
+        paint(fromView,0,compositionSplit);
+        paint(toView,compositionSplit,instances.size()-compositionSplit);
+    }
 
     wgpu::RenderPassColorAttachment color{};
     color.view = surfaceTexture.texture.CreateView();
@@ -632,14 +769,13 @@ bool Renderer::State::frame(double time) {
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &color;
 
-    wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
     wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
-    pass.SetBindGroup(0, bindGroup);
-    pass.SetPipeline(gridPipeline);
-    pass.Draw(3);
-    if (!instances.empty()) {
-        pass.SetPipeline(shapesPipeline);
-        pass.Draw(4, static_cast<uint32_t>(instances.size()));
+    if(composing) {
+        pass.SetPipeline(compositePipeline);pass.SetBindGroup(0,compositeGroup);pass.Draw(3);
+    } else {
+        pass.SetBindGroup(0, bindGroup);
+        if(!editor.presenting()) {pass.SetPipeline(gridPipeline);pass.Draw(3);}
+        if(!instances.empty()) {pass.SetPipeline(shapesPipeline);pass.Draw(4,static_cast<uint32_t>(instances.size()));}
     }
     pass.End();
 

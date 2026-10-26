@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 #include "vc/color.hpp"
 #include "vc/document.hpp"
@@ -43,11 +44,33 @@ struct DrawItem {
     bool closed = false;
     bool filled = false;
     const Raster* image = nullptr;
+    /// Stable expanded node key and primitive slot, independent of the paint's geometry.
+    Id node;
+    std::uint32_t primitive = 0;
 };
 
 /// Fills `out` with what's visible inside `view`, in paint order, resolving tokens in `mode`.
 /// Returns how many nodes contributed at least one item.
-std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out);
+std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,
+                          const Id& root = {}, Vec2 scroll = {});
+
+/// Translate native presentation geometry, keeping glyph/image UV coordinates unchanged.
+void transformDrawItem(DrawItem& item, Vec2 offset, double opacity,
+                       std::optional<Rect> viewport = std::nullopt, double scale = 1);
+
+/// Interpolates only unambiguous, identically ordered native paint identities.
+/// Missing/reordered paints, different glyph/image UVs or incompatible path topology
+/// return nullopt so the caller can dissolve complete scenes instead.
+[[nodiscard]] std::optional<std::vector<DrawItem>> interpolateDrawLists(
+    const std::vector<DrawItem>& from, const std::vector<DrawItem>& to, double progress);
+
+/// Rebind destination paints to outgoing identities for a cross-screen transition.
+/// The two expanded subtrees must have identical name/type paths. Root names are
+/// ignored; unnamed descendants and repeated sibling names refuse the whole match.
+/// This does not change either document or relax primitive/texture/order checks.
+[[nodiscard]] std::optional<std::vector<DrawItem>> remapDrawListIdentities(
+    const Document& from, const Id& fromRoot, const Document& to, const Id& toRoot,
+    const std::vector<DrawItem>& destination);
 
 /// The color drawn for a token reference that can't be resolved.
 inline constexpr Color kUnresolvedColor{1.0f, 0.0f, 1.0f, 1.0f};
