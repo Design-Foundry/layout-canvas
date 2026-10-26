@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <array>
+#include <algorithm>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "vc/editor.hpp"
 #include "vc/draw_list.hpp"
@@ -656,4 +657,115 @@ TEST_CASE("Automatic modal entry cancels an active base touch instead of scrolli
     f.editor.prototypeTouchStart(point);f.editor.advancePrototype(100);REQUIRE(f.editor.prototypeOverlay()==modal);
     f.editor.prototypeTouchMove(point-Vec2{0,60});f.editor.prototypeTouchEnd();
     REQUIRE(f.editor.prototypeScroll(f.a).y==0);REQUIRE(f.editor.prototypeScroll(modal).y==0);
+}
+
+namespace {
+struct InteractivePrototype : Prototype {
+    Id main,visual,one,two;
+    InteractivePrototype() {
+        main=add(NodeType::Component,{},1000,0,90,80);
+        visual=add(NodeType::Rect,main,5,5,30,20);
+        ComponentDefinition definition;definition.axes.push_back({"state",{"idle","active"},"idle"});
+        NodePatch active;active.x=35;active.w=50;active.cornerRadius=8.;active.fill=Oklch{.7,.15,140};
+        definition.rules.push_back({{{"state","active"}},visual,active});
+        REQUIRE(session.applyRemote(SetComponentDefinition{main,definition}));
+        NodePatch action;Interaction interaction;interaction.action=PrototypeAction::ChangeState;interaction.stateValues={{"state","active"}};action.interaction=interaction;patch(main,action);
+        one=instance(main,a,0,"a1");two=instance(main,a,100,"a2");
+    }
+    Id instance(Id component,Id parent,double x,const std::string& order) {
+        Node n;n.id=session.newId();n.type=NodeType::Instance;n.component=component;n.parent=parent;n.order=order;n.x=x;n.y=10;n.w=90;n.h=80;
+        REQUIRE(session.applyRemote(CreateNode{n}));return n.id;
+    }
+    Id visualCopy(Id instance) const {
+        for(const auto& key:editor.prototypeDocument().viewChildren(instance)) if(editor.prototypeDocument().sourceOf(key)==visual) return key;
+        return {};
+    }
+    bool active(Id instance) const {
+        const auto& values=editor.prototypeDocument().find(instance)->componentValues;
+        const auto found=values.find("state");return found!=values.end() && std::get<std::string>(found->second)=="active";
+    }
+};
+}
+
+TEST_CASE("Detached playback copies rebuild warmed caches and keep instance states independent of authoring") {
+    InteractivePrototype f;const auto before=snapshotToJson(f.session.document());
+    const auto* warmed=f.session.document().view(f.one);REQUIRE(warmed);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    REQUIRE(f.editor.prototypeDocument().view(f.one)!=warmed);
+    f.click({140,250});REQUIRE(f.active(f.one));REQUIRE_FALSE(f.active(f.two));
+    REQUIRE(f.editor.prototypeDocument().box(f.visualCopy(f.one)).x==35);
+    REQUIRE(f.editor.prototypeDocument().box(f.visualCopy(f.two)).x==5);
+    REQUIRE(f.session.document().find(f.one)->componentValues.empty());
+    REQUIRE(snapshotToJson(f.session.document())==before);REQUIRE(f.session.takeOutbox().empty());REQUIRE_FALSE(f.session.canUndo());
+    REQUIRE(f.editor.restartPrototype());REQUIRE_FALSE(f.active(f.one));
+    f.click({240,250});REQUIRE(f.active(f.two));f.editor.stopPrototype();
+    REQUIRE(snapshotToJson(f.session.document())==before);REQUIRE(f.editor.selection().empty());
+}
+
+TEST_CASE("Smart component transitions retain immutable scenes and interpolate stable expanded primitives") {
+    InteractivePrototype f;NodePatch p;auto action=f.session.document().find(f.main)->interaction;
+    action.transition=PrototypeTransition::SmartAnimate;action.durationMs=400;p.interaction=action;f.patch(f.main,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click({140,250});
+    auto scene=f.editor.prototypeScene();REQUIRE(scene.smart);REQUIRE_FALSE(scene.from.empty());REQUIRE_FALSE(scene.to.empty());
+    REQUIRE(scene.from.front().document->find(f.one)->componentValues.empty());
+    REQUIRE(std::get<std::string>(scene.to.front().document->find(f.one)->componentValues.at("state"))=="active");
+    f.editor.advancePrototype(200);scene=f.editor.prototypeScene();REQUIRE(scene.smart);REQUIRE(scene.progress==.5);
+    std::vector<DrawItem> from,to;const Rect viewport{100,200,200,100};
+    buildDrawList(*scene.from.front().document,viewport,kDefaultModeId,from,f.a);
+    buildDrawList(*scene.to.front().document,viewport,kDefaultModeId,to,f.a);
+    const auto blended=interpolateDrawLists(from,to,.5);REQUIRE(blended.has_value());
+    const auto key=f.visualCopy(f.one);
+    const auto item=std::find_if(blended->begin(),blended->end(),[&](const auto& paint){return paint.node==key && paint.kind==DrawKind::Fill;});
+    REQUIRE(item!=blended->end());REQUIRE(item->quad.x==120);REQUIRE(item->quad.w==40);
+    f.editor.advancePrototype(200);REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE(f.active(f.one));
+}
+
+TEST_CASE("Temporary variant choices preserve authored properties and independent instance overrides") {
+    InteractivePrototype f;
+    auto definition=f.session.document().find(f.main)->definition;definition.properties.push_back({"show",f.visual,true});
+    REQUIRE(f.session.applyRemote(SetComponentDefinition{f.main,definition}));
+    NodePatch p;p.componentValues=ComponentValues{{"show",false}};f.patch(f.one,p);
+    p={};p.x=12;REQUIRE(f.session.applyRemote(SetOverride{f.two,f.visual,p}));
+    const auto snapshot=snapshotToJson(f.session.document());
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click({140,250});REQUIRE(f.active(f.one));
+    REQUIRE_FALSE(std::get<bool>(f.editor.prototypeDocument().find(f.one)->componentValues.at("show")));
+    REQUIRE_FALSE(f.editor.prototypeDocument().view(f.visualCopy(f.one))->visible);
+    f.click({240,250});REQUIRE(f.active(f.two));REQUIRE(f.editor.prototypeDocument().box(f.visualCopy(f.two)).x==12);
+    REQUIRE(snapshotToJson(f.session.document())==snapshot);REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Component state validation fails closed outside an authored instance or for undeclared axis values") {
+    InteractivePrototype f;
+    for(const auto& values:{std::map<std::string,std::string>{{"missing","active"}},std::map<std::string,std::string>{{"state","missing"}}}) {
+        NodePatch p;auto action=f.session.document().find(f.main)->interaction;action.stateValues=values;p.interaction=action;f.patch(f.main,p);
+        REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click({140,250});REQUIRE_FALSE(f.active(f.one));REQUIRE_FALSE(f.editor.prototypeTransitioning());f.editor.stopPrototype();
+    }
+    const auto outside=f.add(NodeType::Rect,f.a,10,92,30,7);
+    NodePatch p;Interaction action;action.action=PrototypeAction::ChangeState;action.stateValues={{"state","active"}};p.interaction=action;f.patch(outside,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click({125,295});REQUIRE_FALSE(f.active(f.one));
+    REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Component state persists through navigation and resets on Restart or remote edits") {
+    InteractivePrototype f;NodePatch nav;nav.interaction=Interaction{PrototypeAction::Navigate,f.b};f.patch(f.a,nav);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click({140,250});REQUIRE(f.active(f.one));
+    f.click({295,298});REQUIRE(f.editor.prototypeScreen()==f.b);REQUIRE(f.editor.prototypeBack());REQUIRE(f.active(f.one));
+    NodePatch remote;remote.name="remote";f.patch(f.visual,remote);f.editor.advancePrototype(1);REQUIRE_FALSE(f.active(f.one));
+    f.click({140,250});REQUIRE(f.active(f.one));REQUIRE(f.editor.restartPrototype());REQUIRE_FALSE(f.active(f.one));
+}
+
+TEST_CASE("Reduced motion and remote interruption settle component transitions without authoring writes") {
+    InteractivePrototype f;NodePatch p;auto action=f.session.document().find(f.main)->interaction;action.transition=PrototypeTransition::SmartAnimate;action.durationMs=400;p.interaction=action;f.patch(f.main,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.editor.setPrototypeReducedMotion(true);f.click({140,250});REQUIRE(f.active(f.one));REQUIRE_FALSE(f.editor.prototypeTransitioning());
+    REQUIRE(f.editor.restartPrototype());f.editor.setPrototypeReducedMotion(false);f.click({140,250});REQUIRE(f.editor.prototypeTransitioning());
+    p={};p.name="updated";f.patch(f.visual,p);f.editor.advancePrototype(1);
+    REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE_FALSE(f.active(f.one));REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Derived nested instance state actions cannot mutate the shared authored nested source") {
+    InteractivePrototype f;const auto outer=f.add(NodeType::Component,{},1400,0,90,80);
+    const auto nested=f.instance(f.main,outer,0,"a0");const auto outerInstance=f.instance(outer,f.a,0,"a3");
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    const auto nestedKey=f.editor.prototypeDocument().viewChildren(outerInstance).front();REQUIRE(nestedKey!=nested);
+    f.click({140,250});REQUIRE(f.editor.prototypeDocument().find(nested)->componentValues.empty());REQUIRE_FALSE(f.active(f.one));
 }

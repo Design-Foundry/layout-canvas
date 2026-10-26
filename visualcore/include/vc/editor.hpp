@@ -36,6 +36,8 @@ struct PrototypeLayer {
     std::optional<Rect> viewport;
     /// Content-only translation, before the screen affine transform.
     Vec2 scroll{};
+    /// Owns immutable outgoing scene data while temporary component states change.
+    std::shared_ptr<const Document> document;
 };
 
 /// Complete native scenes to mix after each has been painted at full opacity.
@@ -44,6 +46,7 @@ struct PrototypeScene {
     std::vector<PrototypeLayer> to;
     double progress = 1;
     bool dissolve = false;
+    bool smart = false;
 };
 
 /// A resize handle: which vertical edge (-1 left, 1 right, 0 none) and which horizontal edge
@@ -86,6 +89,9 @@ public:
     [[nodiscard]] Id prototypeStart() const { return prototypeStart_; }
     [[nodiscard]] bool canPrototypeBack() const { return presenting_ && (!prototypeHistory_.empty() || !prototypeOverlays_.empty()); }
     [[nodiscard]] bool prototypeEligible(const Id& id) const;
+    [[nodiscard]] const Document& prototypeDocument() const {
+        return prototypeDocument_?*prototypeDocument_:session_.document();
+    }
     [[nodiscard]] Vec2 prototypeScroll(const Id& screen) const;
     bool scrollPrototype(Vec2 screen, Vec2 delta);
     bool prototypeTouchStart(Vec2 screen);
@@ -234,7 +240,8 @@ private:
     void fitPrototype();
     [[nodiscard]] Id prototypeHotspot(Vec2 screen, PrototypeTrigger trigger = PrototypeTrigger::Click) const;
     bool activatePrototype(Vec2 screen, PrototypeTrigger trigger = PrototypeTrigger::Click);
-    bool runPrototypeInteraction(const Interaction& interaction);
+    bool runPrototypeInteraction(Interaction interaction, Id source = {});
+    bool changePrototypeState(const Interaction& interaction, Id source);
     void resetPrototypeTriggers();
     void cancelPrototypeTriggers();
     void advancePrototypeTriggers(double deltaMs);
@@ -280,6 +287,7 @@ private:
     bool penClosed_ = false;
     std::vector<Vec2> pencilPoints_;
     bool presenting_ = false;
+    std::shared_ptr<Document> prototypeDocument_;
     Camera prototypeSavedCamera_;
     Id prototypeScreen_;
     Id prototypeStart_;

@@ -520,18 +520,20 @@ void Renderer::State::buildInstances() {
         if(scene.dissolve && std::uint64_t(width)*height>16*1024*1024) {
             editor.finishPrototypeTransition();scene=editor.prototypeScene();
         }
-        composing=scene.dissolve;compositionProgress=static_cast<float>(scene.progress);
+        composing=scene.dissolve || scene.smart;compositionProgress=static_cast<float>(scene.progress);
         drawItems.clear();
         std::vector<DrawItem> layerItems;
         const auto append=[&](const std::vector<PrototypeLayer>& layers) {
             for(const auto& layer:layers) {
                 if(layer.overlay) {
                     DrawItem scrim;scrim.quad=layer.viewport.value_or(view);scrim.a.rect=scrim.quad;scrim.clip=scrim.quad;
+                    scrim.node=layer.screen;scrim.primitive=UINT32_MAX;
                     scrim.color={0,0,0,.35f};drawItems.push_back(std::move(scrim));
                 }
                 const Rect sourceView{(view.x-layer.offset.x)/layer.scale,(view.y-layer.offset.y)/layer.scale,
                                       view.w/layer.scale,view.h/layer.scale};
-                stats.visible+=buildDrawList(document,sourceView,editor.activeMode(),layerItems,layer.screen,layer.scroll);
+                const auto& sourceDocument=layer.document?*layer.document:editor.prototypeDocument();
+                stats.visible+=buildDrawList(sourceDocument,sourceView,editor.activeMode(),layerItems,layer.screen,layer.scroll);
                 for(auto& item:layerItems) {
                     transformDrawItem(item,layer.offset,1,layer.viewport,layer.scale);
                     drawItems.push_back(std::move(item));
@@ -540,6 +542,16 @@ void Renderer::State::buildInstances() {
         };
         if(composing) {append(scene.from);compositionSplit=drawItems.size();}
         append(scene.to);
+        if(scene.smart) {
+            const std::vector<DrawItem> from(drawItems.begin(),drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit));
+            const std::vector<DrawItem> to(drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit),drawItems.end());
+            if(auto interpolated=interpolateDrawLists(from,to,scene.progress)) {
+                drawItems=std::move(*interpolated);composing=false;compositionSplit=0;
+            } else if(std::uint64_t(width)*height>16*1024*1024) {
+                editor.finishPrototypeTransition();scene=editor.prototypeScene();
+                drawItems.clear();stats.visible=0;composing=false;compositionSplit=0;append(scene.to);
+            }
+        }
     } else {
         releaseComposition();
         stats.visible=buildDrawList(document,view,editor.activeMode(),drawItems);

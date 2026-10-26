@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -33,6 +34,14 @@ struct ResolvedShadow {
 class Document {
 public:
     Document();
+    /// Independent authored data with fresh expansion/layout caches. Presentation
+    /// can resolve temporary instance values without modifying the source document.
+    [[nodiscard]] std::shared_ptr<Document> detachedCopy() const {
+        auto copy=std::make_shared<Document>();
+        copy->nodes_=nodes_;copy->children_=children_;
+        copy->tokens_=tokens_;copy->modes_=modes_;
+        return copy;
+    }
 
     /// Applies `op` and returns its inverse, or nothing if the op is invalid for the current state
     /// (unknown node, cycle, deleting a node with children). Invalid ops leave the document untouched.
