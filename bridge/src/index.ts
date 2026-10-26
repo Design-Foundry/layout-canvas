@@ -229,6 +229,7 @@ export interface PrototypeAnimation<T extends PrototypeTransition = PrototypeTra
   readonly durationMs?: number;
 }
 export interface PrototypeScreen {
+  readonly flowName?: string;
   readonly id: string;
   readonly name: string;
   readonly start: boolean;
@@ -248,6 +249,7 @@ export interface NodeFields {
   readonly interaction?: PrototypeInteraction | null;
   readonly interactions?: readonly PrototypeTriggeredInteraction[];
   readonly prototypeStart?: boolean;
+  readonly prototypeFlowName?: string;
   readonly prototypeOverflow?: PrototypeOverflow;
   readonly image?: RasterImage;
   readonly imageFit?: ImageFit;

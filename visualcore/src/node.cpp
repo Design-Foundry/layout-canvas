@@ -1,7 +1,13 @@
 #include "vc/node.hpp"
 #include <cmath>
+#include <algorithm>
 
 namespace vc {
+bool validPrototypeFlowName(const std::string& name) {
+    if(name.size()>128 || std::any_of(name.begin(),name.end(),[](unsigned char c){return c<32 || c==127;})) return false;
+    TextRun text;text.content=name;return !textProblem(text);
+}
+
 bool validInteractionSettings(const Interaction& i) {
     const bool destination=i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay || i.action==PrototypeAction::ChangeState;
     switch(i.action) {
@@ -96,6 +102,7 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
         node.interactions=patch.interactions.value_or(std::vector<TriggeredInteraction>{});
     }
     swapIn(inverse.prototypeStart,patch.prototypeStart,node.prototypeStart);
+    swapIn(inverse.prototypeFlowName,patch.prototypeFlowName,node.prototypeFlowName);
     swapIn(inverse.prototypeOverflow,patch.prototypeOverflow,node.prototypeOverflow);
     swapIn(inverse.image,patch.image,node.image);
     swapIn(inverse.imageFit,patch.imageFit,node.imageFit);
@@ -148,6 +155,7 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
         else out.interactions.reset();
     }
     if(top.prototypeStart) out.prototypeStart=top.prototypeStart;
+    if(top.prototypeFlowName) out.prototypeFlowName=top.prototypeFlowName;
     if(top.prototypeOverflow) out.prototypeOverflow=top.prototypeOverflow;
     if(top.image) out.image=top.image;
     if(top.imageFit) out.imageFit=top.imageFit;
@@ -207,6 +215,7 @@ NodePatch fullPatch(const Node& n) {
     if(n.interaction!=Interaction{}) p.interaction=n.interaction;
     if(!n.interactions.empty()) p.interactions=n.interactions;
     if(n.prototypeStart) p.prototypeStart=true;
+    if(!n.prototypeFlowName.empty()) p.prototypeFlowName=n.prototypeFlowName;
     if(n.prototypeOverflow!=PrototypeOverflow::None) p.prototypeOverflow=n.prototypeOverflow;
     if(n.type==NodeType::Image){p.image=n.image;p.imageFit=n.imageFit;p.imageCrop=n.imageCrop;}
     if (n.type == NodeType::Line || n.type == NodeType::Path) p.lineWidth=n.lineWidth;

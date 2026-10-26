@@ -159,7 +159,7 @@ std::string prototypeScreens() {
         const auto* node=rt->session.document().find(id);
         const auto box=rt->session.document().box(id,rt->editor.activeMode());
         if(out.size()>1) out+=',';
-        out+="{\"id\":"+jsonString(id.toString())+",\"name\":"+jsonString(node->name)+
+        out+="{\"id\":"+jsonString(id.toString())+",\"name\":"+jsonString(node->name)+",\"flowName\":"+jsonString(node->prototypeFlowName)+
             ",\"start\":"+(node->prototypeStart?"true":"false")+",\"w\":"+std::to_string(box.w)+",\"h\":"+std::to_string(box.h)+"}";
     }
     return out+"]";

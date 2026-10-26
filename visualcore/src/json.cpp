@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 21;
+constexpr int kSnapshotVersion = 22;
 
 bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
@@ -180,6 +180,7 @@ json writeValues(const ComponentValues& values) {
 
 void writePatch(json& out, const NodePatch& p) {
     if(p.prototypeStart) out["prototypeStart"]=*p.prototypeStart;
+    if(p.prototypeFlowName) out["prototypeFlowName"]=*p.prototypeFlowName;
     if(p.prototypeOverflow) out["prototypeOverflow"]=nameOf(kPrototypeOverflows,*p.prototypeOverflow);
     if(p.interaction) {
         switch(p.interaction->action) {
@@ -586,6 +587,8 @@ std::optional<TextStyle> readTextStyle(const json& v) {
 std::optional<NodePatch> readPatch(const json& j) {
     NodePatch p;
     if(!readField(j,"prototypeStart",p.prototypeStart,readBool)) return std::nullopt;
+    if(!readField(j,"prototypeFlowName",p.prototypeFlowName,readString)) return std::nullopt;
+    if(p.prototypeFlowName && !validPrototypeFlowName(*p.prototypeFlowName)) {DiagnosticScope field{"prototypeFlowName"};return refused("flow name must be single-line text of at most 128 UTF-8 bytes");}
     if(j.contains("prototypeOverflow")) {
         DiagnosticScope field{"prototypeOverflow"};
         const auto value=valueOf(kPrototypeOverflows,j["prototypeOverflow"]);
@@ -942,6 +945,7 @@ std::optional<Node> readNode(const json& j) {
     if (*type != NodeType::Image && patch->imageFit) return misplaced("imageFit", "only image nodes take imageFit");
     if (*type != NodeType::Image && patch->imageCrop) return misplaced("imageCrop", "only image nodes take imageCrop");
     if (*type == NodeType::Instance && (patch->interaction || patch->interactions)) return misplaced("interaction", "instance interactions use component-root overrides");
+    if (patch->prototypeFlowName && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeFlowName", "only root frames take flow names");
     if (patch->prototypeStart && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeStart", "only root frames take flow starting flags");
     if (patch->prototypeOverflow && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeOverflow", "only root frames take prototype overflow");
     if (patch->textStyle) return misplaced("textStyle", "nodes store their full text, use text instead of textStyle");
@@ -1536,6 +1540,7 @@ std::string snapshotToJson(const Document& document) {
     bool scrolling = false;
     bool multipleInteractions = false;
     bool componentStates = false;
+    bool namedFlows = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
     document.forEachInPaintOrder([&](const Node& node) {
@@ -1548,6 +1553,7 @@ std::string snapshotToJson(const Document& document) {
         prototype = prototype || node.interaction!=Interaction{} || node.prototypeStart;
         extended = extended || extendedPrototype(node.interaction);
         positioned = positioned || positionedPrototype(node.interaction);
+        namedFlows = namedFlows || !node.prototypeFlowName.empty();
         scrolling = scrolling || node.prototypeOverflow!=PrototypeOverflow::None;
         multipleInteractions = multipleInteractions || !node.interactions.empty();
         componentStates = componentStates || statePrototype(node.interaction) || std::any_of(node.interactions.begin(),node.interactions.end(),[](const auto& e){return statePrototype(e.interaction);});
@@ -1563,6 +1569,7 @@ std::string snapshotToJson(const Document& document) {
             prototype = prototype || patch.interaction.has_value() || patch.prototypeStart.has_value();
             extended = extended || (patch.interaction && extendedPrototype(*patch.interaction));
             positioned = positioned || (patch.interaction && positionedPrototype(*patch.interaction));
+            namedFlows = namedFlows || patch.prototypeFlowName.has_value();
             scrolling = scrolling || patch.prototypeOverflow.has_value();
             multipleInteractions = multipleInteractions || patch.interactions.has_value();
             componentStates = componentStates || (patch.interaction && statePrototype(*patch.interaction)) || (patch.interactions && std::any_of(patch.interactions->begin(),patch.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));
@@ -1577,7 +1584,7 @@ std::string snapshotToJson(const Document& document) {
         for (const auto& o : node.overrides) styleVersion(o.patch);
         for (const auto& r : node.definition.rules) styleVersion(r.patch);
     });
-    return json{{"version", componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
+    return json{{"version", namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
 }
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
@@ -1641,6 +1648,7 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         DiagnosticScope entry{slot(index)};
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
+        if(version<22 && (j["nodes"][index].contains("prototypeFlowName") || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.prototypeFlowName.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.prototypeFlowName.has_value();}))) return refused("named flows need snapshot version 22 or later");
         const auto statePatch=[](const NodePatch& p){return (p.interaction && statePrototype(*p.interaction)) || (p.interactions && std::any_of(p.interactions->begin(),p.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));};
         if(version<21 && (statePrototype(node->interaction) || std::any_of(node->interactions.begin(),node->interactions.end(),[](const auto& e){return statePrototype(e.interaction);}) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return statePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return statePatch(r.patch);}))) return refused("component state actions and smart-animate need snapshot version 21 or later");
         const auto multiplePatch=[](const NodePatch& p){return p.interactions.has_value();};

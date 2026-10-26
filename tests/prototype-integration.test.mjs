@@ -156,3 +156,17 @@ test('prototype overflow refuses portable files on nodes and nested patches incl
     }
   }
 });
+
+test('snapshot22 without flow metadata remains portable and labels including empty never escape',()=>{
+  const plain=fixture();plain.snapshot.version=22;
+  assert.equal(readComponent(JSON.stringify(plain)).snapshot.version,22);
+  assert.equal(exportComponent(plain.snapshot,id(1)).snapshot.version,22);
+  for(const prototypeFlowName of ['', 'Checkout']) for(const location of ['node','override','rule']) {
+    const data=fixture();data.snapshot.version=22;const patch={prototypeFlowName};
+    if(location==='node')Object.assign(data.snapshot.nodes[0],patch);
+    if(location==='override')data.snapshot.nodes[0].overrides=[{node:id(2),patch}];
+    if(location==='rule')data.snapshot.nodes[0].definition={rules:[{target:id(2),when:{state:'a'},patch}]};
+    assert.throws(()=>readComponent(JSON.stringify(data)),/document-local/);
+    assert.throws(()=>exportComponent(data.snapshot,id(1)),/document-local/);
+  }
+});

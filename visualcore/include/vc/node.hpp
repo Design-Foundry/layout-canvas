@@ -13,6 +13,9 @@
 
 namespace vc {
 
+/// Empty clears a flow label; names are bounded single-line bundled-font text.
+bool validPrototypeFlowName(const std::string& name);
+
 enum class NodeType {
     Frame,
     Rect,
@@ -151,6 +154,7 @@ struct NodePatch {
     std::optional<Interaction> interaction;
     std::optional<std::vector<TriggeredInteraction>> interactions;
     std::optional<bool> prototypeStart;
+    std::optional<std::string> prototypeFlowName;
     std::optional<PrototypeOverflow> prototypeOverflow;
     std::optional<Raster> image;
     std::optional<std::string> imageFit;
@@ -250,6 +254,7 @@ struct Node {
     Interaction interaction;
     std::vector<TriggeredInteraction> interactions;
     bool prototypeStart = false;
+    std::string prototypeFlowName;
     PrototypeOverflow prototypeOverflow = PrototypeOverflow::None;
     Raster image;
     std::string imageFit = "cover";

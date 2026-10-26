@@ -27,6 +27,7 @@ bool nonNegative(const Value<double>& value) {
 constexpr std::string_view kFrameStyling = "text, lines, paths and images take no stroke, shadows, corner radius or auto layout";
 
 bool isValidPatch(const NodePatch& patch) {
+    if(patch.prototypeFlowName && !validPrototypeFlowName(*patch.prototypeFlowName)) return refuse("prototypeFlowName must be single-line text of at most 128 UTF-8 bytes");
     if(patch.interactions && !validTriggeredInteractions(*patch.interactions)) return refuse("interactions needs at most 16 valid trigger actions");
     if(patch.interaction && patch.interaction->action!=PrototypeAction::None && patch.interactions && !patch.interactions->empty()) return refuse("interaction and interactions cannot both be active");
     if(patch.prototypeOverflow && (*patch.prototypeOverflow<PrototypeOverflow::None || *patch.prototypeOverflow>PrototypeOverflow::Both)) return refuse("prototypeOverflow must be none, vertical, horizontal or both");
@@ -207,6 +208,8 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
     if(node.prototypeOverflow<PrototypeOverflow::None || node.prototypeOverflow>PrototypeOverflow::Both) return refused("invalid prototypeOverflow");
     if(node.prototypeOverflow!=PrototypeOverflow::None && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeOverflow applies only to root frames");
     if(node.type==NodeType::Instance && node.interaction!=Interaction{}) return refused("an instance interaction is set as an override on its main component root");
+    if(!validPrototypeFlowName(node.prototypeFlowName)) return refused("invalid prototypeFlowName");
+    if(!node.prototypeFlowName.empty() && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeFlowName applies only to root frames");
     if(node.prototypeStart && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeStart applies only to root frames");
     if(node.type!=NodeType::Image && (node.image!=Raster{} || node.imageFit!="cover" || node.imageCrop!=ImageCrop{})) return refused("only image nodes take image, imageFit or imageCrop");
     if(node.type==NodeType::Image && !validRaster(node.image)) return refused("image pixels do not match its width, height and id");
@@ -241,6 +244,7 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
         if(o.patch.interaction && !validInteraction(*o.patch.interaction)) return std::nullopt;
         if(o.patch.interactions) for(const auto& entry:*o.patch.interactions) if(!validInteraction(entry.interaction)) return std::nullopt;
         if(o.patch.prototypeOverflow) return refused("overrides cannot set prototypeOverflow");
+        if(o.patch.prototypeFlowName) return refused("overrides cannot set prototypeFlowName");
         if(o.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
     }
     if (!node.overrides.empty()) {
@@ -290,8 +294,9 @@ std::optional<OpBody> Document::setProps(const SetProps& op) {
         }
     }
     if(op.patch.prototypeOverflow && (nextType!=NodeType::Frame || !current.parent.isNil())) return refused("prototypeOverflow applies only to root frames");
+    if(op.patch.prototypeFlowName && (nextType!=NodeType::Frame || !current.parent.isNil())) return refused("prototypeFlowName applies only to root frames");
     if(op.patch.prototypeStart && (nextType!=NodeType::Frame || !current.parent.isNil())) return refused("prototypeStart applies only to root frames");
-    if(nextType!=NodeType::Frame && (current.prototypeStart || current.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame cannot change its type");
+    if(nextType!=NodeType::Frame && (current.prototypeStart || !current.prototypeFlowName.empty() || current.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame cannot change its type");
     if((op.patch.image || op.patch.imageFit || op.patch.imageCrop) && current.type!=NodeType::Image) return refused("only image nodes take image, imageFit or imageCrop");
     if (op.patch.path && current.type != NodeType::Path) return refused("only path nodes take a path");
     if (op.patch.lineReverse && current.type != NodeType::Line) return refused("only line nodes take lineReverse");
@@ -362,7 +367,7 @@ std::optional<OpBody> Document::setProps(const SetProps& op) {
 std::optional<OpBody> Document::move(const MoveNode& op) {
     const auto it = nodes_.find(op.id);
     if (it == nodes_.end()) return refused("no node has this id");
-    if(!op.parent.isNil() && (it->second.prototypeStart || it->second.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame must stay at the document root");
+    if(!op.parent.isNil() && (it->second.prototypeStart || !it->second.prototypeFlowName.empty() || it->second.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame must stay at the document root");
     if (!isValidParent(op.parent)) return refused("the parent does not exist or cannot have children");
     if (!op.parent.isNil() && isAncestorOrSelf(op.id, op.parent)) {
         return refused("a node cannot move into itself or its descendants");
@@ -465,6 +470,7 @@ std::optional<OpBody> Document::setOverride(const SetOverride& op) {
         return refused("overrides cannot change type, component, componentValues or typography");
     }
     if(op.patch.prototypeOverflow) return refused("overrides cannot set prototypeOverflow");
+    if(op.patch.prototypeFlowName) return refused("overrides cannot set prototypeFlowName");
     if(op.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
     if(op.patch.interaction && !validInteraction(*op.patch.interaction)) return std::nullopt;
     if(op.patch.interactions) for(const auto& entry:*op.patch.interactions) if(!validInteraction(entry.interaction)) return std::nullopt;
@@ -634,7 +640,7 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
             if (std::find(axis->values.begin(), axis->values.end(), value) == axis->values.end()) return refuse("when uses a value the axis does not declare: " + value);
         }
         const DiagnosticScope patchScope{"patch"};
-        if(p.interaction || p.interactions || p.prototypeStart || p.prototypeOverflow) return refuse("variant rules cannot set prototype interactions, starting screens or overflow");
+        if(p.interaction || p.interactions || p.prototypeStart || p.prototypeFlowName || p.prototypeOverflow) return refuse("variant rules cannot set prototype interactions, starting screens or overflow");
         const bool lineTarget = target->type == NodeType::Line;
         const bool pathTarget = target->type == NodeType::Path;
         const bool imageTarget = target->type == NodeType::Image;

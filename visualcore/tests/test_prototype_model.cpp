@@ -366,3 +366,38 @@ TEST_CASE("Prototype overflow snapshot19 preserves each axis refuses downgrades 
     }
     REQUIRE_FALSE(snapshotFromJson(R"({"version":18,"modes":[],"tokens":[],"nodes":[{"id":"00000000-0000-0000-0000-000000000001","type":"frame","order":"a0","prototypeOverflow":"none"}]})").has_value());
 }
+
+TEST_CASE("Named flows round-trip at snapshot22 and refuse semantic downgrades") {
+    Prototypes f;const auto screen=f.create();NodePatch patch;patch.prototypeFlowName="Compra rápida";patch.prototypeStart=true;
+    REQUIRE(f.editor.setProps(screen.id,patch));const auto snapshot=snapshotToJson(f.session.document());
+    REQUIRE(snapshot.find("\"version\":22")!=std::string::npos);
+    const auto ops=snapshotFromJson(snapshot);REQUIRE(ops.has_value());Document restored;for(const auto& op:*ops)REQUIRE(restored.apply(op));
+    REQUIRE(restored.find(screen.id)->prototypeFlowName=="Compra rápida");REQUIRE(restored.find(screen.id)->prototypeStart);
+    auto old=snapshot;old.replace(old.find("\"version\":22"),12,"\"version\":21");REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    REQUIRE_FALSE(snapshotFromJson(R"({"version":21,"modes":[],"tokens":[],"nodes":[{"id":"00000000-0000-0000-0000-000000000001","type":"frame","order":"a0","prototypeFlowName":""}]})").has_value());
+}
+TEST_CASE("Flow labels preserve start flags with reversible independent clears") {
+    Prototypes f;const auto screen=f.create();NodePatch name;name.prototypeFlowName="Checkout";REQUIRE(f.editor.setProps(screen.id,name));
+    REQUIRE_FALSE(f.session.document().find(screen.id)->prototypeStart);NodePatch start;start.prototypeStart=true;REQUIRE(f.editor.setProps(screen.id,start));
+    REQUIRE(mergePatch(name,start).prototypeFlowName==name.prototypeFlowName);
+    name.prototypeFlowName="";REQUIRE(f.editor.setProps(screen.id,name));REQUIRE(f.session.document().find(screen.id)->prototypeStart);
+    REQUIRE(f.editor.undo());REQUIRE(f.session.document().find(screen.id)->prototypeFlowName=="Checkout");REQUIRE(f.editor.redo());
+    start.prototypeStart=false;REQUIRE(f.editor.setProps(screen.id,start));REQUIRE(snapshotToJson(f.session.document()).find("\"version\":2")!=std::string::npos);
+}
+TEST_CASE("Flow labels are bounded single-line text with native and JSON parity") {
+    REQUIRE(patchFromJson(R"({"prototypeFlowName":""})"));REQUIRE(patchFromJson(R"({"prototypeFlowName":"Ingreso rápido"})"));
+    for(const auto json:{R"({"prototypeFlowName":null})",R"({"prototypeFlowName":5})",R"({"prototypeFlowName":"bad\nline"})"})REQUIRE_FALSE(patchFromJson(json));
+    Prototypes f;const auto screen=f.create();for(const auto& name:{std::string(129,'x'),std::string("bad\tline"),std::string("bad\0value",9),std::string("\xff")}) {
+        NodePatch patch;patch.prototypeFlowName=name;REQUIRE_FALSE(f.session.edit(SetProps{screen.id,patch}));
+    }
+    NodePatch patch;patch.prototypeFlowName=std::string(128,'x');REQUIRE(f.session.edit(SetProps{screen.id,patch}));
+}
+TEST_CASE("Flow labels stay on authored root frames and refuse overrides and variant rules") {
+    Prototypes f;const auto screen=f.create(),child=f.create(NodeType::Frame,screen.id),rect=f.create(NodeType::Rect),main=f.create(NodeType::Component),source=f.create(NodeType::Rect,main.id);
+    const auto instance=*f.editor.createInstance(main.id);REQUIRE_FALSE(instance.isNil());
+    for(const auto id:{child.id,rect.id,main.id,instance}) for(const auto& name:{std::string{},std::string{"Flow"}}){NodePatch patch;patch.prototypeFlowName=name;REQUIRE_FALSE(f.session.edit(SetProps{id,patch}));}
+    NodePatch name;name.prototypeFlowName="Flow";REQUIRE(f.session.edit(SetProps{screen.id,name}));REQUIRE_FALSE(f.session.edit(MoveNode{screen.id,child.id,"a0"}));
+    NodePatch type;type.type=NodeType::Rect;REQUIRE_FALSE(f.session.edit(SetProps{screen.id,type}));
+    for(const auto& value:{std::string{},std::string{"Flow"}}){name.prototypeFlowName=value;REQUIRE_FALSE(f.session.edit(SetOverride{instance,source.id,name}));ComponentDefinition def;def.axes.push_back({"state",{"a","b"},"a"});def.rules={{{{"state","b"}},source.id,name}};REQUIRE_FALSE(f.editor.setComponentDefinition(main.id,def));}
+    REQUIRE_FALSE(opFromJson("CreateNode",R"({"id":"00000000-0000-0000-0000-000000000001","type":"rect","order":"a0","prototypeFlowName":""})"));
+}
