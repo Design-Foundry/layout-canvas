@@ -13,6 +13,29 @@ const fixture = () => ({
     modes: [],
   },
 });
+
+test('snapshot21 without prototype state metadata remains portable', () => {
+  const data = fixture();
+  data.snapshot.version = 21;
+  assert.equal(readComponent(JSON.stringify(data)).snapshot.version, 21);
+});
+
+test('state actions and smart transitions remain explicitly refused in portable components', () => {
+  for (const interaction of [
+    { trigger: 'click', action: 'change-state', values: { state: 'pressed' }, transition: 'smart-animate', durationMs: 300 },
+    { trigger: 'click', action: 'navigate', target: id(3), transition: 'smart-animate', durationMs: 500 },
+  ]) {
+    for (const location of ['legacy', 'list', 'override']) {
+      const data = fixture();
+      data.snapshot.version = 21;
+      if (location === 'legacy') data.snapshot.nodes[0].interaction = interaction;
+      else if (location === 'list') data.snapshot.nodes[0].interactions = [interaction];
+      else data.snapshot.nodes[0].overrides = [{ node: id(2), patch: { interactions: [interaction] } }];
+      assert.throws(() => readComponent(JSON.stringify(data)), /document-local/);
+      assert.throws(() => exportComponent(data.snapshot, id(1)), /document-local/);
+    }
+  }
+});
 test('snapshot20 without ordered prototype metadata remains portable', () => {
   const data = fixture();
   data.snapshot.version = 20;

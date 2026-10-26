@@ -43,7 +43,7 @@ function object(value: unknown): value is Record<string, any> {
 function snapshot(value: unknown): asserts value is ComponentSnapshot {
   if (
     !object(value) ||
-    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].includes(value['version']) ||
+    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].includes(value['version']) ||
     !Array.isArray(value['nodes']) ||
     !Array.isArray(value['tokens']) ||
     !Array.isArray(value['modes']) ||

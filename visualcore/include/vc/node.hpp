@@ -111,9 +111,9 @@ struct Path {
 /// Why `validPath` refuses `path`, or null when it accepts it.
 [[nodiscard]] const char* pathProblem(const Path& path);
 
-enum class PrototypeAction { None, Navigate, Back, OpenOverlay, CloseOverlay };
+enum class PrototypeAction { None, Navigate, Back, OpenOverlay, CloseOverlay, ChangeState };
 enum class PrototypeOverflow { None, Vertical, Horizontal, Both };
-enum class PrototypeTransition { Instant, Dissolve, SlideLeft, SlideRight, SlideUp, SlideDown, PushLeft, PushRight, PushUp, PushDown };
+enum class PrototypeTransition { Instant, Dissolve, SlideLeft, SlideRight, SlideUp, SlideDown, PushLeft, PushRight, PushUp, PushDown, SmartAnimate };
 enum class OverlayPlacement { Center, TopLeft, TopCenter, TopRight, CenterLeft, CenterRight, BottomLeft, BottomCenter, BottomRight, Manual };
 struct OverlayOffset {
     double x = 0;
@@ -128,6 +128,7 @@ struct Interaction {
     bool dismissOutside = true;
     OverlayPlacement placement = OverlayPlacement::Center;
     OverlayOffset overlayOffset;
+    std::map<std::string,std::string> stateValues;
     friend bool operator==(const Interaction&,const Interaction&) = default;
 };
 [[nodiscard]] bool validInteractionSettings(const Interaction& interaction);

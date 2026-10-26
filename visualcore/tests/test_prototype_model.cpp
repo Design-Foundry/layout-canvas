@@ -11,6 +11,67 @@ struct Prototypes {
     Node create(NodeType type=NodeType::Frame,Id parent={}){auto n=node(type,parent);REQUIRE(session.edit(CreateNode{n}));return n;}
 };
 }
+
+TEST_CASE("Change-state JSON preserves relative axis values and smart animation across trigger lists") {
+    const auto patch=patchFromJson(R"({"interaction":{"trigger":"click","action":"change-state","values":{"state":"pressed","size":"large"},"transition":"smart-animate","durationMs":450}})");
+    REQUIRE(patch.has_value());REQUIRE(patch->interaction->action==PrototypeAction::ChangeState);REQUIRE(patch->interaction->target.isNil());
+    REQUIRE(patch->interaction->stateValues.at("state")=="pressed");REQUIRE(patch->interaction->transition==PrototypeTransition::SmartAnimate);
+    const auto encoded=opToJson(SetProps{Id{146,99},*patch});const auto op=opFromJson("SetProps",encoded);REQUIRE(op.has_value());REQUIRE(std::get<SetProps>(*op).patch==*patch);
+    const auto list=patchFromJson(R"({"interactions":[{"trigger":"hover","action":"change-state","values":{"state":"hover"},"transition":"dissolve","durationMs":300},{"trigger":"delay","delayMs":500,"action":"change-state","values":{"state":"default"}}]})");
+    REQUIRE(list.has_value());REQUIRE(list->interactions->size()==2);REQUIRE(list->interactions->at(1).interaction.stateValues.at("state")=="default");
+    REQUIRE(opFromJson("SetProps",opToJson(SetProps{Id{146,99},*list})).has_value());
+}
+
+TEST_CASE("Change-state refuses malformed values, targets, overlay options and incompatible transitions") {
+    for(const auto json:{
+        R"({"interaction":{"trigger":"click","action":"change-state"}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{}}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":[]}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{"state":true}}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{"state":""}}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{"":"hover"}}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{"state":"hover"},"target":"00000000-0000-0000-0000-000000000001"}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{"state":"hover"},"dismissOutside":true}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{"state":"hover"},"transition":"slide-left"}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{"state":"hover"},"transition":"push-right"}})",
+        R"({"interaction":{"trigger":"click","action":"navigate","target":"00000000-0000-0000-0000-000000000001","values":{"state":"hover"}}})",
+        R"({"interaction":{"trigger":"click","action":"open-overlay","target":"00000000-0000-0000-0000-000000000001","transition":"smart-animate"}})",
+        R"({"interaction":{"trigger":"click","action":"change-state","values":{"state":"hover"},"durationMs":100}})"
+    }) REQUIRE_FALSE(patchFromJson(json).has_value());
+    Interaction state;state.action=PrototypeAction::ChangeState;state.stateValues={{"state","hover"}};REQUIRE(validInteractionSettings(state));
+    for(int invalid=0;invalid<8;++invalid) {
+        auto test=state;
+        if(invalid==0) test.stateValues.clear();
+        if(invalid==1) test.stateValues={{std::string(65,'a'),"hover"}};
+        if(invalid==2) test.stateValues={{"state",std::string(129,'a')}};
+        if(invalid==3) {test.stateValues.clear();for(int n=0;n<9;++n)test.stateValues[std::to_string(n)]="hover";}
+        if(invalid==4) test.target=Id{146,1};
+        if(invalid==5) test.action=PrototypeAction::Back;
+        if(invalid==6) test.transition=PrototypeTransition::PushDown;
+        if(invalid==7) test.stateValues={{"state",std::string("bad\0value",9)}};
+        REQUIRE_FALSE(validInteractionSettings(test));
+    }
+}
+
+TEST_CASE("Snapshot21 guards source state actions smart navigation and override-only smart lists") {
+    Prototypes f;const auto source=f.create(),destination=f.create(),main=f.create(NodeType::Component),child=f.create(NodeType::Rect,main.id);const auto instance=*f.editor.createInstance(main.id);
+    const auto check=[&] {
+        const auto json=snapshotToJson(f.session.document());REQUIRE(json.find("\"version\":21")!=std::string::npos);
+        const auto ops=snapshotFromJson(json);REQUIRE(ops.has_value());Document loaded;for(const auto& op:*ops)REQUIRE(loaded.apply(op));REQUIRE(snapshotToJson(loaded)==json);
+        auto old=json;old.replace(old.find("\"version\":21"),12,"\"version\":20");REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    };
+    Interaction state;state.action=PrototypeAction::ChangeState;state.stateValues={{"state","hover"}};NodePatch p;p.interaction=state;REQUIRE(f.editor.setProps(source.id,p));check();
+    p.interaction=Interaction{PrototypeAction::Navigate,destination.id,PrototypeTransition::SmartAnimate,300};REQUIRE(f.editor.setProps(source.id,p));check();
+    p.interaction=Interaction{};REQUIRE(f.editor.setProps(source.id,p));p={};p.interactions=std::vector<TriggeredInteraction>{{PrototypeTrigger::Click,state}};REQUIRE(f.session.edit(SetOverride{instance,child.id,p}));check();
+    p.interactions=std::vector<TriggeredInteraction>{};REQUIRE(f.session.edit(SetOverride{instance,child.id,p}));REQUIRE(snapshotToJson(f.session.document()).find("\"version\":20")!=std::string::npos);
+}
+
+TEST_CASE("Relative state metadata is reversible and does not create absolute frame references") {
+    Prototypes f;const auto source=f.create(),unused=f.create();Interaction state;state.action=PrototypeAction::ChangeState;state.stateValues={{"state","pressed"}};state.transition=PrototypeTransition::Dissolve;
+    NodePatch p;p.interaction=state;REQUIRE(f.editor.setProps(source.id,p));REQUIRE(f.editor.undo());REQUIRE(f.session.document().find(source.id)->interaction==Interaction{});REQUIRE(f.editor.redo());
+    REQUIRE(f.session.edit(DeleteNode{unused.id}));REQUIRE(f.session.document().find(source.id)->interaction.stateValues==state.stateValues);
+    NodePatch clear;clear.interaction=Interaction{};REQUIRE(f.editor.setProps(source.id,clear));REQUIRE(snapshotToJson(f.session.document()).find("\"version\":2")!=std::string::npos);
+}
 TEST_CASE("Ordered prototype interactions validate triggers delay bounds lists and exclusive legacy actions") {
     const auto patch=patchFromJson(R"({"interactions":[{"trigger":"hover","action":"back"},{"trigger":"press","action":"close-overlay"},{"trigger":"delay","delayMs":60000,"action":"back"},{"trigger":"click","action":"back"}]})");
     REQUIRE(patch.has_value());REQUIRE(patch->interactions->size()==4);

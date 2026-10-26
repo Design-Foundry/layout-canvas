@@ -13,7 +13,9 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 20;
+constexpr int kSnapshotVersion = 21;
+
+bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
 bool extendedPrototype(const Interaction& interaction) {
     return interaction.action==PrototypeAction::OpenOverlay || interaction.action==PrototypeAction::CloseOverlay || interaction.transition!=PrototypeTransition::Instant;
@@ -73,12 +75,12 @@ constexpr std::array<std::pair<ColorChannel, std::string_view>, 4> kChannels{{
 constexpr std::array<std::pair<PrototypeOverflow, std::string_view>, 4> kPrototypeOverflows{{
     {PrototypeOverflow::None,"none"}, {PrototypeOverflow::Vertical,"vertical"},
     {PrototypeOverflow::Horizontal,"horizontal"}, {PrototypeOverflow::Both,"both"}}};
-constexpr std::array<std::pair<PrototypeTransition, std::string_view>, 10> kPrototypeTransitions{{
+constexpr std::array<std::pair<PrototypeTransition, std::string_view>, 11> kPrototypeTransitions{{
     {PrototypeTransition::Instant,"instant"}, {PrototypeTransition::Dissolve,"dissolve"},
     {PrototypeTransition::SlideLeft,"slide-left"}, {PrototypeTransition::SlideRight,"slide-right"},
     {PrototypeTransition::SlideUp,"slide-up"}, {PrototypeTransition::SlideDown,"slide-down"},
     {PrototypeTransition::PushLeft,"push-left"}, {PrototypeTransition::PushRight,"push-right"},
-    {PrototypeTransition::PushUp,"push-up"}, {PrototypeTransition::PushDown,"push-down"}}};
+    {PrototypeTransition::PushUp,"push-up"}, {PrototypeTransition::PushDown,"push-down"}, {PrototypeTransition::SmartAnimate,"smart-animate"}}};
 constexpr std::array<std::pair<OverlayPlacement, std::string_view>, 10> kOverlayPlacements{{
     {OverlayPlacement::Center,"center"}, {OverlayPlacement::TopLeft,"top-left"},
     {OverlayPlacement::TopCenter,"top-center"}, {OverlayPlacement::TopRight,"top-right"},
@@ -186,6 +188,7 @@ void writePatch(json& out, const NodePatch& p) {
             case PrototypeAction::Back: out["interaction"]={{"trigger","click"},{"action","back"}};break;
             case PrototypeAction::OpenOverlay: out["interaction"]={{"trigger","click"},{"action","open-overlay"},{"target",p.interaction->target.toString()}};break;
             case PrototypeAction::CloseOverlay: out["interaction"]={{"trigger","click"},{"action","close-overlay"}};break;
+            case PrototypeAction::ChangeState: out["interaction"]={{"trigger","click"},{"action","change-state"},{"values",p.interaction->stateValues}};break;
         }
         if(p.interaction->transition!=PrototypeTransition::Instant) {
             out["interaction"]["transition"]=nameOf(kPrototypeTransitions,p.interaction->transition);
@@ -598,16 +601,30 @@ std::optional<NodePatch> readPatch(const json& j) {
             if(!i.contains("trigger") || i["trigger"]!="click") { DiagnosticScope field{"trigger"};return refused("only click triggers are supported"); }
             if(!i.contains("action") || !i["action"].is_string()) { DiagnosticScope field{"action"};return refused("an action is required"); }
             if((i["action"]=="back" || i["action"]=="close-overlay") && i.size()==2) p.interaction=Interaction{i["action"]=="back"?PrototypeAction::Back:PrototypeAction::CloseOverlay,{}};
-            else if((i["action"]=="navigate" || i["action"]=="open-overlay") && i.contains("target")) {
-                const auto id=[&] {DiagnosticScope field{"target"};return readId(i["target"]);}();
-                if(!id||id->isNil()) {DiagnosticScope field{"target"};return refused("target must be a non-nil frame UUID");}
-                Interaction interaction{i["action"]=="navigate"?PrototypeAction::Navigate:PrototypeAction::OpenOverlay,*id};
+            else if(((i["action"]=="navigate" || i["action"]=="open-overlay") && i.contains("target")) || i["action"]=="change-state") {
+                Interaction interaction;
+                if(i["action"]=="change-state") {
+                    interaction.action=PrototypeAction::ChangeState;
+                    if(i.contains("target")) {DiagnosticScope field{"target"};return refused("change-state resolves its own instance and takes no target");}
+                    if(!i.contains("values")) {DiagnosticScope field{"values"};return refused("change-state needs variant axis values");}
+                } else {
+                    const auto id=[&] {DiagnosticScope field{"target"};return readId(i["target"]);}();
+                    if(!id||id->isNil()) {DiagnosticScope field{"target"};return refused("target must be a non-nil frame UUID");}
+                    interaction.action=i["action"]=="navigate"?PrototypeAction::Navigate:PrototypeAction::OpenOverlay;interaction.target=*id;
+                }
                 for(auto field=i.begin();field!=i.end();++field) {
                     if(field.key()=="trigger" || field.key()=="action" || field.key()=="target") continue;
                     DiagnosticScope option{field.key()};
-                    if(field.key()=="transition") {
+                    if(field.key()=="values" && interaction.action==PrototypeAction::ChangeState) {
+                        if(!field->is_object() || field->empty() || field->size()>8) return refused("values must hold 1 to 8 variant axis selections");
+                        for(auto value=field->begin();value!=field->end();++value) {
+                            DiagnosticScope axis{value.key()};
+                            if(!value->is_string()) return refused("variant selections must be strings");
+                            interaction.stateValues.emplace(value.key(),value->get<std::string>());
+                        }
+                    } else if(field.key()=="transition") {
                         const auto transition=valueOf(kPrototypeTransitions,*field);
-                        if(!transition) return refused("transition must be instant, dissolve, slide-left/right/up/down or push-left/right/up/down");
+                        if(!transition) return refused("transition must be instant, dissolve, smart-animate, slide-left/right/up/down or push-left/right/up/down");
                         interaction.transition=*transition;
                     } else if(field.key()=="durationMs") {
                         if(!field->is_number_integer()) return refused("durationMs must be an integer from 1 to 2000");
@@ -640,7 +657,7 @@ std::optional<NodePatch> readPatch(const json& j) {
                 if(interaction.action==PrototypeAction::OpenOverlay && interaction.transition>=PrototypeTransition::PushLeft && interaction.transition<=PrototypeTransition::PushDown) {DiagnosticScope field{"transition"};return refused("push transitions are supported only for navigate actions");}
                 if(!validInteractionSettings(interaction)) return refused("invalid prototype action settings");
                 p.interaction=interaction;
-            } else return refused("use navigate/open-overlay with a target, or back/close-overlay without options");
+            } else return refused("use navigate/open-overlay with a target, change-state with values, or back/close-overlay without options");
         }
     }
     if(j.contains("interactions")) {
@@ -1518,6 +1535,7 @@ std::string snapshotToJson(const Document& document) {
     bool positioned = false;
     bool scrolling = false;
     bool multipleInteractions = false;
+    bool componentStates = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
     document.forEachInPaintOrder([&](const Node& node) {
@@ -1532,6 +1550,7 @@ std::string snapshotToJson(const Document& document) {
         positioned = positioned || positionedPrototype(node.interaction);
         scrolling = scrolling || node.prototypeOverflow!=PrototypeOverflow::None;
         multipleInteractions = multipleInteractions || !node.interactions.empty();
+        componentStates = componentStates || statePrototype(node.interaction) || std::any_of(node.interactions.begin(),node.interactions.end(),[](const auto& e){return statePrototype(e.interaction);});
         swaps = swaps || !node.definition.swaps.empty();
         text = text || node.type == NodeType::Text;
         wrapping = wrapping || node.textWrap;
@@ -1546,6 +1565,7 @@ std::string snapshotToJson(const Document& document) {
             positioned = positioned || (patch.interaction && positionedPrototype(*patch.interaction));
             scrolling = scrolling || patch.prototypeOverflow.has_value();
             multipleInteractions = multipleInteractions || patch.interactions.has_value();
+            componentStates = componentStates || (patch.interaction && statePrototype(*patch.interaction)) || (patch.interactions && std::any_of(patch.interactions->begin(),patch.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));
             curved = curved || (patch.path && (patch.path->filled || !patch.path->inHandles.empty()));
             oblique = oblique || (patch.text && slanted(patch.text->font)) || (patch.textStyle && patch.textStyle->font && slanted(*patch.textStyle->font));
             wrapping = wrapping || patch.textWrap.has_value();
@@ -1557,7 +1577,7 @@ std::string snapshotToJson(const Document& document) {
         for (const auto& o : node.overrides) styleVersion(o.patch);
         for (const auto& r : node.definition.rules) styleVersion(r.patch);
     });
-    return json{{"version", multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
+    return json{{"version", componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
 }
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
@@ -1621,6 +1641,8 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         DiagnosticScope entry{slot(index)};
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
+        const auto statePatch=[](const NodePatch& p){return (p.interaction && statePrototype(*p.interaction)) || (p.interactions && std::any_of(p.interactions->begin(),p.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));};
+        if(version<21 && (statePrototype(node->interaction) || std::any_of(node->interactions.begin(),node->interactions.end(),[](const auto& e){return statePrototype(e.interaction);}) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return statePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return statePatch(r.patch);}))) return refused("component state actions and smart-animate need snapshot version 21 or later");
         const auto multiplePatch=[](const NodePatch& p){return p.interactions.has_value();};
         if(version<20 && (j["nodes"][index].contains("interactions") || !node->interactions.empty() ||
             std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return multiplePatch(o.patch);}) ||

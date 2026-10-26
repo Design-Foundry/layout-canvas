@@ -3,9 +3,9 @@
 
 namespace vc {
 bool validInteractionSettings(const Interaction& i) {
-    const bool destination=i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay;
+    const bool destination=i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay || i.action==PrototypeAction::ChangeState;
     switch(i.action) {
-        case PrototypeAction::None: case PrototypeAction::Back: case PrototypeAction::CloseOverlay:
+        case PrototypeAction::None: case PrototypeAction::Back: case PrototypeAction::CloseOverlay: case PrototypeAction::ChangeState:
             if(!i.target.isNil()) return false;
             break;
         case PrototypeAction::Navigate: case PrototypeAction::OpenOverlay:
@@ -13,6 +13,14 @@ bool validInteractionSettings(const Interaction& i) {
             break;
         default: return false;
     }
+    if(i.action==PrototypeAction::ChangeState) {
+        if(i.stateValues.empty() || i.stateValues.size()>8) return false;
+        for(const auto& [name,value]:i.stateValues) {
+            if(name.empty() || name.size()>64 || value.empty() || value.size()>128) return false;
+            TextRun test;test.content=name;if(textProblem(test)) return false;
+            test.content=value;if(textProblem(test)) return false;
+        }
+    } else if(!i.stateValues.empty()) return false;
     if(i.action!=PrototypeAction::OpenOverlay && !i.dismissOutside) return false;
     switch(i.placement) {
         case OverlayPlacement::Center: case OverlayPlacement::TopLeft: case OverlayPlacement::TopCenter: case OverlayPlacement::TopRight:
@@ -26,8 +34,10 @@ bool validInteractionSettings(const Interaction& i) {
     if(i.transition==PrototypeTransition::Instant) return i.durationMs==300;
     if(!destination || i.durationMs<1 || i.durationMs>2000) return false;
     switch(i.transition) {
-        case PrototypeTransition::Dissolve: case PrototypeTransition::SlideLeft: case PrototypeTransition::SlideRight:
-        case PrototypeTransition::SlideUp: case PrototypeTransition::SlideDown: return true;
+        case PrototypeTransition::Dissolve: return true;
+        case PrototypeTransition::SmartAnimate: return i.action==PrototypeAction::Navigate || i.action==PrototypeAction::ChangeState;
+        case PrototypeTransition::SlideLeft: case PrototypeTransition::SlideRight:
+        case PrototypeTransition::SlideUp: case PrototypeTransition::SlideDown: return i.action!=PrototypeAction::ChangeState;
         case PrototypeTransition::PushLeft: case PrototypeTransition::PushRight: case PrototypeTransition::PushUp:
         case PrototypeTransition::PushDown: return i.action==PrototypeAction::Navigate;
         default: return false;

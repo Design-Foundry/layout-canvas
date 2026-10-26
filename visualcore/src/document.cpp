@@ -180,7 +180,7 @@ bool Document::isAncestorOrSelf(const Id& ancestor, const Id& id) const {
 
 bool Document::validInteraction(const Interaction& interaction) const {
     if(!validInteractionSettings(interaction)) return refuse("interaction has an invalid action, target, transition, duration or outside-dismiss setting");
-    if(interaction.action==PrototypeAction::None || interaction.action==PrototypeAction::Back || interaction.action==PrototypeAction::CloseOverlay) return true;
+    if(interaction.action==PrototypeAction::None || interaction.action==PrototypeAction::Back || interaction.action==PrototypeAction::CloseOverlay || interaction.action==PrototypeAction::ChangeState) return true;
     const Node* target=find(interaction.target);
     return (target && target->type==NodeType::Frame && target->parent.isNil()) || refuse("a prototype destination must be an existing root frame");
 }
