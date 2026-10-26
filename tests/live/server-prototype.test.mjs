@@ -1,10 +1,80 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
+import { exportDocument, readDocument } from '../../client/src/app/editor/document-package.ts';
 const origin = new URL(process.env.CANVAS_TEST_URL || 'http://127.0.0.1:5180');
 assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname));
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const navigate = (target) => ({ trigger: 'click', action: 'navigate', target });
 const back = { trigger: 'click', action: 'back' };
+
+function deliveryFixture() {
+  const snapshot = fixture();
+  snapshot.version = 22;
+  snapshot.nodes[0].prototypeFlowName = 'Checkout';
+  snapshot.nodes[0].prototypeOverflow = 'vertical';
+  snapshot.nodes.find((node) => node.id === id(30)).definition = {
+    properties: [], axes: [{ name: 'state', values: ['idle', 'active'], default: 'idle' }], rules: [],
+  };
+  snapshot.nodes.find((node) => node.id === id(31)).interaction = {
+    trigger: 'click', action: 'change-state', values: { state: 'active' },
+    transition: 'smart-animate', durationMs: 700,
+  };
+  const dimensions = Buffer.alloc(8);
+  dimensions.writeUInt32LE(1, 0); dimensions.writeUInt32LE(1, 4);
+  const rgba = Buffer.from([255, 120, 0, 255]);
+  snapshot.nodes.push({
+    id: id(50), type: 'image', parent: id(20), order: 'a1', w: 24, h: 24,
+    image: { id: createHash('sha256').update(dimensions).update(rgba).digest('hex'),
+      width: 1, height: 1, pixels: rgba.toString('base64') },
+  });
+  return snapshot;
+}
+
+test('whole-document local package reopens native flows, links, states and inline images faithfully', async () => {
+  const source = deliveryFixture();
+  const bundle = readDocument(JSON.stringify(exportDocument(source, 'Local flow delivery')));
+  await using(bundle.snapshot, async (document) => {
+    const detail = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
+    const stored = detail.snapshot.data;
+    assert.equal(stored.version, 22);
+    assert.equal(stored.nodes.find((node) => node.id === id(10)).prototypeFlowName, 'Checkout');
+    assert.equal(stored.nodes.find((node) => node.id === id(10)).prototypeOverflow, 'vertical');
+    assert.deepEqual(stored.nodes.find((node) => node.id === id(11)).interaction, navigate(id(20)));
+    assert.deepEqual(stored.nodes.find((node) => node.id === id(31)).interaction,
+      source.nodes.find((node) => node.id === id(31)).interaction);
+    assert.deepEqual(stored.nodes.find((node) => node.id === id(50)).image, source.nodes.at(-1).image);
+    const delivered = readDocument(JSON.stringify(exportDocument(stored, 'Reopened')));
+    await using(delivered.snapshot, async (reopened) => {
+      assert.notEqual(reopened, document);
+      const fresh = await (await fetch(new URL(`/api/documents/${reopened}`, origin))).json();
+      assert.deepEqual(fresh.snapshot.data, stored);
+      assert.equal(fresh.headSeq, 1);
+    });
+    const unchanged = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
+    assert.deepEqual(unchanged, detail, 'opening a delivery copy never changes the current document');
+  });
+});
+
+test('native local reopen rejects bad destinations and corrupt inline image content atomically', async () => {
+  await using(fixture(), async (document) => {
+    const before = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
+    const listBefore = await (await fetch(new URL('/api/documents', origin))).json();
+    for (const corrupt of ['target', 'pixels']) {
+      const invalid = deliveryFixture();
+      if (corrupt === 'target') invalid.nodes[1].interaction.target = id(999);
+      else invalid.nodes.at(-1).image.pixels = 'AAAAAA==';
+      // Envelope parsing deliberately delegates native semantics and asset hashes to visualcore.
+      const bundle = readDocument(JSON.stringify(exportDocument(invalid, 'Invalid local delivery')));
+      const response = await request('/api/documents/import', { name: bundle.name, snapshot: bundle.snapshot });
+      assert.equal(response.status, 400, await response.text());
+    }
+    const after = await (await fetch(new URL(`/api/documents/${document}`, origin))).json();
+    const listAfter = await (await fetch(new URL('/api/documents', origin))).json();
+    assert.deepEqual(after, before);
+    assert.deepEqual(listAfter, listBefore, 'invalid imports must not create partial documents');
+  });
+});
 
 test('snapshot21 preserves relative component states, Smart Animate and independent overrides', async () => {
   const snapshot=fixture();snapshot.version=21;
