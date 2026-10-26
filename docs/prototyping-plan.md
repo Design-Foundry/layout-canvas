@@ -23,9 +23,30 @@ The native baseline is covered by model, runtime and browser regressions.
 | 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | Complete |
 | 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | Complete |
 | 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | Complete |
+| 7 | Nested component playback and screen matching | Independent temporary states for nested expanded instances; unambiguous hierarchical screen matching with tested dissolve fallback, no persisted format change | In progress |
 
 Variables, expressions, conditions and external URLs need separate contracts.
 Portable component files refuse document-local screen references rather than dropping them.
+
+## Stage 7 contract
+
+State actions resolve the nearest expanded component instance, including nested
+copies, without falling through to a different outer component. Temporary values
+belong to that exact expanded occurrence and effective component identity. They
+preserve independent overrides, survive normal navigation and reset with the
+existing Restart/Exit/incoming-edit lifecycle. Swapped component identities cannot
+inherit another component's temporary state. The source document, snapshots, Undo
+and synchronization remain untouched; no new persisted field or snapshot version
+is introduced.
+
+Smart Animate between two single screen layers matches exact hierarchical layer
+names and types, ignoring only the root screen's own name. Descendant names must
+be nonempty and unique among siblings; the expanded subtree sets, including
+nonpainting layers, must agree. Missing, renamed, ambiguous or incompatible trees
+fall back to full-scene dissolve. Existing paint-order, image/UV, glyph and path
+topology checks still apply. Same-screen component animation keeps stable native
+identities. This conservative contract does not imply partial-tree matching,
+automatic layer reordering, conditional actions or hosted sharing.
 
 ## Stage 5 contract
 
