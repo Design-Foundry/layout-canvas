@@ -21,6 +21,35 @@ change snapshot version 18 or authored actions. Oversized render viewports settl
 instantly rather than exceeding the two-target allocation budget. Scrolling, more
 triggers and Smart Animate remain separate planned increments.
 
+## Stage 5: isolated component states and conservative Smart Animate
+
+The public branch passed **602 automated checks**: 355 native, 138 Angular,
+41 Node interchange, 38 server and 30 live localhost HTTP checks. Native, WASM
+release, bridge TypeScript, production client and server builds pass. The final
+native/server DLL SHA256 matches:
+`24C55747D01CE5A6B8732B0D1DA473959B281AD0217B53674086E4C45C796420`.
+
+Native tests verify detached cache ownership, independent instance state, unchanged
+authoring snapshots/outbox/Undo, retention of authored properties and overrides,
+state persistence through navigation and resets on Restart/remote edits. They also
+cover invalid context/axis/choice refusal, derived nested-instance refusal, reduced
+motion, immutable outgoing state and midpoint paint interpolation. Draw tests cover
+stable identity, geometry/color/path interpolation, UV preservation and conservative
+fallback. Model/HTTP tests exercise strict state syntax, override persistence,
+transition combinations, snapshot 21 and downgrade refusal. Inspector tests cover
+declared-axis discovery/selection, imported unavailable choices and list preservation.
+
+Browser QA used two instances of one native component containing an immutable RGBA
+image. Expanding one instance changed its image geometry, background and radii while
+the other remained unchanged. An active-transition capture had `aria-busy=true`;
+the final capture had `false`. Changing text used a whole-scene dissolve, and Restart
+restored both instances. The imported document stayed at sequence 1 with empty
+authored instance values after playback. Inspector state selection, Smart Animate,
+Undo/Redo, confirmed operation-log persistence and reload were then verified.
+No WebGPU validation messages were observed. Physical touch hardware remains
+unverified. Cross-screen identity matching and derived nested instance states are
+explicit limitations, not verified Figma parity.
+
 ## Stage 4: ordered trigger lists
 
 The public branch passed **570 automated checks**: 338 native, 127 Angular,

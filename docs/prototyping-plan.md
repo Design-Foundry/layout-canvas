@@ -21,7 +21,7 @@ The native baseline is covered by model, runtime and browser regressions.
 | 2 | Offscreen composition and transition polish | Correct group alpha for overlapping paints/images/text; preserved outgoing viewport across unequal screens; reduced-motion preference and consistent interrupted transition policy | Complete |
 | 3 | Scrollable screen and overlay viewports | Explicit overflow contract, wheel/touch scroll with clipping and consistent picking; fixed/sticky elements only after native layout semantics exist; reset and remote invalidation behavior tested | Complete |
 | 4 | Multiple interactions and triggers | Versioned ordered interaction list, click/hover/press/delay semantics, cancellation and timer lifecycle, source/instance overrides and backward migration | Complete |
-| 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | In progress |
+| 5 | Interactive components and Smart Animate | Variant state transitions without authoring mutations; stable matching identities, interpolation policy per property, conservative fallback for incompatible nodes; real component and image demos | Complete |
 | 6 | Flows and delivery | Named flow entries, visual connector authoring, accessible player controls, full-document local export/reopen; sharing only after explicit hosting/auth scope | Planned |
 
 Variables, expressions, conditions and external URLs need separate contracts.
@@ -104,7 +104,7 @@ keeps the clamped position and cancels the gesture. Playback produces no documen
 operations, undo entries or serialized scroll offsets. Fixed/sticky positioning,
 momentum, nested scroll containers and pinch zoom remain separate work.
 
-Stages 5–6 remain planned; these increments are not full Figma prototyping parity.
+Stage 6 remains planned; these increments are not full Figma prototyping parity.
 
 ## Stage 4 contract
 
@@ -135,5 +135,9 @@ DLLs verified; see the validation record for touch-device limits.
 
 Stage 4 passed 570 automated checks and real browser click/press/hover/delay,
 initial full-stage timer entry and persisted inspector/reload verification.
-See the validation record. Interactive component states and Smart Animate remain
-the next implementation stage.
+See the validation record. Stage 5 extends that baseline with isolated component states and conservative
+Smart Animate.
+
+Stage 5 passed 602 automated checks and real browser component/image transition,
+text fallback, reset and persisted inspector/reload verification. Named flows and
+full-document local delivery are the next implementation stage.
