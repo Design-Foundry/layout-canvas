@@ -41,10 +41,19 @@ describe('document-local prototype authoring', () => {
     await fixture.whenStable();
     const control=fixture.nativeElement.querySelector('[aria-label="State value 1"]') as HTMLSelectElement;
     expect(control.tagName).toBe('SELECT');
+    expect(control.value).toBe('Unavailable');
     expect([...control.options].map(option=>option.value)).toEqual(['Unavailable','Idle','Active']);
     expect(control.options[0].disabled).toBe(true);expect(saved).toEqual([]);
     await select('State value 1','Active');
     expect(saved.at(-1)?.patch.interaction).toMatchObject({ values: { State: 'Active' } });
+    fixture.componentRef.setInput('node', {
+      id:'another-copy',type:'rect',inInstance:true,
+      interaction:{trigger:'click',action:'change-state',values:{Unknown:'Original'}},
+    });
+    await fixture.whenStable();
+    const axis=fixture.nativeElement.querySelector('[aria-label="State axis 1"]') as HTMLSelectElement;
+    expect(axis.value).toBe('Unknown');expect(axis.selectedOptions[0].disabled).toBe(true);
+    expect(saved.length).toBe(1);
   });
   it('selects the new axis default when its declared choices differ and preserves the trigger', async () => {
     const { fixture, saved, select } = await setup(true, {

@@ -171,7 +171,7 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
           @if (stateAxes().length) {
             <select [attr.aria-label]="'State axis ' + ($index + 1)" [value]="entry[0]"
               [disabled]="!!node().swapBound" (change)="stateField($event, $index, 'name')">
-              @if (!stateAxis(entry[0])) { <option [value]="entry[0]" disabled>{{ entry[0] }} (unavailable)</option> }
+              @if (!stateAxis(entry[0])) { <option [value]="entry[0]" [selected]="true" disabled>{{ entry[0] }} (unavailable)</option> }
               @for (axis of stateAxes(); track axis.name) {
                 <option [value]="axis.name" [selected]="axis.name === entry[0]">{{ axis.name }}</option>
               }
@@ -186,7 +186,7 @@ const PLACEMENTS: readonly PrototypePlacement[] = [
           @if (stateAxis(entry[0]); as axis) {
             <select [attr.aria-label]="'State value ' + ($index + 1)" [value]="entry[1]"
               [disabled]="!!node().swapBound" (change)="stateField($event, $index, 'value')">
-              @if (!axis.values.includes(entry[1])) { <option [value]="entry[1]" disabled>{{ entry[1] }} (unavailable)</option> }
+              @if (!axis.values.includes(entry[1])) { <option [value]="entry[1]" [selected]="true" disabled>{{ entry[1] }} (unavailable)</option> }
               @for (value of axis.values; track value) {
                 <option [value]="value" [selected]="value === entry[1]">{{ value }}</option>
               }
