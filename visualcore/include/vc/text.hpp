@@ -11,7 +11,7 @@ namespace vc {
 
 enum class TextAlign { Left, Center, Right };
 
-/// A single face and style for an editable text node. The font is embedded in both runtimes.
+/// A single face and style for an editable text node.
 struct TextRun {
     std::string content;
     std::string font = "inter-regular-v1";
@@ -33,10 +33,16 @@ struct TextStyle {
     friend bool operator==(const TextStyle&, const TextStyle&) = default;
 };
 
+/// A glyph of one face at fixed axis values.
+struct GlyphKey {
+    std::uint32_t instance = 0;
+    std::uint32_t glyph = 0;
+    friend bool operator==(const GlyphKey&, const GlyphKey&) = default;
+};
+
 struct TextGlyph {
     Rect box;
-    /// Normalized atlas rectangle, not a world-space box.
-    Rect uv;
+    GlyphKey key;
 };
 
 struct TextLayout {
@@ -51,10 +57,27 @@ struct TextLayout {
 [[nodiscard]] const char* textProblem(const TextRun& text);
 /// Optional greedy wrapping at spaces, with glyph breaks for words wider than the available width.
 [[nodiscard]] TextLayout layoutText(const TextRun& text, double availableWidth = -1.0, bool wrap = false);
-/// Immutable trusted font atlas; external font bytes are deliberately not accepted.
+/// Id of the bundled Inter variable face.
+inline constexpr std::string_view kEmbeddedInterFace = "embedded/inter";
+/// Registers `bytes` as face `id` when their SHA-256 is `sha256` in lowercase hex. Returns null, or why
+/// it refused. Registering the same id and hash again succeeds without copying.
+[[nodiscard]] const char* registerFontFace(std::string_view id, std::span<const std::uint8_t> bytes, std::string_view sha256);
+/// SHA-256 of face `id`, or empty when no face has that id.
+[[nodiscard]] std::string fontFaceSha256(std::string_view id);
+
+/// Normalized atlas rectangle of `key`, rasterized on first use. Empty when the glyph has no ink.
+[[nodiscard]] Rect textGlyphUv(GlyphKey key);
+/// Grayscale glyph atlas, `kTextAtlasSize` pixels square.
 [[nodiscard]] std::span<const std::uint8_t> textAtlas();
+/// Grows when the atlas is cleared to make room, which invalidates earlier `textGlyphUv` results.
+[[nodiscard]] std::uint64_t textAtlasGeneration();
+struct TextAtlasRegion {
+    int x = 0, y = 0, w = 0, h = 0;
+};
+/// Pixels changed since the last call, aligned to `kTextAtlasPadding`, or null when none changed.
+[[nodiscard]] std::optional<TextAtlasRegion> takeTextAtlasChanges();
 inline constexpr int kTextAtlasSize = 4096;
-/// Every glyph's `uv` has at least this many transparent atlas pixels around it, and cells are
+/// Every glyph's atlas rectangle has at least this many transparent atlas pixels around it, and cells are
 /// aligned to it, so the first `kTextAtlasMipLevels` mip levels keep glyphs apart.
 inline constexpr int kTextAtlasPadding = 8;
 inline constexpr int kTextAtlasMipLevels = 4;

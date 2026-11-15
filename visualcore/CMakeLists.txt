@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+﻿cmake_minimum_required(VERSION 3.25)
 project(visualcore VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -13,23 +13,32 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
-# The exact trusted font bytes are shared by native metrics and the WASM glyph atlas.
+FetchContent_Declare(
+    harfbuzz
+    URL https://github.com/harfbuzz/harfbuzz/releases/download/15.0.0/harfbuzz-15.0.0.tar.xz
+    URL_HASH SHA256=968536e9abd782f07f7954044c0c4020199fcdd39b41d221ec42d2a3be4a44df
+)
+FetchContent_GetProperties(harfbuzz)
+if(NOT harfbuzz_POPULATED)
+    FetchContent_Populate(harfbuzz)
+endif()
+add_library(vc_harfbuzz STATIC ${harfbuzz_SOURCE_DIR}/src/harfbuzz.cc)
+target_include_directories(vc_harfbuzz PUBLIC ${harfbuzz_SOURCE_DIR}/src)
+target_compile_definitions(vc_harfbuzz PRIVATE HB_NO_AAT HB_NO_PAINT HB_NO_COLOR HB_NO_LEGACY HB_NO_BUFFER_SERIALIZE
+    HB_NO_OT_FONT_GLYPH_NAMES HB_NO_FACE_COLLECT_UNICODES HB_NO_MATH HB_NO_META HB_NO_BASE
+    HB_NO_NAME HB_NO_ERRNO HB_NO_GETENV HB_NO_OPEN HB_NO_SETLOCALE HB_NO_STYLE $<$<BOOL:${EMSCRIPTEN}>:HB_NO_MT>)
+set_target_properties(vc_harfbuzz PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(EMSCRIPTEN)
+    target_compile_options(vc_harfbuzz PRIVATE -fno-exceptions -fno-rtti)
+endif()
+
+# The exact trusted font bytes are shared by native layout and the WASM glyph atlas.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter.ttf")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter.ttf" VC_FONT_HEX HEX)
 string(REGEX REPLACE "(..)" "0x\\1," VC_FONT_ARRAY "${VC_FONT_HEX}")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/vc_inter_font.inc" "${VC_FONT_ARRAY}")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/CanvasInter-Bold.ttf")
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/CanvasInter-Bold.ttf" VC_BOLD_FONT_HEX HEX)
-string(REGEX REPLACE "(..)" "0x\\1," VC_BOLD_FONT_ARRAY "${VC_BOLD_FONT_HEX}")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/vc_inter_bold_font.inc" "${VC_BOLD_FONT_ARRAY}")
-foreach(FACE IN ITEMS Oblique BoldOblique)
-    string(TOLOWER "${FACE}" FACE_LOWER)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/CanvasInter-${FACE}.ttf")
-    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/CanvasInter-${FACE}.ttf" FACE_HEX HEX)
-    string(REGEX REPLACE "(..)" "0x\\1," FACE_ARRAY "${FACE_HEX}")
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/vc_inter_${FACE_LOWER}_font.inc" "${FACE_ARRAY}")
-endforeach()
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter.ttf" VC_INTER_SHA256)
 
 # ---------------------------------------------------------------------------
 # vc_core: plain C++. No browser, no GPU. Compiles and tests natively.
@@ -43,6 +52,7 @@ add_library(vc_core STATIC
     src/document_tokens.cpp
     src/draw_list.cpp
     src/editor.cpp
+    src/fonts.cpp
     src/fractional_index.cpp
     src/geometry.cpp
     src/id.cpp
@@ -50,6 +60,7 @@ add_library(vc_core STATIC
     src/json.cpp
     src/node.cpp
     src/session.cpp
+    src/sha256.cpp
     src/tokens.cpp
     src/text.cpp
     src/raster.cpp
@@ -57,7 +68,8 @@ add_library(vc_core STATIC
 )
 target_include_directories(vc_core PUBLIC include)
 target_include_directories(vc_core PRIVATE third_party "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(vc_core PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(vc_core PRIVATE nlohmann_json::nlohmann_json vc_harfbuzz)
+target_compile_definitions(vc_core PRIVATE VC_INTER_SHA256="${VC_INTER_SHA256}")
 
 if(MSVC)  # true for clang-cl too
     target_compile_options(vc_core PRIVATE /W4)
@@ -134,6 +146,7 @@ else()
             tests/test_native.cpp
             tests/test_tokens.cpp
             tests/test_text.cpp
+            tests/test_font_registry.cpp
             tests/test_line.cpp
             tests/test_path.cpp
             tests/test_prototype_model.cpp
@@ -144,6 +157,7 @@ else()
             tests/test_viewport_controller.cpp
         )
         target_link_libraries(vc_tests PRIVATE vc_core vc_native Catch2::Catch2WithMain)
+        target_compile_definitions(vc_tests PRIVATE VC_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts")
 
         enable_testing()
         list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

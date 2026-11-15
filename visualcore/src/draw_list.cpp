@@ -228,8 +228,10 @@ private:
                     const auto slot=glyphIndex++;
                     const Rect quad = offset(glyph.box, box.x, box.y);
                     if (!quad.intersects(intersect(view_, textClip))) continue;
+                    const Rect uv = textGlyphUv(glyph.key);
+                    if (uv.w <= 0 || uv.h <= 0) continue;
                     // Glyph items use a.rect for normalized atlas coordinates.
-                    out_.push_back({DrawKind::Glyph, false, quad, {glyph.uv, {}}, {}, color, textClip});
+                    out_.push_back({DrawKind::Glyph, false, quad, {uv, {}}, {}, color, textClip});
                     out_.back().node=id;out_.back().primitive=slot;
                     visible = true;
                 }

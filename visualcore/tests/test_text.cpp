@@ -314,7 +314,7 @@ TEST_CASE("Bundled bold uses a distinct trusted face with its own metrics, glyph
     auto bold=regular; bold.font="inter-bold-v1";
     REQUIRE(validText(bold));
     REQUIRE(layoutText(bold).width > layoutText(regular).width);
-    REQUIRE(layoutText(bold).glyphs.front().uv.y > layoutText(regular).glyphs.front().uv.y);
+    REQUIRE(layoutText(bold).glyphs.front().key.instance != layoutText(regular).glyphs.front().key.instance);
     bold.content="AV"; const auto pair=layoutText(bold).width;
     bold.content="A"; const auto a=layoutText(bold).width; bold.content="V";
     REQUIRE(pair < a + layoutText(bold).width);
@@ -449,7 +449,7 @@ TEST_CASE("Real oblique faces keep ink inside Hug bounds and account for overhan
         REQUIRE(wrapped.height == full.height*2);
         REQUIRE(layoutText(text,0,true).glyphs.size() == 2);
         auto upright=text; upright.font=font==std::string("inter-oblique-v1") ? "inter-regular-v1" : "inter-bold-v1";
-        REQUIRE(full.glyphs.front().uv.y > layoutText(upright).glyphs.front().uv.y);
+        REQUIRE(full.glyphs.front().key.instance != layoutText(upright).glyphs.front().key.instance);
     }
 }
 
@@ -540,6 +540,7 @@ TEST_CASE("Bundled font measures accented Latin, kerning, alignment and explicit
     REQUIRE_THAT(centered.glyphs[0].box.x - multiline.glyphs[0].box.x, WithinAbs(50, 1e-8));
     text.letterSpacing = 2;
     REQUIRE(layoutText(text).width > multiline.width);
+    for (const auto& glyph : multiline.glyphs) REQUIRE(textGlyphUv(glyph.key).w > 0);
     const auto atlas = textAtlas();
     REQUIRE(atlas.size() == kTextAtlasSize * kTextAtlasSize);
     REQUIRE(std::any_of(atlas.begin(), atlas.end(), [](auto p) { return p != 0; }));

@@ -158,6 +158,7 @@ struct Renderer::State {
     void writeFrameUniform();
     void buildInstances();
     void uploadImages();
+    void uploadGlyphAtlas(int x, int y, int w, int h);
     void addSelectionOutlines();
     void applyCursor();
     bool frame(double time);
@@ -251,6 +252,29 @@ void Renderer::State::onDevice() {
     }
 }
 
+void Renderer::State::uploadGlyphAtlas(int x, int y, int w, int h) {
+    const auto atlas = textAtlas();
+    std::vector<std::uint8_t> level(std::size_t(w) * h);
+    for (int row = 0; row < h; ++row)
+        std::copy_n(atlas.data() + std::size_t(y + row) * kTextAtlasSize + x, w, level.data() + std::size_t(row) * w);
+    for (uint32_t mip = 0; mip < kTextAtlasMipLevels; ++mip) {
+        const uint32_t rw = uint32_t(w) >> mip, rh = uint32_t(h) >> mip;
+        if (mip > 0) {
+            const uint32_t pw = uint32_t(w) >> (mip - 1);
+            for (uint32_t ry = 0; ry < rh; ++ry)
+                for (uint32_t rx = 0; rx < rw; ++rx) {
+                    const auto at = [&](uint32_t dx, uint32_t dy) { return unsigned(level[(2 * ry + dy) * pw + 2 * rx + dx]); };
+                    level[ry * rw + rx] = std::uint8_t((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4);
+                }
+        }
+        wgpu::TexelCopyTextureInfo destination{}; destination.texture = glyphTexture; destination.mipLevel = mip;
+        destination.origin = {uint32_t(x) >> mip, uint32_t(y) >> mip, 0};
+        wgpu::TexelCopyBufferLayout dataLayout{}; dataLayout.bytesPerRow = rw; dataLayout.rowsPerImage = rh;
+        const wgpu::Extent3D extent{rw, rh, 1};
+        device.GetQueue().WriteTexture(&destination, level.data(), std::size_t(rw) * rh, &dataLayout, &extent);
+    }
+}
+
 void Renderer::State::createPipelines() {
     wgpu::TextureDescriptor textureDesc{};
     textureDesc.size = {kTextAtlasSize, kTextAtlasSize, 1};
@@ -264,21 +288,8 @@ void Renderer::State::createPipelines() {
     samplerDesc.minFilter = wgpu::FilterMode::Linear;
     samplerDesc.mipmapFilter = wgpu::MipmapFilterMode::Linear;
     glyphSampler = device.CreateSampler(&samplerDesc);
-    const auto atlas = textAtlas();
-    std::vector<std::uint8_t> level(atlas.begin(), atlas.end());
-    for (uint32_t mip = 0, size = kTextAtlasSize; mip < kTextAtlasMipLevels; ++mip, size /= 2) {
-        if (mip > 0) {
-            for (uint32_t y = 0; y < size; ++y)
-                for (uint32_t x = 0; x < size; ++x) {
-                    const auto at = [&](uint32_t dx, uint32_t dy) { return unsigned(level[(2 * y + dy) * 2 * size + 2 * x + dx]); };
-                    level[y * size + x] = std::uint8_t((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4);
-                }
-        }
-        wgpu::TexelCopyTextureInfo destination{}; destination.texture = glyphTexture; destination.mipLevel = mip;
-        wgpu::TexelCopyBufferLayout dataLayout{}; dataLayout.bytesPerRow = size; dataLayout.rowsPerImage = size;
-        const wgpu::Extent3D extent{size, size, 1};
-        device.GetQueue().WriteTexture(&destination, level.data(), std::size_t(size) * size, &dataLayout, &extent);
-    }
+    uploadGlyphAtlas(0, 0, int(kTextAtlasSize), int(kTextAtlasSize));
+    takeTextAtlasChanges();
 
     wgpu::TextureDescriptor imageDesc{};imageDesc.size={512,512,8};imageDesc.format=wgpu::TextureFormat::RGBA8Unorm;
     imageDesc.usage=wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
@@ -511,63 +522,69 @@ void Renderer::State::uploadImages() {
 }
 
 void Renderer::State::buildInstances() {
-    view = camera.visibleWorld({cssWidth, cssHeight});
-    origin = camera.position();
-    stats.visible=0;composing=false;compositionSplit=0;
-    if(editor.presenting()) {
-        auto scene=editor.prototypeScene();
-        // Bound two full-resolution scene targets to 128 MiB total.
-        if(scene.dissolve && std::uint64_t(width)*height>16*1024*1024) {
-            editor.finishPrototypeTransition();scene=editor.prototypeScene();
-        }
-        composing=scene.dissolve || scene.smart;compositionProgress=static_cast<float>(scene.progress);
+    for(int attempt=0;attempt<2;++attempt) {
+        const auto atlasGeneration=textAtlasGeneration();
         drawItems.clear();
-        std::vector<DrawItem> layerItems;
-        const auto append=[&](const std::vector<PrototypeLayer>& layers) {
-            for(const auto& layer:layers) {
-                if(layer.overlay) {
-                    DrawItem scrim;scrim.quad=layer.viewport.value_or(view);scrim.a.rect=scrim.quad;scrim.clip=scrim.quad;
-                    scrim.node=layer.screen;scrim.primitive=UINT32_MAX;
-                    scrim.color={0,0,0,.35f};drawItems.push_back(std::move(scrim));
-                }
-                const Rect sourceView{(view.x-layer.offset.x)/layer.scale,(view.y-layer.offset.y)/layer.scale,
-                                      view.w/layer.scale,view.h/layer.scale};
-                const auto& sourceDocument=layer.document?*layer.document:editor.prototypeDocument();
-                stats.visible+=buildDrawList(sourceDocument,sourceView,editor.activeMode(),layerItems,layer.screen,layer.scroll);
-                for(auto& item:layerItems) {
-                    transformDrawItem(item,layer.offset,1,layer.viewport,layer.scale);
-                    drawItems.push_back(std::move(item));
-                }
-            }
-        };
-        if(composing) {append(scene.from);compositionSplit=drawItems.size();}
-        append(scene.to);
-        if(scene.smart) {
-            const std::vector<DrawItem> from(drawItems.begin(),drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit));
-            std::vector<DrawItem> to(drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit),drawItems.end());
-            bool identitiesValid=true;
-            if(scene.from.size()==1 && scene.to.size()==1 && !scene.from.front().overlay && !scene.to.front().overlay &&
-               scene.from.front().screen!=scene.to.front().screen) {
-                const auto& before=scene.from.front();const auto& after=scene.to.front();
-                const auto& beforeDocument=before.document?*before.document:editor.prototypeDocument();
-                const auto& afterDocument=after.document?*after.document:editor.prototypeDocument();
-                auto matched=remapDrawListIdentities(beforeDocument,before.screen,afterDocument,after.screen,to);
-                identitiesValid=matched.has_value();
-                if(matched) to=std::move(*matched);
-            }
-            auto interpolated=identitiesValid?interpolateDrawLists(from,to,scene.progress):std::nullopt;
-            if(interpolated) {
-                drawItems=std::move(*interpolated);composing=false;compositionSplit=0;
-            } else if(std::uint64_t(width)*height>16*1024*1024) {
+        view = camera.visibleWorld({cssWidth, cssHeight});
+        origin = camera.position();
+        stats.visible=0;composing=false;compositionSplit=0;
+        if(editor.presenting()) {
+            auto scene=editor.prototypeScene();
+            // Bound two full-resolution scene targets to 128 MiB total.
+            if(scene.dissolve && std::uint64_t(width)*height>16*1024*1024) {
                 editor.finishPrototypeTransition();scene=editor.prototypeScene();
-                drawItems.clear();stats.visible=0;composing=false;compositionSplit=0;append(scene.to);
             }
+            composing=scene.dissolve || scene.smart;compositionProgress=static_cast<float>(scene.progress);
+            drawItems.clear();
+            std::vector<DrawItem> layerItems;
+            const auto append=[&](const std::vector<PrototypeLayer>& layers) {
+                for(const auto& layer:layers) {
+                    if(layer.overlay) {
+                        DrawItem scrim;scrim.quad=layer.viewport.value_or(view);scrim.a.rect=scrim.quad;scrim.clip=scrim.quad;
+                        scrim.node=layer.screen;scrim.primitive=UINT32_MAX;
+                        scrim.color={0,0,0,.35f};drawItems.push_back(std::move(scrim));
+                    }
+                    const Rect sourceView{(view.x-layer.offset.x)/layer.scale,(view.y-layer.offset.y)/layer.scale,
+                                          view.w/layer.scale,view.h/layer.scale};
+                    const auto& sourceDocument=layer.document?*layer.document:editor.prototypeDocument();
+                    stats.visible+=buildDrawList(sourceDocument,sourceView,editor.activeMode(),layerItems,layer.screen,layer.scroll);
+                    for(auto& item:layerItems) {
+                        transformDrawItem(item,layer.offset,1,layer.viewport,layer.scale);
+                        drawItems.push_back(std::move(item));
+                    }
+                }
+            };
+            if(composing) {append(scene.from);compositionSplit=drawItems.size();}
+            append(scene.to);
+            if(scene.smart) {
+                const std::vector<DrawItem> from(drawItems.begin(),drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit));
+                std::vector<DrawItem> to(drawItems.begin()+static_cast<std::ptrdiff_t>(compositionSplit),drawItems.end());
+                bool identitiesValid=true;
+                if(scene.from.size()==1 && scene.to.size()==1 && !scene.from.front().overlay && !scene.to.front().overlay &&
+                   scene.from.front().screen!=scene.to.front().screen) {
+                    const auto& before=scene.from.front();const auto& after=scene.to.front();
+                    const auto& beforeDocument=before.document?*before.document:editor.prototypeDocument();
+                    const auto& afterDocument=after.document?*after.document:editor.prototypeDocument();
+                    auto matched=remapDrawListIdentities(beforeDocument,before.screen,afterDocument,after.screen,to);
+                    identitiesValid=matched.has_value();
+                    if(matched) to=std::move(*matched);
+                }
+                auto interpolated=identitiesValid?interpolateDrawLists(from,to,scene.progress):std::nullopt;
+                if(interpolated) {
+                    drawItems=std::move(*interpolated);composing=false;compositionSplit=0;
+                } else if(std::uint64_t(width)*height>16*1024*1024) {
+                    editor.finishPrototypeTransition();scene=editor.prototypeScene();
+                    drawItems.clear();stats.visible=0;composing=false;compositionSplit=0;append(scene.to);
+                }
+            }
+        } else {
+            releaseComposition();
+            stats.visible=buildDrawList(document,view,editor.activeMode(),drawItems);
         }
-    } else {
-        releaseComposition();
-        stats.visible=buildDrawList(document,view,editor.activeMode(),drawItems);
+        if(!editor.presenting()) addSelectionOutlines();
+        if(textAtlasGeneration()==atlasGeneration) break;
     }
-    if(!editor.presenting()) addSelectionOutlines();
+    if(glyphTexture) if(const auto region=takeTextAtlasChanges()) uploadGlyphAtlas(region->x,region->y,region->w,region->h);
     uploadImages();
 
     instances.clear();

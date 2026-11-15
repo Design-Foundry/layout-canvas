@@ -1,48 +1,14 @@
 #include "vc/text.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <stdexcept>
-#include <unordered_map>
-
-#define STB_TRUETYPE_IMPLEMENTATION
-#include "stb/stb_truetype.h"
+#include "fonts.hpp"
 
 namespace vc {
 namespace {
-const unsigned char kFont[] = {
-#include "vc_inter_font.inc"
-};
-const unsigned char kBoldFont[] = {
-#include "vc_inter_bold_font.inc"
-};
-const unsigned char kObliqueFont[] = {
-#include "vc_inter_oblique_font.inc"
-};
-const unsigned char kBoldObliqueFont[] = {
-#include "vc_inter_boldoblique_font.inc"
-};
-constexpr double kAtlasEm = 96.0;
-struct KernPair { std::uint32_t key; int advance; };
-constexpr KernPair kKerning[] = {
-#include "inter_kerning.inc"
-};
-constexpr KernPair kBoldKerning[] = {
-#include "inter_bold_kerning.inc"
-};
-constexpr KernPair kObliqueKerning[] = {
-#include "inter_oblique_kerning.inc"
-};
-constexpr KernPair kBoldObliqueKerning[] = {
-#include "inter_bold_oblique_kerning.inc"
-};
+using fonts::kAtlasEm;
 constexpr std::uint32_t kPunctuation[] = {0x2013, 0x2014, 0x2018, 0x2019, 0x201a, 0x201c, 0x201d,
                                         0x201e, 0x2022, 0x2026, 0x2039, 0x203a, 0x20ac, 0x2122};
-constexpr int align(int size) { return (size + kTextAtlasPadding - 1) / kTextAtlasPadding * kTextAtlasPadding; }
-struct Glyph {
-    Rect ink;
-    Rect uv;
-    double advance = 0;
-};
 
 bool decode(std::string_view content, std::vector<std::uint32_t>& out) {
     if (content.size() > 4096) return false;
@@ -71,56 +37,30 @@ bool decode(std::string_view content, std::vector<std::uint32_t>& out) {
     return true;
 }
 
-class Font {
-public:
-    Font(const unsigned char* data, std::span<const KernPair> pairs, std::vector<std::uint8_t>& pixels, int& x, int& y, int& rowHeight) : pairs_(pairs) {
-        if (!stbtt_InitFont(&info, data, 0)) throw std::runtime_error("Invalid bundled font");
-        const auto scale = stbtt_ScaleForMappingEmToPixels(&info, float(kAtlasEm));
-        int top, bottom, gap;
-        stbtt_GetFontVMetrics(&info, &top, &bottom, &gap);
-        ascent = top * scale; descent = bottom * scale;
-        std::vector<std::uint32_t> characters;
-        for (std::uint32_t c = 0x20; c <= 0x7e; ++c) characters.push_back(c);
-        for (std::uint32_t c = 0xa0; c <= 0xff; ++c) characters.push_back(c);
-        characters.insert(characters.end(), std::begin(kPunctuation), std::end(kPunctuation));
-        for (auto cp : characters) {
-            if (!stbtt_FindGlyphIndex(&info, cp)) throw std::runtime_error("Bundled font lacks a declared glyph");
-            int width, height, left, upper, advance, bearing;
-            unsigned char* bitmap = stbtt_GetCodepointBitmap(&info, scale, scale, cp, &width, &height, &left, &upper);
-            const int cellWidth = align(width + 2 * kTextAtlasPadding), cellHeight = align(height + 2 * kTextAtlasPadding);
-            if (x + cellWidth > kTextAtlasSize) { x = 0; y += rowHeight; rowHeight = 0; }
-            if (y + cellHeight > kTextAtlasSize) { stbtt_FreeBitmap(bitmap, nullptr); throw std::runtime_error("Font atlas overflow"); }
-            for (int j = 0; j < height; ++j)
-                std::copy_n(bitmap + j * width, width, pixels.begin() + (y + kTextAtlasPadding + j) * kTextAtlasSize + x + kTextAtlasPadding);
-            stbtt_FreeBitmap(bitmap, nullptr);
-            stbtt_GetCodepointHMetrics(&info, cp, &advance, &bearing);
-            glyphs.emplace(cp, Glyph{{double(left), double(upper), double(width), double(height)},
-                {double(x + kTextAtlasPadding) / kTextAtlasSize, double(y + kTextAtlasPadding) / kTextAtlasSize,
-                 double(width) / kTextAtlasSize, double(height) / kTextAtlasSize}, advance * scale});
-            x += cellWidth; rowHeight = std::max(rowHeight, cellHeight);
+struct Face {
+    std::uint32_t instance = 0;
+    bool oblique = false;
+};
+
+Face faceFor(const std::string& font) {
+    static const std::array<std::uint32_t, 4> instances = [] {
+        std::array<std::uint32_t, 4> out{};
+        const float weights[] = {400, 700, 400, 700}, slants[] = {0, 0, -10, -10};
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            const fonts::Variation axes[] = {{fonts::tag("wght"), weights[i]}, {fonts::tag("slnt"), slants[i]}};
+            out[i] = std::uint32_t(fonts::instanceIndex(kEmbeddedInterFace, axes));
         }
-    }
-    double kern(std::uint32_t a, std::uint32_t b) const {
-        const std::uint32_t key = (a << 16) | b;
-        const auto at = std::lower_bound(pairs_.begin(), pairs_.end(), key,
-            [](const KernPair& pair, std::uint32_t value) { return pair.key < value; });
-        return at != pairs_.end() && at->key == key ? at->advance * stbtt_ScaleForMappingEmToPixels(&info, float(kAtlasEm)) : 0.0;
-    }
-    stbtt_fontinfo info{};
-    std::unordered_map<std::uint32_t, Glyph> glyphs;
-    double ascent = 0, descent = 0;
-private:
-    std::span<const KernPair> pairs_;
+        return out;
+    }();
+    if (font == "inter-bold-v1") return {instances[1], false};
+    if (font == "inter-oblique-v1") return {instances[2], true};
+    if (font == "inter-bold-oblique-v1") return {instances[3], true};
+    return {instances[0], false};
+}
+
+struct Line {
+    std::size_t paragraph = 0, begin = 0, end = 0;
 };
-struct FontSet {
-    std::vector<std::uint8_t> pixels = std::vector<std::uint8_t>(kTextAtlasSize * kTextAtlasSize, 0);
-    int x = 0, y = 0, rowHeight = 0;
-    Font regular{kFont, kKerning, pixels, x, y, rowHeight};
-    Font bold{kBoldFont, kBoldKerning, pixels, x, y, rowHeight};
-    Font oblique{kObliqueFont, kObliqueKerning, pixels, x, y, rowHeight};
-    Font boldOblique{kBoldObliqueFont, kBoldObliqueKerning, pixels, x, y, rowHeight};
-};
-const FontSet& fonts() { static const FontSet instance; return instance; }
 } // namespace
 
 const char* textProblem(const TextRun& text) {
@@ -142,71 +82,77 @@ bool validText(const TextRun& text) {
 TextLayout layoutText(const TextRun& text, double availableWidth, bool wrap) {
     TextLayout result;
     if (!validText(text)) return result;
-    std::vector<std::uint32_t> cps; decode(text.content, cps);
-    const bool oblique = text.font == "inter-oblique-v1" || text.font == "inter-bold-oblique-v1";
-    const Font& face = text.font == "inter-bold-v1" ? fonts().bold : text.font == "inter-oblique-v1" ? fonts().oblique : text.font == "inter-bold-oblique-v1" ? fonts().boldOblique : fonts().regular;
+    const auto face = faceFor(text.font);
+    const auto metrics = fonts::metrics(face.instance);
     const double scale = text.fontSize / kAtlasEm;
     const double lineHeight = text.fontSize * text.lineHeight;
-    const double baseline = (lineHeight - (face.ascent - face.descent) * scale) / 2 + face.ascent * scale;
-    std::vector<std::vector<std::uint32_t>> lines;
-    std::size_t begin = 0, i = 0, lastBreak = 0;
-    double measured = 0;
-    double left = 0, right = 0;
-    std::uint32_t prior = 0;
-    while (i < cps.size()) {
-        const auto cp = cps[i];
-        if (cp == '\n') {
-            lines.emplace_back(cps.begin() + begin, cps.begin() + i);
-            begin = ++i; lastBreak = begin; measured = left = right = 0; prior = 0; continue;
-        }
-        const auto& glyph = face.glyphs.at(cp);
-        const double origin = measured + (prior ? face.kern(prior, cp) * scale + text.letterSpacing : 0);
-        const double next = origin + glyph.advance * scale;
-        const double nextLeft = oblique && glyph.ink.w ? std::min(left, origin + glyph.ink.x * scale) : left;
-        const double nextRight = oblique && glyph.ink.w ? std::max(right, origin + (glyph.ink.x + glyph.ink.w) * scale) : right;
-        if (wrap && availableWidth >= 0 && std::max(next, nextRight) - nextLeft > availableWidth && i > begin) {
-            const auto end = lastBreak > begin ? lastBreak : i;
-            lines.emplace_back(cps.begin() + begin, cps.begin() + end);
-            begin = i = end; lastBreak = begin; measured = left = right = 0; prior = 0; continue;
-        }
-        measured = next; left = nextLeft; right = nextRight; prior = cp; ++i;
-        if (cp == ' ') lastBreak = i;
+    const double baseline = (lineHeight - (metrics.ascent - metrics.descent) * scale) / 2 + metrics.ascent * scale;
+    std::vector<std::string_view> paragraphs;
+    const std::string_view content = text.content;
+    for (std::size_t start = 0;;) {
+        const auto end = content.find('\n', start);
+        paragraphs.push_back(content.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start));
+        if (end == std::string_view::npos) break;
+        start = end + 1;
     }
-    lines.emplace_back(cps.begin() + begin, cps.end());
-    std::vector<double> widths;
-    std::vector<double> bearings;
-    std::uint32_t previous = 0;
-    for (const auto& line : lines) {
-        widths.push_back(0); previous = 0; left = right = 0;
-        for (auto cp : line) {
-            if (previous) widths.back() += face.kern(previous, cp) * scale + text.letterSpacing;
-            const auto& glyph = face.glyphs.at(cp);
-            if (oblique && glyph.ink.w) {
-                left = std::min(left, widths.back() + glyph.ink.x * scale);
-                right = std::max(right, widths.back() + (glyph.ink.x + glyph.ink.w) * scale);
+    std::vector<std::vector<fonts::ShapedGlyph>> shaped;
+    std::vector<Line> lines;
+    for (std::size_t p = 0; p < paragraphs.size(); ++p) {
+        const auto& glyphs = shaped.emplace_back(fonts::shape(face.instance, paragraphs[p]));
+        std::size_t begin = 0, i = 0, lastBreak = 0;
+        double measured = 0, left = 0, right = 0;
+        while (i < glyphs.size()) {
+            const auto& glyph = glyphs[i];
+            const double origin = measured + (i > begin ? glyphs[i - 1].kern * scale + text.letterSpacing : 0);
+            const double next = origin + glyph.advance * scale;
+            const double inkX = origin + (glyph.offsetX + glyph.ink.x) * scale;
+            const double nextLeft = face.oblique && glyph.ink.w ? std::min(left, inkX) : left;
+            const double nextRight = face.oblique && glyph.ink.w ? std::max(right, inkX + glyph.ink.w * scale) : right;
+            if (wrap && availableWidth >= 0 && std::max(next, nextRight) - nextLeft > availableWidth && i > begin) {
+                const auto end = lastBreak > begin ? lastBreak : i;
+                lines.push_back({p, begin, end});
+                begin = i = end; lastBreak = begin; measured = left = right = 0;
+                continue;
             }
-            widths.back() += face.glyphs.at(cp).advance * scale;
-            previous = cp;
+            measured = next; left = nextLeft; right = nextRight; ++i;
+            if (paragraphs[p][glyph.cluster] == ' ') lastBreak = i;
         }
-        widths.back() = std::max(widths.back(), right) - left;
+        lines.push_back({p, begin, glyphs.size()});
+    }
+    std::vector<double> widths, bearings;
+    for (const auto& line : lines) {
+        const auto& glyphs = shaped[line.paragraph];
+        double width = 0, left = 0, right = 0;
+        for (auto i = line.begin; i < line.end; ++i) {
+            if (i > line.begin) width += glyphs[i - 1].kern * scale + text.letterSpacing;
+            const auto& glyph = glyphs[i];
+            if (face.oblique && glyph.ink.w) {
+                left = std::min(left, width + (glyph.offsetX + glyph.ink.x) * scale);
+                right = std::max(right, width + (glyph.offsetX + glyph.ink.x + glyph.ink.w) * scale);
+            }
+            width += glyph.advance * scale;
+        }
+        widths.push_back(std::max(width, right) - left);
         bearings.push_back(-left);
     }
     result.width = std::max(0.0, *std::max_element(widths.begin(), widths.end()));
-    result.height = widths.size() * lineHeight;
+    result.height = double(widths.size()) * lineHeight;
     const double width = availableWidth < 0 ? result.width : availableWidth;
-    const auto offset = [&](std::size_t i) { return (width - widths[i]) * (text.align == TextAlign::Center ? .5 : text.align == TextAlign::Right ? 1 : 0); };
+    const double factor = text.align == TextAlign::Center ? .5 : text.align == TextAlign::Right ? 1 : 0;
     for (std::size_t row = 0; row < lines.size(); ++row) {
-        double x = offset(row) + bearings[row]; previous = 0;
-        for (auto cp : lines[row]) {
-            const Glyph& glyph = face.glyphs.at(cp);
-            if (previous) x += face.kern(previous, cp) * scale + text.letterSpacing;
-            if (glyph.ink.w && glyph.ink.h) result.glyphs.push_back({{x + glyph.ink.x * scale,
-                row * lineHeight + baseline + glyph.ink.y * scale, glyph.ink.w * scale, glyph.ink.h * scale}, glyph.uv});
-            x += glyph.advance * scale; previous = cp;
+        const auto& line = lines[row];
+        const auto& glyphs = shaped[line.paragraph];
+        double x = (width - widths[row]) * factor + bearings[row];
+        for (auto i = line.begin; i < line.end; ++i) {
+            if (i > line.begin) x += glyphs[i - 1].kern * scale + text.letterSpacing;
+            const auto& glyph = glyphs[i];
+            if (glyph.ink.w && glyph.ink.h) result.glyphs.push_back({{x + (glyph.offsetX + glyph.ink.x) * scale,
+                double(row) * lineHeight + baseline + (glyph.ink.y - glyph.offsetY) * scale, glyph.ink.w * scale, glyph.ink.h * scale},
+                {face.instance, glyph.glyph}});
+            x += glyph.advance * scale;
         }
     }
     return result;
 }
 
-std::span<const std::uint8_t> textAtlas() { return fonts().pixels; }
 } // namespace vc

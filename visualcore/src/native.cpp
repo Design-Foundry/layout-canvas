@@ -2,7 +2,9 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -11,6 +13,7 @@
 #include "vc/diagnostics.hpp"
 #include "vc/document.hpp"
 #include "vc/json.hpp"
+#include "vc/text.hpp"
 
 struct vc_document {
     vc::Document document;
@@ -155,6 +158,21 @@ char* vc_last_error(void) {
     return guarded([]() -> char* {
         const auto diagnostic = vc::lastDiagnostic();
         return diagnostic ? copyOut(errorJson(*diagnostic)) : nullptr;
+    });
+}
+
+int vc_register_font_face(const char* id, const unsigned char* bytes, size_t size, const char* sha256) {
+    vc::clearDiagnostic();
+    return guarded([&]() -> int {
+        const char* problem = nullptr;
+        if (!id || !bytes || !sha256) {
+            problem = "id, bytes and sha256 are required";
+        } else {
+            problem = vc::registerFontFace(id, std::span<const std::uint8_t>{bytes, size}, sha256);
+        }
+        if (!problem) return 1;
+        vc::restoreDiagnostic(vc::Diagnostic{"font", problem});
+        return 0;
     });
 }
 
