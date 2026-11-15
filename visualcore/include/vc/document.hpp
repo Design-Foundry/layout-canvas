@@ -3,6 +3,7 @@
 #include <deque>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -42,6 +43,7 @@ public:
         auto copy=std::make_shared<Document>();
         copy->nodes_=nodes_;copy->children_=children_;
         copy->tokens_=tokens_;copy->modes_=modes_;copy->fonts_=fonts_;copy->fontStacks_=fontStacks_;
+        copy->unavailableFonts_=unavailableFonts_;
         copy->playbackValues_=playbackValues_;
         return copy;
     }
@@ -112,6 +114,11 @@ public:
     [[nodiscard]] const Font* primaryFont(const Id& stack) const;
     /// Why the document refuses a text that uses `stack` with `axes` and `features`, or nothing.
     [[nodiscard]] std::optional<std::string> fontUseProblem(const Id& stack, const FontAxes& axes, const FontFeatures& features) const;
+    /// Fonts the designer marked unavailable to preview the fallback. View state: not in ops or
+    /// snapshots, and the bundled Inter cannot be marked.
+    [[nodiscard]] const std::set<Id>& unavailableFonts() const { return unavailableFonts_; }
+    /// Returns false for an unknown font or the bundled Inter.
+    bool setFontAvailable(const Id& font, bool available) const;
     /// `text` laid out with the first font of its stack.
     [[nodiscard]] TextLayout layoutText(const TextRun& text, double availableWidth = -1.0, bool wrap = false) const;
     /// True if a node or another token refers to `token`.
@@ -225,6 +232,7 @@ private:
     mutable Id layoutMode_;
     mutable bool layoutDirty_ = true;
     mutable std::uint64_t layoutFonts_ = 0;
+    mutable std::set<Id> unavailableFonts_;
 };
 
 } // namespace vc

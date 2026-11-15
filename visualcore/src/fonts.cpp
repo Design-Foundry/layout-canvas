@@ -224,6 +224,14 @@ bool attachesToPrevious(std::uint32_t codepoint) {
            category == HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK;
 }
 
+ShapedGlyph missingGlyph(std::uint32_t instanceIndex) {
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    auto& instance = *s.instances.at(instanceIndex);
+    const auto& metrics = s.glyph(instance, 0);
+    return {0, 0, double(float(metrics.advance) * instance.scale), 0, 0, 0, metrics.ink, instanceIndex};
+}
+
 bool covers(std::uint32_t instance, std::uint32_t codepoint) {
     auto& s = state();
     hb_font_t* font = nullptr;

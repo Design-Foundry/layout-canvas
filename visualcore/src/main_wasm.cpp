@@ -441,6 +441,33 @@ std::string registerFontFamily(const std::string& provider, const std::string& k
     return problem ? problem : "";
 }
 
+bool setFontAvailable(const std::string& font, bool available) {
+    const auto id = vc::Id::parse(font);
+    return rt && id && rt->editor.setFontAvailable(*id, available);
+}
+
+std::string unavailableFonts() {
+    std::string out = "[";
+    if (rt) for (const auto& id : rt->session.document().unavailableFonts()) out += (out.size() > 1 ? ",\"" : "\"") + id.toString() + "\"";
+    return out + "]";
+}
+
+std::string textFallback(const std::string& id) {
+    const auto parsed = vc::Id::parse(id);
+    if (!rt || !parsed) return "null";
+    const auto& document = rt->session.document();
+    const vc::Node* node = document.view(*parsed);
+    if (!node || node->type != vc::NodeType::Text) return "null";
+    const auto box = document.box(*parsed, rt->editor.activeMode());
+    const auto layout = document.layoutText(node->text, box.w, node->textWrap);
+    std::string generic = "null";
+    if (layout.approximated)
+        if (const auto* stack = document.findFontStack(node->text.stack))
+            if (const auto* font = vc::genericFont(stack->fallback)) generic = "\"" + font->displayName + "\"";
+    return std::string("{\"approximated\":") + (layout.approximated ? "true" : "false") + ",\"missing\":" +
+           (layout.missing ? "true" : "false") + ",\"generic\":" + generic + "}";
+}
+
 bool addFont(const std::string& font) {
     auto parsed = vc::fontFromJson(font);
     return rt && parsed && rt->editor.edit(vc::CreateFont{std::move(*parsed)});
@@ -528,6 +555,9 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("fonts", &fonts);
     function("registerFontFamily", &registerFontFamily);
     function("addFont", &addFont);
+    function("setFontAvailable", &setFontAvailable);
+    function("unavailableFonts", &unavailableFonts);
+    function("textFallback", &textFallback);
     function("addFontStack", &addFontStack);
     function("activeMode", &activeMode);
     function("setActiveMode", &setActiveMode);

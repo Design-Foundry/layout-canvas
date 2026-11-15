@@ -48,6 +48,8 @@ struct ShapedGlyph {
 /// True for characters that attach to the one before them: combining marks, joiners and variation
 /// selectors.
 [[nodiscard]] bool attachesToPrevious(std::uint32_t codepoint);
+/// The instance's missing-glyph mark, with its advance and ink.
+[[nodiscard]] ShapedGlyph missingGlyph(std::uint32_t instance);
 /// True if the instance's font maps `codepoint` to a glyph.
 [[nodiscard]] bool covers(std::uint32_t instance, std::uint32_t codepoint);
 /// Shapes one line of text with no newlines, with `features` on top of the font's defaults.

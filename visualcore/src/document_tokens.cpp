@@ -647,6 +647,13 @@ std::vector<const T*> ordered(const std::unordered_map<Id, T>& items) {
 }
 } // namespace
 
+bool Document::setFontAvailable(const Id& font, bool available) const {
+    if (font == kInterFontId || !findFont(font)) return false;
+    const bool changed = available ? unavailableFonts_.erase(font) > 0 : unavailableFonts_.insert(font).second;
+    if (changed) layoutDirty_ = true;
+    return true;
+}
+
 const Font* Document::findFont(const Id& id) const {
     const auto it = fonts_.find(id);
     return it == fonts_.end() ? nullptr : &it->second;
@@ -669,7 +676,7 @@ const Font* Document::primaryFont(const Id& stack) const {
 TextLayout Document::layoutText(const TextRun& text, double availableWidth, bool wrap) const {
     TextFonts fonts;
     if (const FontStack* stack = findFontStack(text.stack)) {
-        for (const Id& id : stack->fonts) fonts.fonts.push_back(findFont(id));
+        for (const Id& id : stack->fonts) fonts.fonts.push_back(unavailableFonts_.contains(id) ? nullptr : findFont(id));
         fonts.fallback = stack->fallback;
     }
     return vc::layoutText(text, fonts, availableWidth, wrap);
