@@ -1,11 +1,14 @@
 import { TestBed } from '@angular/core/testing';
 import { TokenInspector } from './token-inspector';
+import { FontService } from './font-service';
+import { fontCore } from './font-core.testing';
 import { INTER_STACK_ID } from '@canvas/bridge';
 import type { TokenRow, TokenDef } from '@canvas/bridge';
 
 describe('shared typography token authoring', () => {
   it('edits a complete reusable style without content or binding controls and preserves metadata', async () => {
     await TestBed.configureTestingModule({ imports: [TokenInspector] }).compileComponents();
+    TestBed.inject(FontService).attach(fontCore() as any);
     const fixture = TestBed.createComponent(TokenInspector),
       saved: TokenDef[] = [];
     const token: TokenRow = {
@@ -37,9 +40,9 @@ describe('shared typography token authoring', () => {
     expect(fixture.nativeElement.querySelector('[aria-label="Shared typography"]')).toBeNull();
     expect(fixture.nativeElement.querySelector('textarea[aria-label="Text content"]')).toBeNull();
     const select = fixture.nativeElement.querySelector(
-      '[aria-label="Font style"]',
+      '[aria-label="Weight"]',
     ) as HTMLSelectElement;
-    select.value = 'bold-oblique';
+    select.value = '700';
     select.dispatchEvent(new Event('change'));
     await fixture.whenStable();
     expect(saved.at(-1)).toEqual({
@@ -50,7 +53,8 @@ describe('shared typography token authoring', () => {
       order: 'a0',
       value: {
         stack: INTER_STACK_ID,
-        axes: { wght: 700, slnt: -10 },
+        axes: { wght: 700 },
+        features: {},
         fontSize: 20,
         lineHeight: 1.4,
         letterSpacing: 0,
@@ -59,10 +63,10 @@ describe('shared typography token authoring', () => {
     });
     fixture.componentRef.setInput('replace', () => false);
     await fixture.whenStable();
-    select.value = 'regular';
+    select.value = '400';
     select.dispatchEvent(new Event('change'));
     await fixture.whenStable();
-    expect(select.value).toBe('bold-oblique');
+    expect(select.value).toBe('700');
     expect(saved).toHaveLength(1);
   });
 });
