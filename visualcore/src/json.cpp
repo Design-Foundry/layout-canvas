@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 23;
+constexpr int kSnapshotVersion = 24;
 
 bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
@@ -1546,6 +1546,7 @@ std::string snapshotToJson(const Document& document) {
     bool componentStates = false;
     bool namedFlows = false;
     bool parts = false;
+    bool cellVisibility = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
     document.forEachInPaintOrder([&](const Node& node) {
@@ -1588,9 +1589,12 @@ std::string snapshotToJson(const Document& document) {
             partialTextStyles = partialTextStyles || (patch.textStyle && !patch.textStyle->complete());
         };
         for (const auto& o : node.overrides) styleVersion(o.patch);
-        for (const auto& r : node.definition.rules) styleVersion(r.patch);
+        for (const auto& r : node.definition.rules) {
+            styleVersion(r.patch);
+            cellVisibility = cellVisibility || r.when.empty() || r.patch.visible.has_value();
+        }
     });
-    return json{{"version", parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
+    return json{{"version", cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
 }
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
@@ -1654,6 +1658,7 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         DiagnosticScope entry{slot(index)};
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
+        if(version<24 && std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.when.empty() || r.patch.visible.has_value();})) return refused("base rules and rules that set visible need snapshot version 24 or later");
         if(version<23 && (j["nodes"][index].contains("part") || !node->part.empty())) return refused("component part names need snapshot version 23 or later");
         if(version<22 && (j["nodes"][index].contains("prototypeFlowName") || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.prototypeFlowName.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.prototypeFlowName.has_value();}))) return refused("named flows need snapshot version 22 or later");
         const auto statePatch=[](const NodePatch& p){return (p.interaction && statePrototype(*p.interaction)) || (p.interactions && std::any_of(p.interactions->begin(),p.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));};

@@ -43,6 +43,18 @@ test('whole-document round trip preserves component part names in snapshot 23', 
   assert.deepEqual(bundle.snapshot, snapshot);
 });
 
+test('whole-document round trip preserves base and visibility rules in snapshot 24', () => {
+  const snapshot = fixture();
+  snapshot.version = 24;
+  snapshot.nodes.find((node) => node.id === id(6)).definition.rules = [
+    { when: {}, target: id(6), patch: { opacity: 0.5 } },
+    { when: { state: 'on' }, target: id(6), patch: { visible: false } },
+  ];
+  const bundle = readDocument(JSON.stringify(exportDocument(snapshot, 'Demo')));
+  assert.equal(bundle.snapshot.version, 24);
+  assert.deepEqual(bundle.snapshot, snapshot);
+});
+
 test('export captures a detached snapshot instead of retaining mutable authoring references', () => {
   const snapshot = fixture();
   const bundle = exportDocument(snapshot, 'Demo');
@@ -62,7 +74,7 @@ test('document envelope refuses components, unknown formats and extra metadata',
 
 test('native snapshot envelope refuses unsupported versions and missing structural lists', () => {
   for (const snapshot of [
-    { ...fixture(), version: 24 },
+    { ...fixture(), version: 25 },
     { ...fixture(), version: 0 },
     { ...fixture(), version: 21.5 },
     { ...fixture(), nodes: [null] },

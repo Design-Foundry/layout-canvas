@@ -651,7 +651,6 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
         const NodePatch& p = rule.patch;
         const Node* target = find(rule.target);
         if (!target || !inComponent(rule.target)) return refuse("a rule targets a layer inside the component");
-        if (rule.when.empty()) return refuse("a rule needs at least one axis value in when");
         for (const auto& [name, value] : rule.when) {
             const auto axis = std::find_if(definition.axes.begin(), definition.axes.end(), [&](const VariantAxis& a) { return a.name == name; });
             if (axis == definition.axes.end()) return refuse("when names an axis the definition does not declare: " + name);
@@ -674,8 +673,8 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
             return refuse("a text property controls this layer's content; change its metrics with textStyle instead of text");
         if (textTarget && !validTextPaint(p)) return refuse(kFrameStyling);
         if (!isValidPatch(p) || !isValidPatchRefs(p)) return false;
-        if (p.type || p.component || p.componentValues || p.typography || p.name || p.part || p.visible || p.locked || p.absolute || p.widthSizing || p.heightSizing)
-            return refuse("rules cannot change type, component, componentValues, typography, name, part, visible, locked, absolute or sizing");
+        if (p.type || p.component || p.componentValues || p.typography || p.name || p.part || p.locked || p.absolute || p.widthSizing || p.heightSizing)
+            return refuse("rules cannot change type, component, componentValues, typography, name, part, locked, absolute or sizing");
         if (rule.target == component && (p.x || p.y || p.w || p.h)) return refuse("rules cannot move or resize the component itself");
     }
     return true;

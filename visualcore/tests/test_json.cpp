@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <vector>
 #include "vc/json.hpp"
 
@@ -321,4 +322,68 @@ TEST_CASE("inspected component layers report that they can carry a part") {
     REQUIRE(inspect(instance).find("inComponent") == std::string::npos);
     const Id copy = doc.viewChildren(instance.id).at(0);
     REQUIRE(inspect(*doc.view(copy)).find("inComponent") == std::string::npos);
+}
+
+TEST_CASE("base rules and rules that set visible need snapshot version 24") {
+    const Id mainId = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000201");
+    const Id labelId = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000202");
+    const auto build = [&](const std::vector<vc::VariantRule>& extra) {
+        auto doc = std::make_unique<vc::Document>();
+        Node main;
+        main.id = mainId;
+        main.type = vc::NodeType::Component;
+        main.order = "a0";
+        Node label;
+        label.id = labelId;
+        label.parent = mainId;
+        label.order = "a0";
+        REQUIRE(doc->apply(CreateNode{main}));
+        REQUIRE(doc->apply(CreateNode{label}));
+        vc::ComponentDefinition definition;
+        definition.axes.push_back({"size", {"small", "large"}, "small"});
+        vc::NodePatch wide;
+        wide.w = 90;
+        definition.rules.push_back({{{"size", "large"}}, labelId, wide});
+        for (const auto& rule : extra) definition.rules.push_back(rule);
+        REQUIRE(doc->apply(vc::SetComponentDefinition{mainId, definition}));
+        return doc;
+    };
+    const auto versionOf = [](const std::string& json) { return json.find("\"version\":24") != std::string::npos; };
+
+    REQUIRE(vc::snapshotToJson(*build({})).find("\"version\":3}") != std::string::npos);
+
+    vc::NodePatch faded;
+    faded.opacity = 0.5;
+    vc::NodePatch hidden;
+    hidden.visible = false;
+    const std::vector<std::vector<vc::VariantRule>> cases{
+        {{{}, labelId, faded}},
+        {{{{"size", "small"}}, labelId, hidden}},
+        {{{}, labelId, hidden}},
+    };
+    for (const auto& extra : cases) {
+        const auto doc = build(extra);
+        const std::string json = vc::snapshotToJson(*doc);
+        REQUIRE(versionOf(json));
+        const auto ops = vc::snapshotFromJson(json);
+        REQUIRE(ops.has_value());
+        vc::Document loaded;
+        for (const OpBody& op : *ops) REQUIRE(loaded.apply(op));
+        REQUIRE(loaded.find(mainId)->definition == doc->find(mainId)->definition);
+        REQUIRE(vc::snapshotToJson(loaded) == json);
+
+        auto old = json;
+        old.replace(old.find("\"version\":24"), 12, "\"version\":23");
+        REQUIRE_FALSE(vc::snapshotFromJson(old).has_value());
+    }
+}
+
+TEST_CASE("rule patches carry visible and an empty cell on the wire") {
+    const Id target = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000202");
+    vc::NodePatch hidden;
+    hidden.visible = false;
+    vc::ComponentDefinition definition;
+    definition.rules.push_back({{}, target, hidden});
+    const vc::OpBody op = vc::SetComponentDefinition{*Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000201"), definition};
+    REQUIRE(*vc::opFromJson(vc::opKind(op), vc::opToJson(op)) == op);
 }

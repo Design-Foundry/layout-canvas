@@ -720,6 +720,50 @@ TEST_CASE("Smart component transitions retain immutable scenes and interpolate s
     f.editor.advancePrototype(200);REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE(f.active(f.one));
 }
 
+TEST_CASE("Change state between a cell that hides a layer by rule and one that shows it") {
+    InteractivePrototype f;
+    auto definition=f.session.document().find(f.main)->definition;
+    NodePatch hidden;hidden.visible=false;
+    definition.rules.push_back({{{"state","idle"}},f.visual,hidden});
+    REQUIRE(f.session.applyRemote(SetComponentDefinition{f.main,definition}));
+    const auto before=snapshotToJson(f.session.document());
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));
+    REQUIRE_FALSE(f.editor.prototypeDocument().view(f.visualCopy(f.one))->visible);
+    REQUIRE_FALSE(f.editor.prototypeDocument().view(f.visualCopy(f.two))->visible);
+    const Vec2 activeSpot{160,225};
+    REQUIRE(hitTest(f.editor.prototypeDocument(),activeSpot,false,kDefaultModeId,4,f.a)!=f.visualCopy(f.one));
+    f.click({140,250});REQUIRE(f.active(f.one));
+    REQUIRE(f.editor.prototypeDocument().view(f.visualCopy(f.one))->visible);
+    REQUIRE_FALSE(f.editor.prototypeDocument().view(f.visualCopy(f.two))->visible);
+    REQUIRE(hitTest(f.editor.prototypeDocument(),activeSpot,false,kDefaultModeId,4,f.a)==f.visualCopy(f.one));
+    REQUIRE(f.editor.restartPrototype());
+    REQUIRE_FALSE(f.editor.prototypeDocument().view(f.visualCopy(f.one))->visible);
+    f.editor.stopPrototype();
+    REQUIRE(snapshotToJson(f.session.document())==before);REQUIRE(f.session.takeOutbox().empty());
+}
+
+TEST_CASE("Smart animate between a hidden and a visible layer falls back like any layer that appears") {
+    InteractivePrototype f;
+    auto definition=f.session.document().find(f.main)->definition;
+    NodePatch hidden;hidden.visible=false;
+    definition.rules.push_back({{{"state","idle"}},f.visual,hidden});
+    REQUIRE(f.session.applyRemote(SetComponentDefinition{f.main,definition}));
+    NodePatch p;auto action=f.session.document().find(f.main)->interaction;
+    action.transition=PrototypeTransition::SmartAnimate;action.durationMs=400;p.interaction=action;f.patch(f.main,p);
+    REQUIRE(f.editor.startPrototype(f.a,{448,248}));f.click({140,250});
+    auto scene=f.editor.prototypeScene();REQUIRE(scene.smart);
+    std::vector<DrawItem> from,to;const Rect viewport{100,200,200,100};
+    buildDrawList(*scene.from.front().document,viewport,kDefaultModeId,from,f.a);
+    buildDrawList(*scene.to.front().document,viewport,kDefaultModeId,to,f.a);
+    const auto key=f.visualCopy(f.one);
+    const auto has=[&](const std::vector<DrawItem>& items) {
+        return std::any_of(items.begin(),items.end(),[&](const auto& item){return item.node==key;});
+    };
+    REQUIRE_FALSE(has(from));REQUIRE(has(to));
+    REQUIRE_FALSE(interpolateDrawLists(from,to,.5).has_value());
+    f.editor.advancePrototype(400);REQUIRE_FALSE(f.editor.prototypeTransitioning());REQUIRE(f.active(f.one));
+}
+
 TEST_CASE("Temporary variant choices preserve authored properties and independent instance overrides") {
     InteractivePrototype f;
     auto definition=f.session.document().find(f.main)->definition;definition.properties.push_back({"show",f.visual,true});

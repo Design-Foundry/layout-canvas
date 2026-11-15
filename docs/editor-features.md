@@ -28,13 +28,22 @@ copies. Dragging a layer into another component keeps its part unless that compo
 already uses it, and dragging it out of every component clears it; both are one undo
 step. SetProps, CreateNode and MoveNode operations refuse duplicate parts.
 
+## Variant rules
+
+A rule with an empty cell is the base rule: it applies in every cell, and more specific
+cells override it. Several base rules for one layer apply in declaration order. A rule
+may set `visible`, which overrides the layer's boolean property for that cell; an
+instance override of `visible` wins over both. A layer hidden by a rule is hidden like
+any other layer for rendering, hit testing, auto layout and prototype playback. Base
+rules and rules that set `visible` need snapshot 24.
+
 ## Persistence and rendering
 
 Snapshots remain versioned by the features they contain. Text starts at version 5;
 independent metrics, wrapping, face selection and shared typography progressively
 require versions 6–11. Lines use 12, straight unfilled paths 13, curved/filled paths
 14, raster images 15, click prototypes 16, overlay/dissolve options 17 and directional
-transitions/overlay placement 18, and component part names 23. Earlier documents retain their minimum version. Downlevel
+transitions/overlay placement 18, component part names 23, and base variant rules or rules that set visibility 24. Earlier documents retain their minimum version. Downlevel
 snapshots containing unsupported newer data are refused.
 
 Prototype playback uses the same native renderer and does not produce document

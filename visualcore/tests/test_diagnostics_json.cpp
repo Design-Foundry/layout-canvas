@@ -115,6 +115,10 @@ TEST_CASE("snapshot version gates name the feature and the version", "[diagnosti
     REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"nodes[0]", "curved or filled paths need snapshot version 14 or later"});
 
     vc::clearDiagnostic();
+    REQUIRE_FALSE(vc::snapshotFromJson(snapshot(23, "[" + node("component", R"(,"definition":{"properties":[],"axes":[],"rules":[{"when":{},"target":")" + std::string{kId} + R"(","patch":{"opacity":0.5}}]})") + "]")).has_value());
+    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"nodes[0]", "base rules and rules that set visible need snapshot version 24 or later"});
+
+    vc::clearDiagnostic();
     REQUIRE_FALSE(vc::snapshotFromJson(snapshot(22, "[" + node("rect", R"(,"part":"label")") + "]")).has_value());
     REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"nodes[0]", "component part names need snapshot version 23 or later"});
 
@@ -124,7 +128,7 @@ TEST_CASE("snapshot version gates name the feature and the version", "[diagnosti
 
     vc::clearDiagnostic();
     REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":99,"nodes":[]})").has_value());
-    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"version", "version must be from 1 to 23"});
+    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"version", "version must be from 1 to 24"});
 }
 
 TEST_CASE("snapshot top level shape is explained", "[diagnostics][json]") {

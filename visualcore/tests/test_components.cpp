@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
+#include "vc/draw_list.hpp"
 #include "vc/editor.hpp"
 #include "vc/geometry.hpp"
 #include "vc/json.hpp"
@@ -1162,4 +1164,188 @@ TEST_CASE("dragging a frame with parts out of every component clears the parts o
     REQUIRE(f.editor.undo());
     REQUIRE(document.find(t.frame)->part == "wrapper");
     REQUIRE(document.find(t.child)->part == "content");
+}
+
+namespace {
+struct CellFixture : Fixture {
+    Id other;
+    vc::ComponentDefinition definition;
+    CellFixture() {
+        definition.axes = {{"size", {"small", "large"}, "small"}};
+        Node n; n.id = session.newId(); n.parent = component; n.order = "a1"; n.w = 40; n.h = 20;
+        other = n.id;
+        REQUIRE(session.edit(CreateNode{n}));
+    }
+    static vc::NodePatch radius(double value) { vc::NodePatch p; p.cornerRadius = value; return p; }
+    static vc::NodePatch shown(bool value) { vc::NodePatch p; p.visible = value; return p; }
+    Id instanceIn(const std::string& size) {
+        const Id instance = *editor.createInstance(component);
+        vc::NodePatch values; values.componentValues = vc::ComponentValues{{"size", size}};
+        REQUIRE(editor.setProps(instance, values));
+        return instance;
+    }
+    Id copyOf(const Id& instance, const Id& source) const {
+        for (const Id& key : session.document().viewChildren(instance))
+            if (session.document().sourceOf(key) == source) return key;
+        return {};
+    }
+    void install() { REQUIRE(editor.setComponentDefinition(component, definition)); }
+};
+}
+
+TEST_CASE("a base rule applies in every cell and more specific cells override it") {
+    CellFixture f;
+    f.definition.rules = {{{{"size", "large"}}, f.badge, f.radius(12)}, {{}, f.badge, f.radius(4)}};
+    f.install();
+    const Id small = f.instanceIn("small"), large = f.instanceIn("large");
+    REQUIRE(f.view(f.copyOf(small, f.badge)).cornerRadius == vc::Value<double>{4.0});
+    REQUIRE(f.view(f.copyOf(large, f.badge)).cornerRadius == vc::Value<double>{12.0});
+    REQUIRE(f.view(f.badge).cornerRadius == vc::Value<double>{4.0});
+}
+
+TEST_CASE("base rules for one layer apply in declaration order") {
+    CellFixture f;
+    f.definition.rules = {{{}, f.badge, f.radius(4)}, {{}, f.badge, f.radius(6)}};
+    f.install();
+    for (const auto* size : {"small", "large"})
+        REQUIRE(f.view(f.copyOf(f.instanceIn(size), f.badge)).cornerRadius == vc::Value<double>{6.0});
+    std::swap(f.definition.rules[0], f.definition.rules[1]);
+    f.install();
+    REQUIRE(f.view(f.copyOf(f.instanceIn("large"), f.badge)).cornerRadius == vc::Value<double>{4.0});
+}
+
+TEST_CASE("an instance override wins over a base rule") {
+    CellFixture f;
+    f.definition.rules = {{{}, f.badge, f.radius(4)}};
+    f.install();
+    const Id instance = f.instanceIn("small");
+    REQUIRE(f.session.edit(vc::SetOverride{instance, f.badge, f.radius(20)}));
+    REQUIRE(f.view(f.copyOf(instance, f.badge)).cornerRadius == vc::Value<double>{20.0});
+    REQUIRE(f.view(f.copyOf(f.instanceIn("small"), f.badge)).cornerRadius == vc::Value<double>{4.0});
+}
+
+TEST_CASE("a rule that sets visible hides a layer only in its cell") {
+    CellFixture f;
+    f.definition.rules = {{{{"size", "small"}}, f.badge, f.shown(false)}};
+    f.install();
+    const Id small = f.instanceIn("small"), large = f.instanceIn("large");
+    REQUIRE_FALSE(f.view(f.copyOf(small, f.badge)).visible);
+    REQUIRE(f.view(f.copyOf(large, f.badge)).visible);
+    REQUIRE(f.view(f.copyOf(small, f.other)).visible);
+}
+
+TEST_CASE("a visible rule overrides the boolean property and an instance override overrides the rule") {
+    CellFixture f;
+    f.definition.properties = {{"show-badge", f.badge, true}};
+    f.definition.rules = {{{{"size", "small"}}, f.badge, f.shown(false)}};
+    f.install();
+    const Id small = f.instanceIn("small");
+    REQUIRE_FALSE(f.view(f.copyOf(small, f.badge)).visible);
+    REQUIRE(f.view(f.copyOf(f.instanceIn("large"), f.badge)).visible);
+
+    f.definition.properties = {{"show-badge", f.badge, false}};
+    f.definition.rules = {{{{"size", "large"}}, f.badge, f.shown(true)}};
+    f.install();
+    const Id large = f.instanceIn("large");
+    REQUIRE(f.view(f.copyOf(large, f.badge)).visible);
+    REQUIRE_FALSE(f.view(f.copyOf(f.instanceIn("small"), f.badge)).visible);
+
+    REQUIRE(f.session.edit(vc::SetOverride{large, f.badge, f.shown(false)}));
+    REQUIRE_FALSE(f.view(f.copyOf(large, f.badge)).visible);
+    f.definition.rules = {{{{"size", "large"}}, f.badge, f.shown(false)}};
+    f.install();
+    const Id large2 = f.instanceIn("large");
+    REQUIRE(f.session.edit(vc::SetOverride{large2, f.badge, f.shown(true)}));
+    REQUIRE(f.view(f.copyOf(large2, f.badge)).visible);
+}
+
+TEST_CASE("a base rule can hide a layer that a more specific cell shows") {
+    CellFixture f;
+    f.definition.rules = {{{}, f.badge, f.shown(false)}, {{{"size", "large"}}, f.badge, f.shown(true)}};
+    f.install();
+    REQUIRE_FALSE(f.view(f.copyOf(f.instanceIn("small"), f.badge)).visible);
+    REQUIRE(f.view(f.copyOf(f.instanceIn("large"), f.badge)).visible);
+}
+
+TEST_CASE("a layer hidden by a rule leaves auto layout, hit testing and drawing like any hidden layer") {
+    CellFixture f;
+    vc::NodePatch row;
+    row.layout = vc::Layout{};
+    row.layout->type = vc::LayoutType::Row;
+    row.layout->gap = 10.0;
+    REQUIRE(f.session.edit(vc::SetProps{f.component, row}));
+    f.definition.rules = {{{{"size", "small"}}, f.badge, f.shown(false)}};
+    f.install();
+    const Id small = f.instanceIn("small"), large = f.instanceIn("large");
+    REQUIRE(f.session.document().box(f.copyOf(large, f.other)).x == 60);
+    REQUIRE(f.session.document().box(f.copyOf(small, f.other)).x == 0);
+
+    const auto point = [&](const Id& instance, const Id& source) {
+        const auto bounds = vc::worldBounds(f.session.document(), f.copyOf(instance, source));
+        return vc::Vec2{bounds->x + bounds->w / 2, bounds->y + bounds->h / 2};
+    };
+    const Id badgeInLarge = f.copyOf(large, f.badge);
+    REQUIRE(vc::hitTest(f.session.document(), point(large, f.badge)) == badgeInLarge);
+    const Id hit = vc::hitTest(f.session.document(), {point(small, f.other).x - 20, point(small, f.other).y});
+    REQUIRE(hit != f.copyOf(small, f.badge));
+
+    std::vector<vc::DrawItem> items;
+    vc::buildDrawList(f.session.document(), {-500, -500, 2000, 2000}, vc::kDefaultModeId, items);
+    const auto drawn = [&](const Id& key) {
+        return std::any_of(items.begin(), items.end(), [&](const auto& item) { return item.node == key; });
+    };
+    REQUIRE(drawn(f.copyOf(large, f.badge)));
+    REQUIRE_FALSE(drawn(f.copyOf(small, f.badge)));
+}
+
+TEST_CASE("detaching an instance keeps what a visible rule resolved") {
+    CellFixture f;
+    f.definition.rules = {{{{"size", "small"}}, f.badge, f.shown(false)}};
+    f.install();
+    const Id small = f.instanceIn("small"), large = f.instanceIn("large");
+    const Id hiddenDetached = *f.editor.detachInstance(small);
+    const Id shownDetached = *f.editor.detachInstance(large);
+    const auto& document = f.session.document();
+    const auto childOf = [&](const Id& frame, double width) {
+        for (const Id& id : document.children(frame)) if (document.find(id)->w == width) return id;
+        return Id{};
+    };
+    REQUIRE_FALSE(document.find(childOf(hiddenDetached, 50))->visible);
+    REQUIRE(document.find(childOf(shownDetached, 50))->visible);
+    REQUIRE(document.find(childOf(hiddenDetached, 40))->visible);
+    REQUIRE(f.editor.undo());
+    REQUIRE(document.find(large)->type == NodeType::Instance);
+}
+
+TEST_CASE("base and visible rules survive undo and redo of the definition edit") {
+    CellFixture f;
+    f.definition.rules = {{{}, f.badge, f.radius(4)}};
+    f.install();
+    const auto first = f.definition;
+    const Id small = f.instanceIn("small");
+    f.definition.rules.push_back({{{"size", "small"}}, f.badge, f.shown(false)});
+    f.install();
+    REQUIRE(f.session.document().find(f.component)->definition == f.definition);
+    REQUIRE_FALSE(f.view(f.copyOf(small, f.badge)).visible);
+    REQUIRE(f.editor.undo());
+    REQUIRE(f.session.document().find(f.component)->definition == first);
+    REQUIRE(f.view(f.copyOf(small, f.badge)).visible);
+    REQUIRE(f.editor.redo());
+    REQUIRE(f.session.document().find(f.component)->definition == f.definition);
+    REQUIRE_FALSE(f.view(f.copyOf(small, f.badge)).visible);
+}
+
+TEST_CASE("rules still refuse other identity fields and undeclared axes after allowing base and visible") {
+    CellFixture f;
+    for (const auto& patch : {[] { vc::NodePatch p; p.locked = true; return p; }(), [] { vc::NodePatch p; p.name = "x"; return p; }(),
+                              [] { vc::NodePatch p; p.absolute = true; return p; }()}) {
+        auto invalid = f.definition;
+        invalid.rules = {{{}, f.badge, patch}};
+        REQUIRE_FALSE(f.editor.setComponentDefinition(f.component, invalid));
+    }
+    auto invalid = f.definition;
+    invalid.rules = {{{{"missing", "x"}}, f.badge, f.shown(false)}};
+    REQUIRE_FALSE(f.editor.setComponentDefinition(f.component, invalid));
+    invalid.rules = {{{}, f.badge, f.shown(false)}};
+    REQUIRE(f.editor.setComponentDefinition(f.component, invalid));
 }

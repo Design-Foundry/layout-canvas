@@ -43,7 +43,7 @@ function object(value: unknown): value is Record<string, any> {
 function snapshot(value: unknown): asserts value is ComponentSnapshot {
   if (
     !object(value) ||
-    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23].includes(value['version']) ||
+    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].includes(value['version']) ||
     !Array.isArray(value['nodes']) ||
     !Array.isArray(value['tokens']) ||
     !Array.isArray(value['modes']) ||
@@ -131,6 +131,13 @@ function snapshot(value: unknown): asserts value is ComponentSnapshot {
   };
   for (const node of value['nodes']) {
     const patches = [...(node?.overrides ?? []), ...(node?.definition?.rules ?? [])];
+    if (
+      value['version'] < 24 &&
+      (node?.definition?.rules ?? []).some(
+        (rule: any) => Object.keys(rule?.when ?? {}).length === 0 || rule?.patch?.visible !== undefined,
+      )
+    )
+      throw new Error('Base rules and rules that set visible require Canvas snapshot version 24.');
     if (value['version'] < 23 && node?.part !== undefined)
       throw new Error('Component part names require Canvas snapshot version 23.');
     if (
