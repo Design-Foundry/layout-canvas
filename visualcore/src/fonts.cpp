@@ -21,6 +21,12 @@ namespace {
 const unsigned char kInter[] = {
 #include "vc_inter_font.inc"
 };
+const unsigned char kSerif[] = {
+#include "vc_serif_font.inc"
+};
+const unsigned char kMono[] = {
+#include "vc_mono_font.inc"
+};
 constexpr std::size_t kMaxFaceBytes = std::size_t(32) << 20;
 constexpr std::size_t kShapeCacheLimit = 8192;
 
@@ -70,6 +76,8 @@ struct State {
 
     State() {
         if (add(kEmbeddedInterFace, {kInter, sizeof kInter}, VC_INTER_SHA256, false)) std::abort();
+        if (add(fonts::kSerifFace, {kSerif, sizeof kSerif}, VC_SERIF_SHA256, false)) std::abort();
+        if (add(fonts::kMonoFace, {kMono, sizeof kMono}, VC_MONO_SHA256, false)) std::abort();
     }
 
     const char* add(std::string_view id, std::span<const std::uint8_t> bytes, std::string_view sha256, bool verify) {
@@ -165,7 +173,16 @@ namespace fonts {
 std::uint32_t tag(std::string_view name) { return name.size() == 4 ? HB_TAG(name[0], name[1], name[2], name[3]) : 0; }
 
 int instanceIndex(std::string_view faceId, std::span<const Variation> variations) {
-    std::vector<Variation> sorted(variations.begin(), variations.end());
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    const auto face = s.faces.find(faceId);
+    if (face == s.faces.end()) return -1;
+    std::vector<Variation> sorted;
+    for (const auto& v : variations) {
+        hb_ot_var_axis_info_t info{};
+        if (hb_ot_var_find_axis_info(face->second->face, v.tag, &info) && info.default_value == v.value) continue;
+        sorted.push_back(v);
+    }
     std::sort(sorted.begin(), sorted.end(), [](const Variation& a, const Variation& b) { return a.tag < b.tag; });
     std::string key(faceId);
     for (const auto& v : sorted) {
@@ -173,11 +190,7 @@ int instanceIndex(std::string_view faceId, std::span<const Variation> variations
         std::snprintf(part, sizeof part, "|%08x=%a", unsigned(v.tag), double(v.value));
         key += part;
     }
-    auto& s = state();
-    const std::scoped_lock guard(s.lock);
     if (const auto found = s.instanceIds.find(key); found != s.instanceIds.end()) return int(found->second);
-    const auto face = s.faces.find(faceId);
-    if (face == s.faces.end()) return -1;
     auto instance = std::make_unique<Instance>();
     instance->font = hb_font_create(face->second->face);
     const auto upem = hb_face_get_upem(face->second->face);
@@ -198,6 +211,24 @@ int instanceIndex(std::string_view faceId, std::span<const Variation> variations
     s.instances.push_back(std::move(instance));
     s.instanceIds.emplace(std::move(key), index);
     return int(index);
+}
+
+bool attachesToPrevious(std::uint32_t codepoint) {
+    if (codepoint == 0x200d || (codepoint >= 0xfe00 && codepoint <= 0xfe0f) || (codepoint >= 0xe0100 && codepoint <= 0xe01ef)) return true;
+    const auto category = hb_unicode_general_category(hb_unicode_funcs_get_default(), codepoint);
+    return category == HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK || category == HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK ||
+           category == HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK;
+}
+
+bool covers(std::uint32_t instance, std::uint32_t codepoint) {
+    auto& s = state();
+    hb_font_t* font = nullptr;
+    {
+        const std::scoped_lock guard(s.lock);
+        font = s.instances.at(instance)->font;
+    }
+    hb_codepoint_t glyph = 0;
+    return hb_font_get_nominal_glyph(font, codepoint, &glyph);
 }
 
 Metrics metrics(std::uint32_t instance) {
@@ -238,7 +269,7 @@ std::vector<ShapedGlyph> shape(std::uint32_t instanceIndex, std::string_view tex
         const auto& metrics = s.glyph(instance, info[i].codepoint);
         out[i] = {info[i].codepoint, info[i].cluster, double(float(metrics.advance) * scale),
                   double(float(positions[i].x_advance - metrics.advance) * scale),
-                  double(float(positions[i].x_offset) * scale), double(float(positions[i].y_offset) * scale), metrics.ink};
+                  double(float(positions[i].x_offset) * scale), double(float(positions[i].y_offset) * scale), metrics.ink, instanceIndex};
     }
     hb_buffer_destroy(buffer);
     if (s.shaped.size() >= kShapeCacheLimit) s.shaped.clear();

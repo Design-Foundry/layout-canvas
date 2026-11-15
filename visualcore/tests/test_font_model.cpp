@@ -282,7 +282,7 @@ TEST_CASE("layout follows the stack's primary font") {
         text.axes = {{"wght", 700}};
         CHECK_THAT(layoutText(text).width, WithinAbs(721.41, 0.01));
     }
-    SECTION("a font whose face is not registered lays out nothing") {
+    SECTION("a font whose face is not registered falls back to the generic face") {
         Fixture f;
         auto font = customFont(f.font);
         font.provider = "test";
@@ -292,9 +292,11 @@ TEST_CASE("layout follows the stack's primary font") {
         TextRun text;
         text.content = "Hola";
         text.stack = f.stack;
-        CHECK(f.session.document().layoutText(text, -1, false).glyphs.empty());
+        const auto fallback = f.session.document().layoutText(text, -1, false);
         text.stack = kInterStackId;
-        CHECK_FALSE(f.session.document().layoutText(text, -1, false).glyphs.empty());
+        const auto inter = f.session.document().layoutText(text, -1, false);
+        CHECK(fallback.glyphs.size() == inter.glyphs.size());
+        CHECK_THAT(fallback.width, WithinAbs(inter.width, 1e-9));
     }
     SECTION("tabular numbers change the width of ones") {
         TextRun plain;

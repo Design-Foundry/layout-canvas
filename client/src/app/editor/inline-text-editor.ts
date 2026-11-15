@@ -146,9 +146,7 @@ export class InlineTextEditor {
     const node = this.node(),
       content = this.draft().normalize('NFC');
     if (
-      !/^[\x20-\x7e\xa0-\xff\n\u2013\u2014\u2018\u2019\u201a\u201c\u201d\u201e\u2022\u2026\u2039\u203a\u20ac\u2122]*$/.test(
-        content,
-      ) ||
+      !/^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f]*$/.test(content) ||
       [...content].length > 2048 ||
       new TextEncoder().encode(content).length > 4096
     ) {

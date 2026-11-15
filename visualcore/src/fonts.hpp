@@ -11,6 +11,8 @@
 namespace vc::fonts {
 
 inline constexpr double kAtlasEm = 96.0;
+inline constexpr std::string_view kSerifFace = "embedded/source-serif-4";
+inline constexpr std::string_view kMonoFace = "embedded/jetbrains-mono";
 
 struct Variation {
     std::uint32_t tag = 0;
@@ -34,12 +36,18 @@ struct ShapedGlyph {
     double offsetX = 0;
     double offsetY = 0;
     Rect ink;
+    std::uint32_t instance = 0;
 };
 
 [[nodiscard]] std::uint32_t tag(std::string_view name);
 /// Index of `face` at `variations`, created on first use; -1 when no face has that id.
 [[nodiscard]] int instanceIndex(std::string_view face, std::span<const Variation> variations);
 [[nodiscard]] Metrics metrics(std::uint32_t instance);
+/// True for characters that attach to the one before them: combining marks, joiners and variation
+/// selectors.
+[[nodiscard]] bool attachesToPrevious(std::uint32_t codepoint);
+/// True if the instance's font maps `codepoint` to a glyph.
+[[nodiscard]] bool covers(std::uint32_t instance, std::uint32_t codepoint);
 /// Shapes one line of text with no newlines, with `features` on top of the font's defaults.
 [[nodiscard]] std::vector<ShapedGlyph> shape(std::uint32_t instance, std::string_view text, const FontFeatures& features = {});
 

@@ -18,8 +18,7 @@ const FONT_STYLES: Record<string, Record<string, number>> = {
   oblique: { slnt: -10 },
   'bold-oblique': { wght: 700, slnt: -10 },
 };
-const ALLOWED =
-  /^[\x20-\x7e\xa0-\xff\n\u2013\u2014\u2018\u2019\u201a\u201c\u201d\u201e\u2022\u2026\u2039\u203a\u20ac\u2122]*$/;
+const ALLOWED = /^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f]*$/;
 
 @Component({
   selector: 'app-text-panel',
@@ -139,7 +138,7 @@ const ALLOWED =
       </fieldset>
       @if (!styleOnly()) {
         <p class="typography-caption">
-          Latin text, including Spanish accents. With wrapping enabled, use Fixed or Fill width and
+          With wrapping enabled, use Fixed or Fill width and
           Hug height to grow with the lines.
         </p>
       }

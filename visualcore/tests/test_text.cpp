@@ -78,7 +78,7 @@ TEST_CASE("Declared text uses snapshot 6 and accepts long strings without weaken
     auto old = saved; old.replace(old.find("\"version\":25"), 12, "\"version\":5"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
     choice.componentValues = ComponentValues{{"size", std::string(200, 'A')}}; REQUIRE_FALSE(f.editor.setProps(f.first, choice));
     choice.componentValues = ComponentValues{{"label", true}}; REQUIRE_FALSE(f.editor.setProps(f.first, choice));
-    choice.componentValues = ComponentValues{{"label", std::string("\xf0\x9f\x98\x80")}}; REQUIRE_FALSE(f.editor.setProps(f.first, choice));
+    choice.componentValues = ComponentValues{{"label", std::string("a\x01")}}; REQUIRE_FALSE(f.editor.setProps(f.first, choice));
 }
 
 TEST_CASE("Declaring text refuses existing content overrides and protects its actual anatomy") {
@@ -94,7 +94,7 @@ TEST_CASE("Declaring text refuses existing content overrides and protects its ac
     REQUIRE_FALSE(f.session.edit(DeleteNode{f.label}));
     auto duplicate = f.definition(); duplicate.properties.push_back({"label", f.label, true});
     REQUIRE_FALSE(f.editor.setComponentDefinition(f.main, duplicate));
-    auto invalid = f.definition("\xf0\x9f\x98\x80"); REQUIRE_FALSE(f.editor.setComponentDefinition(f.main, invalid));
+    auto invalid = f.definition("a\x01"); REQUIRE_FALSE(f.editor.setComponentDefinition(f.main, invalid));
     REQUIRE(snapshotToJson(f.session.document()) == before);
 }
 
@@ -561,10 +561,10 @@ TEST_CASE("Bundled font measures accented Latin, kerning, alignment and explicit
     REQUIRE(std::any_of(atlas.begin(), atlas.end(), [](auto p) { return p != 0; }));
 }
 
-TEST_CASE("Text refuses unsupported scripts, malformed UTF-8 and untrusted fonts") {
+TEST_CASE("Text refuses control characters, malformed UTF-8 and unknown stacks") {
     TextRun text;
-    for (const auto& value : {std::string("\xc0\xaf"), std::string("\xed\xa0\x80"), std::string("\xf0\x9f\x98\x80"),
-                              std::string("\xd8\xa7"), std::string("a\xcc\x81"), std::string("a\0b", 3), std::string(4097, 'a')}) {
+    for (const auto& value : {std::string("\xc0\xaf"), std::string("\xed\xa0\x80"), std::string("a\x07"),
+                              std::string("\xc2\x85"), std::string("\x7f"), std::string("a\0b", 3), std::string(4097, 'a')}) {
         text.content = value;
         REQUIRE_FALSE(validText(text));
     }
