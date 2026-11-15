@@ -168,9 +168,13 @@ TextLayout layoutText(const TextRun& text, const TextFonts& stack, double availa
     std::vector<Face> faces;
     for (const Font* font : stack.fonts)
         if (font) if (const auto face = faceFor(text, *font)) faces.push_back(*face);
+    const std::size_t fromStack = faces.size();
     if (const Font* generic = genericFont(stack.fallback))
         if (const auto face = faceFor(text, *generic)) faces.push_back(*face);
-    if (faces.empty()) faces.push_back(*faceFor(text, embeddedInterFont()));
+    const bool nothing = faces.empty();
+    if (nothing) faces.push_back(*faceFor(text, embeddedInterFont()));
+    std::unordered_map<std::uint32_t, bool> fromFonts;
+    for (std::size_t f = 0; f < fromStack; ++f) fromFonts[faces[f].instance] = true;
     std::unordered_map<std::uint32_t, bool> oblique;
     for (const auto& face : faces) oblique[face.instance] = face.oblique;
     const auto metrics = fonts::metrics(faces.front().instance);
@@ -188,7 +192,25 @@ TextLayout layoutText(const TextRun& text, const TextFonts& stack, double availa
     std::vector<std::vector<fonts::ShapedGlyph>> shaped;
     std::vector<Line> lines;
     for (std::size_t p = 0; p < paragraphs.size(); ++p) {
-        const auto& glyphs = shaped.emplace_back(shapeParagraph(paragraphs[p], faces, text.features));
+        if (nothing) {
+            auto& marks = shaped.emplace_back();
+            std::vector<Character> characters;
+            decode(paragraphs[p], characters);
+            for (const auto& character : characters) {
+                if (!marks.empty() && fonts::attachesToPrevious(character.codepoint)) continue;
+                auto mark = fonts::missingGlyph(faces.front().instance);
+                mark.cluster = std::uint32_t(character.offset);
+                if (character.codepoint == ' ' || character.codepoint == 0xa0) mark.ink = {};
+                marks.push_back(mark);
+            }
+        } else {
+            shaped.emplace_back(shapeParagraph(paragraphs[p], faces, text.features));
+        }
+        const auto& glyphs = shaped.back();
+        for (const auto& glyph : glyphs) {
+            if (glyph.glyph == 0) result.missing = true;
+            else if (!fromFonts[glyph.instance]) result.approximated = true;
+        }
         std::size_t begin = 0, i = 0, lastBreak = 0;
         double measured = 0, left = 0, right = 0;
         while (i < glyphs.size()) {

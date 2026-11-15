@@ -55,6 +55,11 @@ struct TextLayout {
     double width = 0.0;
     double height = 0.0;
     std::vector<TextGlyph> glyphs;
+    /// Some characters come from the bundled face of the stack's generic family instead of a font
+    /// of the stack.
+    bool approximated = false;
+    /// Some characters draw the missing-glyph mark.
+    bool missing = false;
 };
 
 /// Strict UTF-8 without control characters other than newline. Checks the font settings' shape, not

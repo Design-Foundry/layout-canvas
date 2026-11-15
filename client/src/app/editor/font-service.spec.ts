@@ -26,6 +26,9 @@ function setup(initial = [font('f1', 'Roboto')]) {
     addFontStack: vi.fn(() => true),
     registerFontFamily: vi.fn((): string | null => null),
     registerFontFace: vi.fn((): string | null => null),
+    textFallback: vi.fn(() => null),
+    setFontAvailable: vi.fn(() => true),
+    unavailableFonts: vi.fn((): string[] => []),
   };
   return { core, service: TestBed.inject(FontService), http: TestBed.inject(HttpTestingController) };
 }

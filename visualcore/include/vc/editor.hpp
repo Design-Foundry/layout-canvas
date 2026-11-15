@@ -171,6 +171,9 @@ public:
 
     /// The mode tokens resolve in on the canvas. View state: switching it is not an edit.
     void setActiveMode(const Id& mode);
+    /// Marks a font unavailable, or available again, to preview its fallback in the canvas and the
+    /// prototype preview. Not an edit. False for an unknown font or the bundled Inter.
+    bool setFontAvailable(const Id& font, bool available);
     [[nodiscard]] const Id& activeMode() const { return activeMode_; }
 
     /// When on (the default), drawing and moving put edges on whole world units, in absolute

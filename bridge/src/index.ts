@@ -727,6 +727,27 @@ export class VisualCore {
     return this.module.registerFontFamily(provider, key, version, JSON.stringify(files)) || null;
   }
 
+  /**
+   * Marks a font unavailable, or available again, to preview how its stack falls back, in the canvas
+   * and the prototype preview. View state, not an edit. False for an unknown font or the bundled Inter.
+   */
+  setFontAvailable(fontId: string, available: boolean): boolean {
+    return this.module.setFontAvailable(fontId, available);
+  }
+
+  /** Ids of the fonts marked unavailable. */
+  unavailableFonts(): string[] {
+    return JSON.parse(this.module.unavailableFonts());
+  }
+
+  /**
+   * Whether a text layer draws some characters with the bundled face of its stack's generic family
+   * (`generic` names that face) or with the missing-glyph mark. Null for anything but a text layer.
+   */
+  textFallback(id: string): { approximated: boolean; missing: boolean; generic: string | null } | null {
+    return JSON.parse(this.module.textFallback(id));
+  }
+
   /** Adds a font to the document as an undoable edit. */
   addFont(font: Font): boolean {
     return this.module.addFont(JSON.stringify(font));

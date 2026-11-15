@@ -22,7 +22,14 @@ export interface PinnedFont {
 }
 type FontCore = Pick<
   VisualCore,
-  'fonts' | 'addFont' | 'addFontStack' | 'registerFontFamily' | 'registerFontFace'
+  | 'fonts'
+  | 'addFont'
+  | 'addFontStack'
+  | 'registerFontFamily'
+  | 'registerFontFace'
+  | 'textFallback'
+  | 'setFontAvailable'
+  | 'unavailableFonts'
 >;
 
 /** The order key that sorts after `last`, following the document's fractional index format. */
@@ -54,6 +61,9 @@ export class FontService {
   private core: FontCore | undefined;
 
   readonly snapshot = signal<FontsSnapshot>({ fonts: [], fontStacks: [] });
+  readonly unavailable = signal<readonly string[]>([]);
+  /** Counts the families whose files finished loading, which changes layouts without a revision. */
+  readonly loadedFamilies = signal(0);
 
   private get http(): HttpClient {
     return this.injector.get(HttpClient);
@@ -63,6 +73,21 @@ export class FontService {
     if (core !== this.core) this.loaded.clear();
     this.core = core;
     if (core) this.refresh();
+    else this.unavailable.set([]);
+  }
+
+  fallbackOf(nodeId: string): ReturnType<FontCore['textFallback']> {
+    return this.core?.textFallback?.(nodeId) ?? null;
+  }
+
+  setAvailable(fontId: string, available: boolean): void {
+    this.core?.setFontAvailable?.(fontId, available);
+    this.readUnavailable();
+  }
+
+  private readUnavailable(): void {
+    const next = this.core?.unavailableFonts?.() ?? [];
+    if (JSON.stringify(next) !== JSON.stringify(this.unavailable())) this.unavailable.set(next);
   }
 
   /** Reads the document's fonts and starts loading the families that are not loaded yet. */
@@ -70,14 +95,15 @@ export class FontService {
     if (!this.core) return;
     const next = this.core.fonts();
     if (JSON.stringify(next) !== JSON.stringify(this.snapshot())) this.snapshot.set(next);
+    this.readUnavailable();
     for (const font of next.fonts) {
       if (font.provider !== GOOGLE_PROVIDER || !font.familyVersion) continue;
       const id = `${font.key}@${font.familyVersion}`;
       if (this.loaded.has(id)) continue;
       this.loaded.add(id);
-      this.load(font.key, font.familyVersion).catch((error) =>
-        console.warn(`Font ${font.key} could not be loaded`, error),
-      );
+      this.load(font.key, font.familyVersion)
+        .catch((error) => console.warn(`Font ${font.key} could not be loaded`, error))
+        .finally(() => this.loadedFamilies.update((n) => n + 1));
     }
   }
 

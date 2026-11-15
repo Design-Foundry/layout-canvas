@@ -584,6 +584,12 @@ bool Editor::deleteMode(const Id& mode) {
     return deleted;
 }
 
+bool Editor::setFontAvailable(const Id& font, bool available) {
+    if (!session_.document().setFontAvailable(font, available)) return false;
+    if (prototypeDocument_) prototypeDocument_->setFontAvailable(font, available);
+    return true;
+}
+
 void Editor::setActiveMode(const Id& mode) {
     if(presenting_) return;
     if (mode != activeMode_ && session_.document().findMode(mode)) {

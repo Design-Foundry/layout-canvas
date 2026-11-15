@@ -1,7 +1,7 @@
-import { Component, computed, effect, input, output, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
-import { ModeRow, TokenRow, TokenType } from '@canvas/bridge';
+import { INTER_FONT_ID, ModeRow, TokenRow, TokenType } from '@canvas/bridge';
 import {
   LucentIcon,
   LucentIconButton,
@@ -11,6 +11,7 @@ import {
   LucentMenuTrigger,
   LucentSelect,
 } from '@designfoundry/lucent-angular';
+import { FontService } from './font-service';
 import { TOKEN_FAMILIES, tokenSummary } from './token-model';
 
 export interface ModeRename {
@@ -96,6 +97,25 @@ export interface ModeRename {
           }
         </section>
       }
+      @if (fonts().length) {
+        <section class="family" aria-label="Fonts">
+          <header class="family-header">
+            <h3 class="family-title typography-caption">Fonts</h3>
+          </header>
+          @for (font of fonts(); track font.id) {
+            <label class="font typography-body-sm">
+              <span class="name">{{ font.displayName || font.identifier }}</span>
+              <input
+                type="checkbox"
+                aria-label="Available"
+                [checked]="font.available"
+                (change)="setAvailable(font.id, $any($event.target).checked)"
+              />
+              Available
+            </label>
+          }
+        </section>
+      }
     </div>
   `,
   styleUrls: ['./tokens-panel.scss', './token-row.scss'],
@@ -118,6 +138,19 @@ export class TokensPanel {
   );
   protected readonly modeOptions = computed(() => this.modes().map((mode) => ({ label: mode.name, value: mode.id })));
   protected readonly activeModeRow = computed(() => this.modes().find((mode) => mode.id === this.activeMode()));
+
+  private readonly fontService = inject(FontService);
+  protected readonly fonts = computed(() => {
+    const off = new Set(this.fontService.unavailable());
+    return this.fontService
+      .snapshot()
+      .fonts.filter((font) => font.id !== INTER_FONT_ID)
+      .map((font) => ({ ...font, available: !off.has(font.id) }));
+  });
+
+  protected setAvailable(id: string, available: boolean): void {
+    this.fontService.setAvailable(id, available);
+  }
 
   protected readonly modeControl = new FormControl('', { nonNullable: true });
   protected readonly modeNameControl = new FormControl('', { nonNullable: true });
