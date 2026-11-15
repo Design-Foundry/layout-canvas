@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -111,6 +113,52 @@ TEST_CASE("atlas changes are reported once and aligned to the padding") {
     CHECK(region->x + region->w <= vc::kTextAtlasSize);
     CHECK(region->y + region->h <= vc::kTextAtlasSize);
     CHECK(!vc::takeTextAtlasChanges().has_value());
+}
+
+TEST_CASE("a full atlas clears and serves glyphs again from the top") {
+    std::vector<vc::GlyphKey> keys;
+    for (const char* font : {"inter-regular-v1", "inter-bold-v1", "inter-oblique-v1", "inter-bold-oblique-v1"}) {
+        const auto instance = vc::layoutText(run(font, "A")).glyphs.at(0).key.instance;
+        for (std::uint32_t glyph = 1; glyph < 2500; ++glyph) keys.push_back({instance, glyph});
+    }
+    const auto first = vc::layoutText(run("inter-regular-v1", "A")).glyphs.at(0).key;
+    const vc::Rect before = vc::textGlyphUv(first);
+    const auto generation = vc::textAtlasGeneration();
+    (void)vc::takeTextAtlasChanges();
+
+    std::optional<vc::GlyphKey> trigger;
+    for (const auto& key : keys) {
+        const vc::Rect uv = vc::textGlyphUv(key);
+        if (vc::textAtlasGeneration() == generation) continue;
+        trigger = key;
+        constexpr double corner = double(vc::kTextAtlasPadding) / vc::kTextAtlasSize;
+        CHECK(uv.x == corner);
+        CHECK(uv.y == corner);
+        break;
+    }
+    REQUIRE(trigger.has_value());
+    CHECK(vc::textAtlasGeneration() == generation + 1);
+
+    const auto region = vc::takeTextAtlasChanges();
+    REQUIRE(region.has_value());
+    CHECK(region->x == 0);
+    CHECK(region->y == 0);
+    CHECK(region->w == vc::kTextAtlasSize);
+    CHECK(region->h == vc::kTextAtlasSize);
+
+    const auto atlas = vc::textAtlas();
+    const auto lowerHalf = atlas.subspan(std::size_t(vc::kTextAtlasSize) * vc::kTextAtlasSize / 2);
+    CHECK(std::all_of(lowerHalf.begin(), lowerHalf.end(), [](std::uint8_t p) { return p == 0; }));
+
+    const vc::Rect after = vc::textGlyphUv(first);
+    CHECK(after.w == before.w);
+    CHECK(after.h == before.h);
+    CHECK(after.x > double(vc::kTextAtlasPadding) / vc::kTextAtlasSize);
+    const int left = int(after.x * vc::kTextAtlasSize), top = int(after.y * vc::kTextAtlasSize);
+    int ink = 0;
+    for (int y = top; y < top + int(after.h * vc::kTextAtlasSize); ++y)
+        for (int x = left; x < left + int(after.w * vc::kTextAtlasSize); ++x) ink += atlas[std::size_t(y) * vc::kTextAtlasSize + x] > 0;
+    CHECK(ink > 0);
 }
 
 TEST_CASE("bold and regular glyphs are different instances") {
