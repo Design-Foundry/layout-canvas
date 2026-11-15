@@ -7,5 +7,5 @@ SHA-256: `ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab`.
 The upstream dual MIT/public-domain license and notices are retained in the file;
 this project uses its MIT license option.
 
-Only the trusted bundled Inter file is parsed. No user-uploaded or remotely
-supplied font data reaches this parser, following its upstream security warning.
+No font file reaches this parser. HarfBuzz reads the fonts and hands their outlines to
+`stbtt_Rasterize`, which is the only part of stb_truetype in use.
