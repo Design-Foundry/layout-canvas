@@ -338,9 +338,10 @@
             </select></label
           >
           <label
-            >Style property<select [(ngModel)]="ruleField">
+            >Style property<select [ngModel]="ruleField" (ngModelChange)="selectRuleField($event)">
               <option value="cornerRadius">Corner radius</option>
               <option value="opacity">Opacity</option>
+              <option value="visible">Visible</option>
               <option value="fill">Background color</option>
               <option value="w">Child width</option>
               <option value="h">Child height</option>
@@ -358,6 +359,13 @@
                 <option value="left">Left</option>
                 <option value="center">Center</option>
                 <option value="right">Right</option>
+              </select></label
+            >
+          } @else if (ruleField === 'visible') {
+            <label
+              >Style value<select [(ngModel)]="ruleValue">
+                <option value="on">On</option>
+                <option value="off">Off</option>
               </select></label
             >
           } @else {
@@ -392,7 +400,19 @@
                 @if (field.editable) {
                   <label
                     >{{ field.label }}
-                    @if (field.key === 'textStyle.align') {
+                    @if (field.key === 'visible') {
+                      <select
+                        [attr.aria-label]="field.label + ' in variant style ' + (ruleIndex + 1)"
+                        #visibleControl="ngModel"
+                        [ngModel]="field.value"
+                        (ngModelChange)="
+                          ruleFieldChanged(ruleIndex, field.key, $event, visibleControl)
+                        "
+                      >
+                        <option value="on">On</option>
+                        <option value="off">Off</option>
+                      </select>
+                    } @else if (field.key === 'textStyle.align') {
                       <select
                         [attr.aria-label]="field.label + ' in variant style ' + (ruleIndex + 1)"
                         #alignmentControl="ngModel"

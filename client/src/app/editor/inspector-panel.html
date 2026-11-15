@@ -97,6 +97,24 @@
       </section>
     }
 
+    @if (n.inComponent && !n.inInstance) {
+      <section class="section">
+        <label class="part-field">
+          Part
+          <input
+            type="text"
+            aria-label="Part"
+            maxlength="64"
+            [value]="n.part ?? ''"
+            (change)="setPart($event)"
+          />
+        </label>
+        @if (partError()) {
+          <p class="typography-caption" role="alert">{{ partError() }}</p>
+        }
+      </section>
+    }
+
     <app-component-properties-panel
       [node]="n"
       [snapshot]="snapshot()"

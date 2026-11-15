@@ -8,6 +8,11 @@ bool validPrototypeFlowName(const std::string& name) {
     TextRun text;text.content=name;return !textProblem(text);
 }
 
+bool validKebabName(const std::string& name) {
+    return !name.empty() && name.size() <= 64 && name[0] >= 'a' && name[0] <= 'z' &&
+        std::all_of(name.begin(), name.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
+}
+
 bool validInteractionSettings(const Interaction& i) {
     const bool destination=i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay || i.action==PrototypeAction::ChangeState;
     switch(i.action) {
@@ -122,6 +127,7 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
         swapIn(inverse.textStyle->align, patch.textStyle->align, node.text.align);
     }
     swapIn(inverse.name, patch.name, node.name);
+    swapIn(inverse.part, patch.part, node.part);
     swapIn(inverse.x, patch.x, node.x);
     swapIn(inverse.y, patch.y, node.y);
     swapIn(inverse.w, patch.w, node.w);
@@ -185,6 +191,7 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
         }
     }
     take(out.name, top.name);
+    take(out.part, top.part);
     take(out.x, top.x);
     take(out.y, top.y);
     take(out.w, top.w);
@@ -225,6 +232,7 @@ NodePatch fullPatch(const Node& n) {
     if (n.type == NodeType::Text) p.text = n.text;
     if (n.type == NodeType::Text) p.textWrap = n.textWrap;
     p.name = n.name;
+    if (!n.part.empty()) p.part = n.part;
     p.x = n.x;
     p.y = n.y;
     p.w = n.w;

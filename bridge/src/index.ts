@@ -268,6 +268,8 @@ export interface NodeFields {
   readonly text?: TextRun;
   readonly componentValues?: ComponentValues;
   readonly name: string;
+  /** Style-addressable name inside a main component. Empty or absent means no part; kebab-case and unique within the component. */
+  readonly part?: string;
   readonly x: number;
   readonly y: number;
   readonly w: number;
@@ -313,6 +315,8 @@ export interface NodeProps extends Omit<NodeFields, 'fill'> {
   readonly inUse?: boolean;
   /** True for a node copied into an instance. Its edits become overrides. */
   readonly inInstance?: boolean;
+  /** True for a stored layer inside a main component, including the component root. */
+  readonly inComponent?: boolean;
 }
 
 /** The properties a `setProps` call may change. Grouped properties are replaced whole. */

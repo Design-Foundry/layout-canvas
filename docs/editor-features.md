@@ -15,13 +15,35 @@ contracts. This is an editor foundation increment, not a claim of full Figma par
 | Exchange | Portable `canvas-component/1` files with native validation and dependent mains/tokens; atomic import into a new document | 2 MB files; malformed/unsupported data refuses instead of silent substitution |
 | Prototyping | Root-frame screens, starting screen selection, Navigate/Back/Open/Close overlay, positioned modals, scene-composited dissolve/slide/push, preserved outgoing viewports, reduced motion, scrollable screen/modal viewports, inherited hotspot overrides, ordered click/hover/press/delay interactions, isolated nested component states, hierarchical cross-screen Smart Animate and native playback | No partial-tree matching, fixed/sticky or nested scroll containers, variables, URLs or hosted sharing; directional transitions use dissolve across mismatched viewport shapes; portable files refuse document-local links |
 
+## Component parts
+
+A layer inside a main component can carry a part, a lowercase kebab-case name
+(up to 64 characters) that is unique within that component. The inspector shows a
+Part field for stored layers inside a main component, including the component root.
+Parts are optional, need snapshot 23 and are refused on layers outside a component.
+Expanded copies in instances expose the part of their source layer, but instances,
+overrides and variant rules cannot change it. Variant rules keep targeting layer ids,
+so renaming a part never breaks a rule. Detaching an instance clears the parts of its
+copies. Dragging a layer into another component keeps its part unless that component
+already uses it, and dragging it out of every component clears it; both are one undo
+step. SetProps, CreateNode and MoveNode operations refuse duplicate parts.
+
+## Variant rules
+
+A rule with an empty cell is the base rule: it applies in every cell, and more specific
+cells override it. Several base rules for one layer apply in declaration order. A rule
+may set `visible`, which overrides the layer's boolean property for that cell; an
+instance override of `visible` wins over both. A layer hidden by a rule is hidden like
+any other layer for rendering, hit testing, auto layout and prototype playback. Base
+rules and rules that set `visible` need snapshot 24.
+
 ## Persistence and rendering
 
 Snapshots remain versioned by the features they contain. Text starts at version 5;
 independent metrics, wrapping, face selection and shared typography progressively
 require versions 6–11. Lines use 12, straight unfilled paths 13, curved/filled paths
 14, raster images 15, click prototypes 16, overlay/dissolve options 17 and directional
-transitions/overlay placement 18. Earlier documents retain their minimum version. Downlevel
+transitions/overlay placement 18, component part names 23, and base variant rules or rules that set visibility 24. Earlier documents retain their minimum version. Downlevel
 snapshots containing unsupported newer data are refused.
 
 Prototype playback uses the same native renderer and does not produce document

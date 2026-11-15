@@ -232,6 +232,47 @@ describe('declared component properties', () => {
     });
     expect(panel.patchLabel(saves.at(-1)?.rules[0].patch)).toContain('fontSize: 32');
   });
+  it('saves a rule with an empty cell as the base and labels it Base', async () => {
+    const { fixture, saves, element } = await setup('component');
+    const panel = fixture.componentInstance as any;
+    panel.ruleTarget = 'icon';
+    panel.cell = {};
+    panel.ruleField = 'opacity';
+    panel.ruleValue = '0.5';
+    panel.addRule();
+    expect(saves.at(-1)?.rules).toEqual([{ target: 'icon', when: {}, patch: { opacity: 0.5 } }]);
+    await fixture.whenStable();
+    expect(
+      [...element.querySelectorAll('.entry')].some((e) => e.textContent?.includes('Base')),
+    ).toBe(true);
+    expect(panel.ruleLabel({})).toBe('Base');
+  });
+  it('adds a visible rule with an on or off value and edits it afterwards', async () => {
+    const { fixture, saves, element } = await setup('component');
+    const panel = fixture.componentInstance as any;
+    panel.ruleTarget = 'icon';
+    panel.cell = { size: 'compact' };
+    panel.selectRuleField('visible');
+    expect(panel.ruleValue).toBe('off');
+    panel.addRule();
+    expect(saves.at(-1)?.rules[0].patch).toEqual({ visible: false });
+    expect(panel.patchLabel({ visible: false })).toBe('Visible: off');
+    await fixture.whenStable();
+    const select = element.querySelector<HTMLSelectElement>(
+      '[aria-label="Visible in variant style 1"]',
+    )!;
+    select.value = 'on';
+    select.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    expect(saves.at(-1)?.rules[0].patch).toEqual({ visible: true });
+    panel.selectRuleField('opacity');
+    expect(panel.ruleValue).toBe('8');
+    panel.selectRuleField('visible');
+    panel.ruleValue = '';
+    const count = saves.length;
+    panel.addRule();
+    expect(saves).toHaveLength(count);
+  });
   it('refuses text fields on non-text anatomy and invalid metrics before saving', async () => {
     const { fixture, saves } = await setup('component');
     fixture.componentRef.setInput('snapshot', () => ({
