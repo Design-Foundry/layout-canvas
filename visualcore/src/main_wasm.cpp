@@ -5,6 +5,7 @@
 
 #include <emscripten/bind.h>
 #include <emscripten/html5.h>
+#include <emscripten/val.h>
 
 #include "render/renderer.hpp"
 #include "vc/camera.hpp"
@@ -13,6 +14,7 @@
 #include "vc/geometry.hpp"
 #include "vc/json.hpp"
 #include "vc/session.hpp"
+#include "vc/text.hpp"
 #include "web/input.hpp"
 
 namespace {
@@ -428,6 +430,12 @@ int main() {
     return 0;
 }
 
+std::string registerFontFace(const std::string& id, const emscripten::val& bytes, const std::string& sha256) {
+    const auto data = emscripten::convertJSArrayToNumberVector<std::uint8_t>(bytes);
+    const char* problem = vc::registerFontFace(id, data, sha256);
+    return problem ? problem : "";
+}
+
 EMSCRIPTEN_BINDINGS(visualcore) {
     using namespace emscripten;
 
@@ -457,6 +465,7 @@ EMSCRIPTEN_BINDINGS(visualcore) {
         .function("position", &vc::Camera::position)
         .function("zoom", &vc::Camera::zoom);
 
+    function("registerFontFace", &registerFontFace);
     function("attach", &attach);
     function("detach", &detach);
     function("addRandomShapes", &addRandomShapes);

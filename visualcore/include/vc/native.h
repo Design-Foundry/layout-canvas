@@ -10,6 +10,8 @@
 #define VC_API __attribute__((visibility("default")))
 #endif
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -36,6 +38,11 @@ VC_API char* vc_document_apply(vc_document* document, const char* ops);
 /* Why the last `vc_document_open` or `vc_document_apply` on this thread refused its input, as
  * `{ "path", "message" }`, or null when it refused nothing. */
 VC_API char* vc_last_error(void);
+
+/* Registers a font face from `size` bytes under `id`, provided their SHA-256 is `sha256` in lowercase
+ * hex. Returns 1 on success, including registering the same id and hash again, or 0 when refused, with
+ * the reason in `vc_last_error` as `{ "path": "font", "message" }`. */
+VC_API int vc_register_font_face(const char* id, const unsigned char* bytes, size_t size, const char* sha256);
 
 VC_API char* vc_document_snapshot(const vc_document* document);
 /* Rows topmost first, each followed by its children, nodes copied into instances included. */
