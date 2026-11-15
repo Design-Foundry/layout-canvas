@@ -154,6 +154,7 @@ else()
             tests/test_font_registry.cpp
             tests/test_font_model.cpp
             tests/test_font_stacks.cpp
+            tests/test_font_families.cpp
             tests/test_line.cpp
             tests/test_path.cpp
             tests/test_prototype_model.cpp

@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 #include "vc/font.hpp"
+#include "vc/text.hpp"
+struct hb_face_t;
 #include "vc/math.hpp"
 
 namespace vc::fonts {
@@ -51,6 +53,10 @@ struct ShapedGlyph {
 /// Shapes one line of text with no newlines, with `features` on top of the font's defaults.
 [[nodiscard]] std::vector<ShapedGlyph> shape(std::uint32_t instance, std::string_view text, const FontFeatures& features = {});
 
+struct ReadAxis;
+struct Capabilities;
+[[nodiscard]] Capabilities capabilitiesOf(hb_face_t* face);
+
 struct ReadAxis {
     std::string tag;
     double min = 0, max = 0;
@@ -64,5 +70,7 @@ struct Capabilities {
 };
 /// Nothing when no face has that id.
 [[nodiscard]] std::optional<Capabilities> capabilities(std::string_view face);
+/// The files declared for a family and version, or nothing.
+[[nodiscard]] std::optional<std::vector<FontFile>> familyFiles(std::string_view provider, std::string_view key, std::string_view version);
 
 } // namespace vc::fonts

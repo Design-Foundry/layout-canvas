@@ -460,6 +460,7 @@ json writeFont(const Font& font) {
              {"capabilities", {{"axes", axes}, {"features", font.features}}}, {"order", font.order}};
     if (!font.displayName.empty()) out["displayName"] = font.displayName;
     if (!font.sha256.empty()) out["sha256"] = font.sha256;
+    if (!font.familyVersion.empty()) out["familyVersion"] = font.familyVersion;
     return out;
 }
 
@@ -472,10 +473,11 @@ std::optional<Font> readFont(const json& j) {
     font.id = *id;
     for (const char* key : {"identifier", "provider", "key"}) if (!require(j, key, Shape::String)) return std::nullopt;
     font.identifier = j["identifier"]; font.provider = j["provider"]; font.key = j["key"];
-    for (const char* key : {"displayName", "sha256"})
+    for (const char* key : {"displayName", "sha256", "familyVersion"})
         if (j.contains(key)) { if (!require(j, key, Shape::String)) return std::nullopt; }
     if (j.contains("displayName")) font.displayName = j["displayName"];
     if (j.contains("sha256")) font.sha256 = j["sha256"];
+    if (j.contains("familyVersion")) font.familyVersion = j["familyVersion"];
     const auto order = requireOrder(j);
     if (!order) return std::nullopt;
     font.order = *order;
@@ -2083,6 +2085,33 @@ std::string fontsToJson(const Document& document) {
     for (const Font* font : document.fonts()) fonts.push_back(writeFont(*font));
     for (const FontStack* stack : document.fontStacks()) stacks.push_back(writeFontStack(*stack));
     return json{{"fonts", fonts}, {"fontStacks", stacks}}.dump();
+}
+
+std::optional<Font> fontFromJson(std::string_view data) {
+    return readFont(json::parse(data, nullptr, false));
+}
+
+std::optional<FontStack> fontStackFromJson(std::string_view data) {
+    return readFontStack(json::parse(data, nullptr, false));
+}
+
+std::optional<std::vector<FontFile>> fontFilesFromJson(std::string_view data) {
+    const json j = json::parse(data, nullptr, false);
+    if (!j.is_array()) return refused("files must be an array of {face, fixed}");
+    std::vector<FontFile> files;
+    for (std::size_t i = 0; i < j.size(); ++i) {
+        DiagnosticScope entry{"[" + std::to_string(i) + "]"};
+        const auto& item = j[i];
+        if (!item.is_object() || !require(item, "face", Shape::String)) return refused("a file needs a face id");
+        FontFile file{item["face"].get<std::string>(), {}};
+        if (item.contains("fixed")) {
+            const auto fixed = readAxes(item["fixed"]);
+            if (!fixed) return std::nullopt;
+            file.fixed = *fixed;
+        }
+        files.push_back(std::move(file));
+    }
+    return files;
 }
 
 std::optional<Token> tokenFromJson(std::string_view data) {

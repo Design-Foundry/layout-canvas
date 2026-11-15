@@ -178,6 +178,31 @@ int vc_register_font_face(const char* id, const unsigned char* bytes, size_t siz
     });
 }
 
+int vc_register_font_family(const char* provider, const char* key, const char* version, const char* files) {
+    vc::clearDiagnostic();
+    return guarded([&]() -> int {
+        const char* problem = nullptr;
+        if (!provider || !key || !version || !files) {
+            problem = "provider, key, version and files are required";
+        } else if (auto parsed = vc::fontFilesFromJson(files)) {
+            problem = vc::registerFontFamily(provider, key, version, std::move(*parsed));
+        } else {
+            problem = "files must be an array of { face, fixed }";
+        }
+        if (!problem) return 1;
+        vc::restoreDiagnostic(vc::Diagnostic{"font", problem});
+        return 0;
+    });
+}
+
+char* vc_font_capabilities(const unsigned char* bytes, size_t size) {
+    return guarded([&]() -> char* {
+        if (!bytes) return nullptr;
+        const auto read = vc::fontCapabilitiesJson(std::span<const std::uint8_t>{bytes, size});
+        return read ? copyOut(*read) : nullptr;
+    });
+}
+
 char* vc_document_snapshot(const vc_document* document) {
     return guarded([&]() -> char* { return document ? copyOut(vc::snapshotToJson(document->document)) : nullptr; });
 }

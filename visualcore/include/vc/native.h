@@ -44,6 +44,14 @@ VC_API char* vc_last_error(void);
  * the reason in `vc_last_error` as `{ "path": "font", "message" }`. */
 VC_API int vc_register_font_face(const char* id, const unsigned char* bytes, size_t size, const char* sha256);
 
+/* Declares the files of a font family at a version, `files` as `[{ "face", "fixed": { tag: value } }]`.
+ * Returns 1, or 0 when refused, with the reason in `vc_last_error`. */
+VC_API int vc_register_font_family(const char* provider, const char* key, const char* version, const char* files);
+
+/* What font bytes offer, as `{ "axes": [{ "tag", "min", "max", "default" }], "features" }`, or null
+ * when they are not a usable OpenType face. Free with `vc_free`. */
+VC_API char* vc_font_capabilities(const unsigned char* bytes, size_t size);
+
 VC_API char* vc_document_snapshot(const vc_document* document);
 /* Rows topmost first, each followed by its children, nodes copied into instances included. */
 VC_API char* vc_document_layers(const vc_document* document);

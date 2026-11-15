@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <nlohmann/json.hpp>
 #include <hb.h>
 #include <hb-ot.h>
 #include "sha256.hpp"
@@ -72,6 +73,8 @@ struct State {
     std::unordered_map<std::uint64_t, Rect> cells;
     int x = 0, y = 0, rowHeight = 0;
     std::uint64_t generation = 0;
+    std::map<std::string, std::vector<FontFile>, std::less<>> families;
+    std::uint64_t registrations = 0;
     int dirtyX0 = INT_MAX, dirtyY0 = INT_MAX, dirtyX1 = 0, dirtyY1 = 0;
 
     State() {
@@ -101,6 +104,7 @@ struct State {
         }
         hb_face_make_immutable(face->face);
         faces.emplace(std::string(id), std::move(face));
+        ++registrations;
         return nullptr;
     }
 
@@ -277,12 +281,7 @@ std::vector<ShapedGlyph> shape(std::uint32_t instanceIndex, std::string_view tex
     return out;
 }
 
-std::optional<Capabilities> capabilities(std::string_view faceId) {
-    auto& s = state();
-    const std::scoped_lock guard(s.lock);
-    const auto found = s.faces.find(faceId);
-    if (found == s.faces.end()) return std::nullopt;
-    hb_face_t* face = found->second->face;
+Capabilities capabilitiesOf(hb_face_t* face) {
     Capabilities out;
     unsigned count = hb_ot_var_get_axis_count(face);
     std::vector<hb_ot_var_axis_info_t> axes(count);
@@ -311,12 +310,82 @@ std::optional<Capabilities> capabilities(std::string_view faceId) {
     return out;
 }
 
+std::optional<Capabilities> capabilities(std::string_view faceId) {
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    const auto found = s.faces.find(faceId);
+    if (found == s.faces.end()) return std::nullopt;
+    return capabilitiesOf(found->second->face);
+}
+
 } // namespace fonts
 
 const char* registerFontFace(std::string_view id, std::span<const std::uint8_t> bytes, std::string_view sha256) {
     auto& s = state();
     const std::scoped_lock guard(s.lock);
     return s.add(id, bytes, sha256, true);
+}
+
+namespace {
+std::string familyKey(std::string_view provider, std::string_view key, std::string_view version) {
+    std::string out(provider);
+    out += '\x1f';
+    out += key;
+    out += '\x1f';
+    out += version;
+    return out;
+}
+} // namespace
+
+namespace fonts {
+std::optional<std::vector<FontFile>> familyFiles(std::string_view provider, std::string_view key, std::string_view version) {
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    const auto found = s.families.find(familyKey(provider, key, version));
+    if (found == s.families.end()) return std::nullopt;
+    return found->second;
+}
+} // namespace fonts
+
+const char* registerFontFamily(std::string_view provider, std::string_view key, std::string_view version, std::vector<FontFile> files) {
+    if (provider.empty() || key.empty()) return "provider and key are required";
+    if (files.empty() || files.size() > 64) return "a family has 1 to 64 files";
+    for (const auto& file : files) {
+        if (file.face.empty() || file.face.size() > 512) return "a file's face id must have 1 to 512 characters";
+        if (const char* why = fontSettingsProblem(file.fixed, {})) return why;
+    }
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    auto [entry, inserted] = s.families.try_emplace(familyKey(provider, key, version), files);
+    if (!inserted) {
+        if (entry->second == files) return nullptr;
+        return "this family and version already has different files";
+    }
+    ++s.registrations;
+    return nullptr;
+}
+
+std::uint64_t fontRegistryGeneration() {
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    return s.registrations;
+}
+
+std::optional<std::string> fontCapabilitiesJson(std::span<const std::uint8_t> bytes) {
+    if (bytes.empty() || bytes.size() > kMaxFaceBytes) return std::nullopt;
+    hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(bytes.data()), unsigned(bytes.size()), HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+    hb_face_t* face = hb_face_create(blob, 0);
+    std::optional<std::string> out;
+    const auto upem = hb_face_get_upem(face);
+    if (hb_face_get_glyph_count(face) > 0 && upem >= 16 && upem <= 16384) {
+        const auto read = fonts::capabilitiesOf(face);
+        nlohmann::json axes = nlohmann::json::array();
+        for (const auto& axis : read.axes) axes.push_back({{"tag", axis.tag}, {"min", axis.min}, {"max", axis.max}, {"default", axis.defaultValue}});
+        out = nlohmann::json{{"axes", axes}, {"features", read.features}}.dump();
+    }
+    hb_face_destroy(face);
+    hb_blob_destroy(blob);
+    return out;
 }
 
 std::string fontFaceSha256(std::string_view id) {
