@@ -434,6 +434,23 @@ int main() {
     return 0;
 }
 
+std::string registerFontFamily(const std::string& provider, const std::string& key, const std::string& version, const std::string& files) {
+    auto parsed = vc::fontFilesFromJson(files);
+    if (!parsed) return "files must be an array of { face, fixed }";
+    const char* problem = vc::registerFontFamily(provider, key, version, std::move(*parsed));
+    return problem ? problem : "";
+}
+
+bool addFont(const std::string& font) {
+    auto parsed = vc::fontFromJson(font);
+    return rt && parsed && rt->editor.edit(vc::CreateFont{std::move(*parsed)});
+}
+
+bool addFontStack(const std::string& stack) {
+    auto parsed = vc::fontStackFromJson(stack);
+    return rt && parsed && rt->editor.edit(vc::CreateFontStack{std::move(*parsed)});
+}
+
 std::string registerFontFace(const std::string& id, const emscripten::val& bytes, const std::string& sha256) {
     const auto data = emscripten::convertJSArrayToNumberVector<std::uint8_t>(bytes);
     const char* problem = vc::registerFontFace(id, data, sha256);
@@ -509,6 +526,9 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("tokens", &tokens);
     function("modes", &modes);
     function("fonts", &fonts);
+    function("registerFontFamily", &registerFontFamily);
+    function("addFont", &addFont);
+    function("addFontStack", &addFontStack);
     function("activeMode", &activeMode);
     function("setActiveMode", &setActiveMode);
     function("setCanvasBackground", &setCanvasBackground);

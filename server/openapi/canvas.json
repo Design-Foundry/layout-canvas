@@ -350,6 +350,200 @@
           }
         }
       }
+    },
+    "/api/fonts/google/families": {
+      "get": {
+        "tags": [
+          "Fonts"
+        ],
+        "operationId": "ListGoogleFamilies",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleFamiliesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fonts/google/pin": {
+      "post": {
+        "tags": [
+          "Fonts"
+        ],
+        "operationId": "PinGoogleFamily",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinFontRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinFontResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fonts/googlefonts/{version}/{key}/files": {
+      "get": {
+        "tags": [
+          "Fonts"
+        ],
+        "operationId": "GetGoogleFontFiles",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FontFileEntry"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fonts/googlefonts/{version}/{key}/files/{file}": {
+      "get": {
+        "tags": [
+          "Fonts"
+        ],
+        "operationId": "GetGoogleFontFile",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "file",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "description": "Not Found"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "font/ttf": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -491,6 +685,139 @@
           }
         },
         "description": "A document as shown in the document list."
+      },
+      "FontAxisCapability": {
+        "required": [
+          "tag",
+          "domain",
+          "default"
+        ],
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string"
+          },
+          "domain": {
+            "$ref": "#/components/schemas/FontAxisDomain"
+          },
+          "default": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "FontAxisDomain": {
+        "required": [
+          "min",
+          "max",
+          "values"
+        ],
+        "type": "object",
+        "properties": {
+          "min": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "max": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "values": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        "description": "A continuous range (double? FontAxisDomain.Min and double? FontAxisDomain.Max) or a discrete list (IReadOnlyList&lt;double&gt;? FontAxisDomain.Values)."
+      },
+      "FontCapabilitiesInfo": {
+        "required": [
+          "axes",
+          "features"
+        ],
+        "type": "object",
+        "properties": {
+          "axes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FontAxisCapability"
+            }
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "FontFileEntry": {
+        "required": [
+          "face",
+          "fixed",
+          "sha256",
+          "file"
+        ],
+        "type": "object",
+        "properties": {
+          "face": {
+            "type": "string"
+          },
+          "fixed": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          }
+        },
+        "description": "One file of a family: the face id native layout knows it by, the axis values it is fixed at, and its hash."
+      },
+      "GoogleFamiliesResponse": {
+        "required": [
+          "version",
+          "families"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "families": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GoogleFamily"
+            }
+          }
+        }
+      },
+      "GoogleFamily": {
+        "required": [
+          "family"
+        ],
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          }
+        }
       },
       "HealthResponse": {
         "required": [
@@ -694,6 +1021,64 @@
         },
         "description": "A page of the op log. Keep reading from the last `seq` until it reaches HeadSeq."
       },
+      "PinFontRequest": {
+        "required": [
+          "family"
+        ],
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          }
+        }
+      },
+      "PinFontResponse": {
+        "required": [
+          "font",
+          "genericFallback"
+        ],
+        "type": "object",
+        "properties": {
+          "font": {
+            "$ref": "#/components/schemas/PinnedFont"
+          },
+          "genericFallback": {
+            "type": "string"
+          }
+        }
+      },
+      "PinnedFont": {
+        "required": [
+          "identifier",
+          "displayName",
+          "provider",
+          "key",
+          "familyVersion",
+          "capabilities"
+        ],
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "familyVersion": {
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/FontCapabilitiesInfo"
+          }
+        },
+        "description": "A font as a document stores it, without the `id` and `order` the client assigns."
+      },
       "ProblemDetails": {
         "type": "object",
         "properties": {
@@ -749,6 +1134,9 @@
     },
     {
       "name": "Documents"
+    },
+    {
+      "name": "Fonts"
     }
   ]
 }

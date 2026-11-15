@@ -1,6 +1,8 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { INTER_STACK_ID } from '@canvas/bridge';
 import type { NodeProps, TextRun } from '@canvas/bridge';
+import { FontService } from './font-service';
 import { TextPanel } from './text-panel';
 
 const text: TextRun = {
@@ -263,5 +265,114 @@ describe('native text inspector', () => {
     await fixture.whenStable();
     expect((fixture.componentInstance as any).value().fontSize).toBe(24);
     expect(fixture.nativeElement.querySelector('[role="alert"]').textContent).toContain('refused');
+  });
+});
+
+describe('font family picker', () => {
+  const service = {
+    snapshot: signal({
+      fonts: [],
+      fontStacks: [{ id: 'lora-stack', identifier: 'lora', displayName: 'Lora', entries: [] }],
+    }),
+    nameOf: (id: string) => (id === INTER_STACK_ID ? 'Inter' : id === 'lora-stack' ? 'Lora' : ''),
+    search: vi.fn(async (_query: string) => ['Lora', 'Roboto']),
+    use: vi.fn(async (_family: string): Promise<string | null> => 'lora-stack'),
+  };
+  async function pickerSetup(stack = INTER_STACK_ID) {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [{ provide: FontService, useValue: service }] });
+    const saved: TextRun[] = [];
+    const fixture = TestBed.createComponent(TextPanel);
+    fixture.componentRef.setInput('node', {
+      id: 'text',
+      type: 'text',
+      text: { ...text, stack },
+    } as NodeProps);
+    fixture.componentRef.setInput('save', (_id: string, next: TextRun) => {
+      saved.push(next);
+      return true;
+    });
+    await fixture.whenStable();
+    return { fixture, saved, el: fixture.nativeElement as HTMLElement };
+  }
+  const input = (el: HTMLElement) => el.querySelector('[aria-label="Font"]') as HTMLInputElement;
+  const option = (el: HTMLElement, name: string) =>
+    [...el.querySelectorAll('[role="option"] button')].find(
+      (b) => b.textContent?.trim() === name,
+    ) as HTMLButtonElement;
+
+  beforeEach(() => {
+    service.search.mockClear();
+    service.use.mockClear();
+  });
+  afterEach(() => vi.useRealTimers());
+  const settle = () => new Promise((resolve) => setTimeout(resolve));
+
+  it('shows the current font and the style select only for Inter', async () => {
+    const inter = await pickerSetup();
+    expect(input(inter.el).value).toBe('Inter');
+    expect(inter.el.querySelector('[aria-label="Font style"]')).not.toBeNull();
+    const other = await pickerSetup('lora-stack');
+    expect(input(other.el).value).toBe('Lora');
+    expect(other.el.querySelector('[aria-label="Font style"]')).toBeNull();
+  });
+
+  it('searches with a debounce and lists the families', async () => {
+    const { fixture, el } = await pickerSetup();
+    vi.useFakeTimers();
+    input(el).dispatchEvent(new Event('focus'));
+    input(el).value = 'lo';
+    input(el).dispatchEvent(new Event('input'));
+    input(el).value = 'lor';
+    input(el).dispatchEvent(new Event('input'));
+    await vi.advanceTimersByTimeAsync(300);
+    vi.useRealTimers();
+    await fixture.whenStable();
+    expect(service.search.mock.calls.map((call) => call[0])).toEqual(['', 'lor']);
+    expect(option(el, 'Lora')).toBeTruthy();
+    expect(option(el, 'Roboto')).toBeTruthy();
+  });
+
+  it('picks a family through the font service and sets the stack with empty axes', async () => {
+    const { fixture, saved, el } = await pickerSetup();
+    input(el).dispatchEvent(new Event('focus'));
+    await fixture.whenStable();
+    option(el, 'Lora').click();
+    await settle();
+    expect(service.use).toHaveBeenCalledWith('Lora');
+    expect(saved.at(-1)).toMatchObject({ stack: 'lora-stack', axes: {} });
+  });
+
+  it('keeps the saved font when the family cannot be added', async () => {
+    service.use.mockResolvedValueOnce(null);
+    const { fixture, saved, el } = await pickerSetup();
+    input(el).dispatchEvent(new Event('focus'));
+    await fixture.whenStable();
+    option(el, 'Lora').click();
+    await settle();
+    await fixture.whenStable();
+    expect(saved).toEqual([]);
+    expect(el.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it('picks Inter without the font service', async () => {
+    const { fixture, saved, el } = await pickerSetup('lora-stack');
+    input(el).dispatchEvent(new Event('focus'));
+    await fixture.whenStable();
+    option(el, 'Inter').click();
+    expect(service.use).not.toHaveBeenCalled();
+    expect(saved.at(-1)).toMatchObject({ stack: INTER_STACK_ID, axes: {} });
+  });
+
+  it('disables the picker for a shared typography', async () => {
+    const { fixture, el } = await pickerSetup();
+    fixture.componentRef.setInput('node', {
+      id: 'text',
+      type: 'text',
+      text,
+      typography: 'shared',
+    } as NodeProps);
+    await fixture.whenStable();
+    expect(input(el).disabled).toBe(true);
   });
 });

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -64,7 +65,22 @@ std::optional<Face> faceFor(const TextRun& text, const Font& font) {
         axes.push_back({fonts::tag(axis.tag), float(*value)});
         if ((axis.tag == "slnt" && *value != 0) || (axis.tag == "ital" && *value > 0)) oblique = true;
     }
-    const int instance = fonts::instanceIndex(font.face(), axes);
+    std::string face = font.face();
+    if (const auto files = fonts::familyFiles(font.provider, font.key, font.familyVersion)) {
+        const auto wanted = [&](const std::string& tag) {
+            const auto set = text.axes.find(tag);
+            if (set != text.axes.end()) return set->second;
+            const auto* axis = font.axis(tag);
+            return axis && axis->defaultValue ? *axis->defaultValue : 0.0;
+        };
+        double best = std::numeric_limits<double>::infinity();
+        for (const auto& file : *files) {
+            double distance = 0;
+            for (const auto& [tag, value] : file.fixed) distance += std::abs(wanted(tag) - value) * (tag == "ital" ? 1e6 : 1.0);
+            if (distance < best) { best = distance; face = file.face; }
+        }
+    }
+    const int instance = fonts::instanceIndex(face, axes);
     if (instance < 0) return std::nullopt;
     return Face{std::uint32_t(instance), oblique};
 }

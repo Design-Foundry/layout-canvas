@@ -224,6 +224,7 @@ private:
     mutable std::unordered_map<Id, Rect> layout_;
     mutable Id layoutMode_;
     mutable bool layoutDirty_ = true;
+    mutable std::uint64_t layoutFonts_ = 0;
 };
 
 } // namespace vc

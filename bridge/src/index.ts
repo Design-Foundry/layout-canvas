@@ -49,11 +49,19 @@ export interface Font {
   readonly provider: string;
   readonly key: string;
   readonly sha256?: string;
+  /** The provider's version of the family, such as a google/fonts commit. */
+  readonly familyVersion?: string;
   readonly capabilities: {
     readonly axes: readonly { readonly tag: string; readonly domain: AxisDomain; readonly default?: number }[];
     readonly features: readonly string[];
   };
   readonly order: string;
+}
+
+/** One file of a font family: the face holding its bytes and the axis values only it answers. */
+export interface FontFile {
+  readonly face: string;
+  readonly fixed?: FontAxes;
 }
 
 export type GenericFallback = 'sans-serif' | 'serif' | 'monospace' | 'system-ui' | 'none';
@@ -709,6 +717,24 @@ export class VisualCore {
 
   modes(): ModeRow[] {
     return JSON.parse(this.module.modes());
+  }
+
+  /**
+   * Declares the files of a font family at a version: each file's registered face id and the axis
+   * values only it answers. Returns null, or why it refused.
+   */
+  registerFontFamily(provider: string, key: string, version: string, files: readonly FontFile[]): string | null {
+    return this.module.registerFontFamily(provider, key, version, JSON.stringify(files)) || null;
+  }
+
+  /** Adds a font to the document as an undoable edit. */
+  addFont(font: Font): boolean {
+    return this.module.addFont(JSON.stringify(font));
+  }
+
+  /** Adds a font stack to the document as an undoable edit. */
+  addFontStack(stack: FontStack): boolean {
+    return this.module.addFontStack(JSON.stringify(stack));
   }
 
   /** The document's fonts and font stacks in order, the bundled Inter included. */

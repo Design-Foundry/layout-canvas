@@ -81,6 +81,23 @@ inline constexpr std::string_view kEmbeddedInterFace = "embedded/inter";
 [[nodiscard]] const char* registerFontFace(std::string_view id, std::span<const std::uint8_t> bytes, std::string_view sha256);
 /// SHA-256 of face `id`, or empty when no face has that id.
 [[nodiscard]] std::string fontFaceSha256(std::string_view id);
+/// One file of a font family: the face that holds its bytes and the axis values only it answers,
+/// such as ital 1, or wght 700 in a family of static files.
+struct FontFile {
+    std::string face;
+    FontAxes fixed;
+    friend bool operator==(const FontFile&, const FontFile&) = default;
+};
+/// Declares which files make up `provider`/`key` at `version`. A text on that font draws from the
+/// file whose fixed axes are closest to its own values, once that file's face is registered.
+/// Returns null, or why it refused. Declaring the same files again succeeds.
+[[nodiscard]] const char* registerFontFamily(std::string_view provider, std::string_view key, std::string_view version,
+                                             std::vector<FontFile> files);
+/// Grows whenever a face or family is registered, which can change any text's layout.
+[[nodiscard]] std::uint64_t fontRegistryGeneration();
+/// What font bytes offer, as `{ axes: [{tag, min, max, default}], features }`, without registering
+/// them. Null when the bytes are not a usable OpenType face.
+[[nodiscard]] std::optional<std::string> fontCapabilitiesJson(std::span<const std::uint8_t> bytes);
 
 /// Normalized atlas rectangle of `key`, rasterized on first use. Empty when the glyph has no ink.
 [[nodiscard]] Rect textGlyphUv(GlyphKey key);

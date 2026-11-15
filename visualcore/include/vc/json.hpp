@@ -1,4 +1,5 @@
 #pragma once
+#include "vc/text.hpp"
 #include <optional>
 #include <string>
 #include <string_view>
@@ -58,6 +59,11 @@ namespace vc {
 [[nodiscard]] std::string modesToJson(const Document& document);
 /// `{ fonts, fontStacks }` in order, in the snapshot's shape.
 [[nodiscard]] std::string fontsToJson(const Document& document);
+/// A font or font stack in the shape the ops use.
+[[nodiscard]] std::optional<Font> fontFromJson(std::string_view data);
+[[nodiscard]] std::optional<FontStack> fontStackFromJson(std::string_view data);
+/// A family's files as `[{ face, fixed: { tag: value } }]`.
+[[nodiscard]] std::optional<std::vector<FontFile>> fontFilesFromJson(std::string_view data);
 /// Parse a token or mode definition in the same shape the ops use.
 [[nodiscard]] std::optional<Token> tokenFromJson(std::string_view data);
 [[nodiscard]] std::optional<Mode> modeFromJson(std::string_view data);

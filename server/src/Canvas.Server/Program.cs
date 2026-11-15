@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Canvas.Server.Documents;
+using Canvas.Server.Fonts;
 using Canvas.Server.Mcp;
 using Canvas.Server.Storage;
 
@@ -14,6 +15,12 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.Section));
 builder.Services.AddSingleton<Database>();
 builder.Services.AddHostedService<DatabaseInitializer>();
+builder.Services.AddHttpClient(GoogleFontsProvider.HttpClientName)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+builder.Services.Configure<GoogleFontsOptions>(builder.Configuration.GetSection(GoogleFontsOptions.Section));
+builder.Services.AddSingleton<FontFileStore>();
+builder.Services.AddSingleton<GoogleFontsProvider>();
+builder.Services.AddSingleton<GoogleFontsRegistrar>();
 builder.Services.AddSingleton<DocumentStore>();
 builder.Services.Configure<DocumentHostOptions>(builder.Configuration.GetSection(DocumentHostOptions.Section));
 builder.Services.AddSingleton<DocumentHost>();
@@ -35,6 +42,7 @@ api.MapGet("/health", () => TypedResults.Ok(new HealthResponse("ok", typeof(Prog
     .WithName("GetHealth");
 
 api.MapDocuments();
+api.MapFonts();
 app.MapCanvasMcp();
 
 app.Run();

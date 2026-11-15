@@ -37,13 +37,15 @@ struct Font {
     std::string displayName;
     std::string provider;
     std::string key;
-    /// SHA-256 of the face bytes in lowercase hex, empty when the provider does not pin it.
+    /// SHA-256 of the face bytes in lowercase hex, for providers that serve the family as one file.
     std::string sha256;
+    /// The provider's version of the family, such as the google/fonts commit it comes from.
+    std::string familyVersion;
     std::vector<FontAxis> axes;
     std::vector<std::string> features;
     std::string order;
     [[nodiscard]] const FontAxis* axis(std::string_view tag) const;
-    /// The registered face that holds this font's bytes.
+    /// The registered face of a family served as one file.
     [[nodiscard]] std::string face() const { return provider + "/" + key; }
     friend bool operator==(const Font&, const Font&) = default;
 };

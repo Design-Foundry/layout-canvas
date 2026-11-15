@@ -105,6 +105,7 @@ const char* fontProblem(const Font& font) {
     if (font.key.empty() || font.key.size() > 256) return "key must have 1 to 256 characters";
     if (font.displayName.size() > 256) return "displayName must have at most 256 characters";
     if (!font.sha256.empty() && !lowercaseHex(font.sha256)) return "sha256 must be 64 lowercase hexadecimal digits";
+    if (font.familyVersion.size() > 128) return "familyVersion must have at most 128 characters";
     if (font.axes.size() > 64) return "a font has at most 64 axes";
     std::set<std::string> tags;
     for (const auto& axis : font.axes) {

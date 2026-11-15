@@ -167,9 +167,11 @@ std::optional<OpBody> Document::apply(const OpBody& op) {
 }
 
 Rect Document::box(const Id& id, const Id& mode) const {
-    if (layoutDirty_ || layoutMode_ != mode) {
+    const auto fonts = fontRegistryGeneration();
+    if (layoutDirty_ || layoutMode_ != mode || layoutFonts_ != fonts) {
         layout_ = computeLayout(*this, mode);
         layoutMode_ = mode;
+        layoutFonts_ = fonts;
         layoutDirty_ = false;
     }
     const auto it = layout_.find(id);
