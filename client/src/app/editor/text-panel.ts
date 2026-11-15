@@ -1,7 +1,8 @@
-import { Component, computed, effect, input, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule, type NgModel } from '@angular/forms';
 import { INTER_STACK_ID } from '@canvas/bridge';
 import type { NodeProps, TextRun, NodePatch, TokenRow } from '@canvas/bridge';
+import { FontService } from './font-service';
 import { NumberField } from './number-field';
 
 const INITIAL: TextRun = {
@@ -67,21 +68,48 @@ const ALLOWED = /^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f]*$/;
           }
         }
       }
-      <label class="typography-caption"
-        >Font style<select
-          aria-label="Font style"
-          [disabled]="!!node().typography && !node().inInstance"
-          [ngModel]="fontStyle()"
-          #fontControl="ngModel"
-          (ngModelChange)="fontChanged($event, fontControl)"
+      <div class="font-picker typography-caption">
+        <label
+          >Font
+          <input
+            type="text"
+            role="combobox"
+            aria-label="Font"
+            autocomplete="off"
+            [attr.aria-expanded]="query() !== null"
+            [disabled]="!!node().typography && !node().inInstance"
+            [value]="query() ?? stackName()"
+            (focus)="openPicker()"
+            (input)="typed($any($event.target).value)"
+            (blur)="closePicker()"
+          />
+        </label>
+        @if (query() !== null) {
+          <ul role="listbox" aria-label="Fonts" (mousedown)="$event.preventDefault()">
+            @for (option of options(); track option) {
+              <li role="option">
+                <button type="button" (click)="pick(option)">{{ option }}</button>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+      @if (isInter()) {
+        <label class="typography-caption"
+          >Font style<select
+            aria-label="Font style"
+            [disabled]="!!node().typography && !node().inInstance"
+            [ngModel]="fontStyle()"
+            #fontControl="ngModel"
+            (ngModelChange)="fontChanged($event, fontControl)"
+          >
+            <option value="regular">Inter Regular</option>
+            <option value="bold">Inter Bold</option>
+            <option value="oblique">Inter Oblique</option>
+            <option value="bold-oblique">Inter Bold Oblique</option>
+          </select></label
         >
-          <option value="regular">Inter Regular</option>
-          <option value="bold">Inter Bold</option>
-          <option value="oblique">Inter Oblique</option>
-          <option value="bold-oblique">Inter Bold Oblique</option>
-        </select></label
-      >
-      <p class="typography-caption">Inter · included locally</p>
+      }
       @if (!styleOnly()) {
         <label class="wrap-toggle typography-caption"
           ><input
@@ -176,6 +204,43 @@ const ALLOWED = /^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f]*$/;
       display: grid;
       gap: 6px;
     }
+    .font-picker {
+      display: grid;
+      gap: 6px;
+    }
+    .font-picker input {
+      font: inherit;
+      color: inherit;
+      background: transparent;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 8px;
+      box-sizing: border-box;
+      width: 100%;
+    }
+    ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 220px;
+      overflow-y: auto;
+      border: 1px solid #444;
+      border-radius: 4px;
+    }
+    li button {
+      font: inherit;
+      color: inherit;
+      background: transparent;
+      border: 0;
+      text-align: left;
+      width: 100%;
+      padding: 6px 8px;
+      cursor: pointer;
+    }
+    li button:hover,
+    li button:focus-visible {
+      background: #2a2a2a;
+    }
     .wrap-toggle {
       display: flex;
       align-items: center;
@@ -249,6 +314,20 @@ export class TextPanel {
       });
     this.error.set(ok ? '' : 'The wrapping change was refused. The saved layer was kept.');
   }
+  private readonly fontService = inject(FontService);
+  protected readonly query = signal<string | null>(null);
+  private readonly families = signal<readonly string[]>([]);
+  private searchTimer: ReturnType<typeof setTimeout> | undefined;
+  protected readonly isInter = computed(() => this.value().stack === INTER_STACK_ID);
+  protected readonly stackName = computed(() => {
+    this.fontService.snapshot();
+    return this.fontService.nameOf(this.value().stack);
+  });
+  protected readonly options = computed(() => {
+    const query = (this.query() ?? '').trim().toLowerCase();
+    const inter = !query || 'inter'.includes(query) ? ['Inter'] : [];
+    return [...inter, ...this.families().filter((family) => family !== 'Inter')];
+  });
   protected readonly pending = signal<TextRun | null>(null);
   protected readonly value = computed(() => this.pending() ?? this.node().text ?? INITIAL);
   protected readonly content = signal('');
@@ -283,6 +362,47 @@ export class TextPanel {
 
   protected number(key: 'fontSize' | 'lineHeight' | 'letterSpacing', value: number | null): void {
     if (value !== null) this.change({ [key]: value });
+  }
+
+  protected openPicker(): void {
+    this.query.set('');
+    this.search('');
+  }
+
+  protected closePicker(): void {
+    clearTimeout(this.searchTimer);
+    this.query.set(null);
+  }
+
+  protected typed(value: string): void {
+    this.query.set(value);
+    clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => this.search(value), 250);
+  }
+
+  private search(query: string): void {
+    this.fontService
+      .search(query.trim())
+      .then((families) => {
+        if (this.query() !== null) this.families.set(families);
+      })
+      .catch((error) => console.warn('Font search failed', error));
+  }
+
+  protected async pick(family: string): Promise<void> {
+    this.closePicker();
+    if (family === 'Inter') {
+      this.change({ stack: INTER_STACK_ID, axes: {}, features: undefined });
+      return;
+    }
+    try {
+      const stack = await this.fontService.use(family);
+      if (!stack || !this.change({ stack, axes: {}, features: undefined }))
+        this.error.set('The font change was refused. The saved layer was kept.');
+    } catch (error) {
+      console.warn(`Font ${family} could not be added`, error);
+      this.error.set('The font could not be added. The saved layer was kept.');
+    }
   }
 
   protected fontStyle(): string {

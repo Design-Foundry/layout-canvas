@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Canvas.Server.Fonts;
 using Canvas.Server.VisualCore;
 using Microsoft.Extensions.Options;
 
@@ -26,14 +27,16 @@ public sealed class DocumentHost : IDisposable
 
     private readonly ConcurrentDictionary<Guid, Lazy<Task<LiveDocument?>>> documents = new();
     private readonly DocumentStore store;
+    private readonly GoogleFontsRegistrar fonts;
     private readonly TimeProvider clock;
     private readonly DocumentHostOptions options;
     private readonly ILogger<DocumentHost> logger;
     private readonly ITimer evictionTimer;
 
-    public DocumentHost(DocumentStore store, TimeProvider clock, IOptions<DocumentHostOptions> options, ILogger<DocumentHost> logger)
+    public DocumentHost(DocumentStore store, TimeProvider clock, IOptions<DocumentHostOptions> options, ILogger<DocumentHost> logger, GoogleFontsRegistrar fonts)
     {
         this.store = store;
+        this.fonts = fonts;
         this.clock = clock;
         this.options = options.Value;
         this.logger = logger;
@@ -126,7 +129,9 @@ public sealed class DocumentHost : IDisposable
 
         var logged = await store.FindOpsAsync(live.Id, ops.Select(o => o.Id).Distinct().ToList(), ct);
         var fresh = ops.Where(o => !logged.ContainsKey(o.Id)).DistinctBy(o => o.Id).ToList();
-        var refusals = live.Core.Apply(fresh.Select(o => new VisualCoreOp(o.Kind, o.Data)).ToList());
+        var freshOps = fresh.Select(o => new VisualCoreOp(o.Kind, o.Data)).ToList();
+        await fonts.EnsureOpsAsync(freshOps, ct);
+        var refusals = live.Core.Apply(freshOps);
         var accepted = fresh.Where((_, i) => refusals[i] is null).ToList();
         var errors = fresh.Select((op, i) => (op.Id, Error: refusals[i]))
             .Where(r => r.Error is not null)
@@ -267,7 +272,9 @@ public sealed class DocumentHost : IDisposable
             return null;
         }
 
-        var core = VisualCoreDocument.Open(detail.Snapshot?.Data.GetRawText());
+        var snapshot = detail.Snapshot?.Data.GetRawText();
+        await fonts.EnsureSnapshotAsync(snapshot, ct);
+        var core = VisualCoreDocument.Open(snapshot);
         if (core.RejectedOnLoad > 0)
         {
             logger.LogWarning("Document {Id}: {Count} nodes of its snapshot were refused, the first at {Path}: {Message}",
@@ -304,6 +311,7 @@ public sealed class DocumentHost : IDisposable
             }
 
             var ops = page.Ops.Select(o => new VisualCoreOp(o.Kind, o.Data)).ToList();
+            await fonts.EnsureOpsAsync(ops, ct);
             OpRefusal?[] refusals;
             try
             {

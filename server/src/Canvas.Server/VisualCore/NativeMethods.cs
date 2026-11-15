@@ -35,6 +35,15 @@ internal static partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "vc_last_error")]
     internal static partial nint LastError();
 
+    [LibraryImport(Library, EntryPoint = "vc_register_font_face", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RegisterFontFace(string id, ReadOnlySpan<byte> bytes, nuint size, string sha256);
+
+    [LibraryImport(Library, EntryPoint = "vc_register_font_family", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RegisterFontFamily(string provider, string key, string version, string files);
+
+    [LibraryImport(Library, EntryPoint = "vc_font_capabilities")]
+    internal static partial nint FontCapabilities(ReadOnlySpan<byte> bytes, nuint size);
+
     [LibraryImport(Library, EntryPoint = "vc_free")]
     private static partial void Free(nint text);
 
