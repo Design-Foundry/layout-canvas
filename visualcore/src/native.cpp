@@ -63,6 +63,8 @@ std::string originOf(const vc::OpBody& op) {
         else if constexpr (std::is_same_v<T, vc::SetComponentDefinition>) return "nodes[" + body.component.toString() + "]";
         else if constexpr (std::is_same_v<T, vc::CreateToken> || std::is_same_v<T, vc::ReplaceToken>) return "tokens[" + body.token.id.toString() + "]";
         else if constexpr (std::is_same_v<T, vc::CreateMode> || std::is_same_v<T, vc::ReplaceMode>) return "modes[" + body.mode.id.toString() + "]";
+        else if constexpr (std::is_same_v<T, vc::CreateFont> || std::is_same_v<T, vc::ReplaceFont>) return "fonts[" + body.font.id.toString() + "]";
+        else if constexpr (std::is_same_v<T, vc::CreateFontStack> || std::is_same_v<T, vc::ReplaceFontStack>) return "fontStacks[" + body.stack.id.toString() + "]";
         else return "";
     }, op);
 }

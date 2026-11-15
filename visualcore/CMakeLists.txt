@@ -52,6 +52,7 @@ add_library(vc_core STATIC
     src/document_tokens.cpp
     src/draw_list.cpp
     src/editor.cpp
+    src/font.cpp
     src/fonts.cpp
     src/fractional_index.cpp
     src/geometry.cpp
@@ -147,6 +148,7 @@ else()
             tests/test_tokens.cpp
             tests/test_text.cpp
             tests/test_font_registry.cpp
+            tests/test_font_model.cpp
             tests/test_line.cpp
             tests/test_path.cpp
             tests/test_prototype_model.cpp

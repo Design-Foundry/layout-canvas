@@ -1,8 +1,11 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
+#include "vc/font.hpp"
 #include "vc/math.hpp"
 
 namespace vc::fonts {
@@ -33,11 +36,25 @@ struct ShapedGlyph {
     Rect ink;
 };
 
-[[nodiscard]] std::uint32_t tag(const char (&name)[5]);
+[[nodiscard]] std::uint32_t tag(std::string_view name);
 /// Index of `face` at `variations`, created on first use; -1 when no face has that id.
 [[nodiscard]] int instanceIndex(std::string_view face, std::span<const Variation> variations);
 [[nodiscard]] Metrics metrics(std::uint32_t instance);
-/// Shapes one line of text with no newlines.
-[[nodiscard]] std::vector<ShapedGlyph> shape(std::uint32_t instance, std::string_view text);
+/// Shapes one line of text with no newlines, with `features` on top of the font's defaults.
+[[nodiscard]] std::vector<ShapedGlyph> shape(std::uint32_t instance, std::string_view text, const FontFeatures& features = {});
+
+struct ReadAxis {
+    std::string tag;
+    double min = 0, max = 0;
+    double defaultValue = 0;
+};
+/// What a registered face offers, read from its bytes.
+struct Capabilities {
+    std::vector<ReadAxis> axes;
+    /// GSUB and GPOS feature tags, sorted and unique.
+    std::vector<std::string> features;
+};
+/// Nothing when no face has that id.
+[[nodiscard]] std::optional<Capabilities> capabilities(std::string_view face);
 
 } // namespace vc::fonts

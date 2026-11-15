@@ -38,24 +38,21 @@ bool decode(std::string_view content, std::vector<std::uint32_t>& out) {
 }
 
 struct Face {
-    std::uint32_t instance = 0;
+    int instance = -1;
     bool oblique = false;
 };
 
-Face faceFor(const std::string& font) {
-    static const std::array<std::uint32_t, 4> instances = [] {
-        std::array<std::uint32_t, 4> out{};
-        const float weights[] = {400, 700, 400, 700}, slants[] = {0, 0, -10, -10};
-        for (std::size_t i = 0; i < out.size(); ++i) {
-            const fonts::Variation axes[] = {{fonts::tag("wght"), weights[i]}, {fonts::tag("slnt"), slants[i]}};
-            out[i] = std::uint32_t(fonts::instanceIndex(kEmbeddedInterFace, axes));
-        }
-        return out;
-    }();
-    if (font == "inter-bold-v1") return {instances[1], false};
-    if (font == "inter-oblique-v1") return {instances[2], true};
-    if (font == "inter-bold-oblique-v1") return {instances[3], true};
-    return {instances[0], false};
+Face faceFor(const TextRun& text, const Font& primary) {
+    std::vector<fonts::Variation> axes;
+    bool oblique = false;
+    for (const auto& axis : primary.axes) {
+        const auto set = text.axes.find(axis.tag);
+        const auto value = set != text.axes.end() ? std::optional<double>(set->second) : axis.defaultValue;
+        if (!value) continue;
+        axes.push_back({fonts::tag(axis.tag), float(*value)});
+        if ((axis.tag == "slnt" && *value != 0) || (axis.tag == "ital" && *value > 0)) oblique = true;
+    }
+    return {fonts::instanceIndex(primary.face(), axes), oblique};
 }
 
 struct Line {
@@ -64,8 +61,8 @@ struct Line {
 } // namespace
 
 const char* textProblem(const TextRun& text) {
-    if (text.font != "inter-regular-v1" && text.font != "inter-bold-v1" && text.font != "inter-oblique-v1" && text.font != "inter-bold-oblique-v1")
-        return "font must be inter-regular-v1, inter-bold-v1, inter-oblique-v1 or inter-bold-oblique-v1";
+    if (text.stack.isNil()) return "stack must name a font stack";
+    if (const char* why = fontSettingsProblem(text.axes, text.features)) return why;
     if (!std::isfinite(text.fontSize) || text.fontSize < 1 || text.fontSize > 512) return "fontSize must be between 1 and 512";
     if (!std::isfinite(text.lineHeight) || text.lineHeight < 1 || text.lineHeight > 4) return "lineHeight must be between 1 and 4";
     if (!std::isfinite(text.letterSpacing) || text.letterSpacing < 0 || text.letterSpacing > 128) return "letterSpacing must be between 0 and 128";
@@ -80,10 +77,22 @@ bool validText(const TextRun& text) {
 }
 
 TextLayout layoutText(const TextRun& text, double availableWidth, bool wrap) {
+    if (text.stack == kInterStackId) return layoutText(text, embeddedInterFont(), availableWidth, wrap);
+    TextLayout result;
+    result.height = text.fontSize * text.lineHeight;
+    return result;
+}
+
+TextLayout layoutText(const TextRun& text, const Font& primary, double availableWidth, bool wrap) {
     TextLayout result;
     if (!validText(text)) return result;
-    const auto face = faceFor(text.font);
-    const auto metrics = fonts::metrics(face.instance);
+    const auto face = faceFor(text, primary);
+    if (face.instance < 0) {
+        result.height = text.fontSize * text.lineHeight * double(1 + std::count(text.content.begin(), text.content.end(), '\n'));
+        return result;
+    }
+    const auto instance = std::uint32_t(face.instance);
+    const auto metrics = fonts::metrics(instance);
     const double scale = text.fontSize / kAtlasEm;
     const double lineHeight = text.fontSize * text.lineHeight;
     const double baseline = (lineHeight - (metrics.ascent - metrics.descent) * scale) / 2 + metrics.ascent * scale;
@@ -98,7 +107,7 @@ TextLayout layoutText(const TextRun& text, double availableWidth, bool wrap) {
     std::vector<std::vector<fonts::ShapedGlyph>> shaped;
     std::vector<Line> lines;
     for (std::size_t p = 0; p < paragraphs.size(); ++p) {
-        const auto& glyphs = shaped.emplace_back(fonts::shape(face.instance, paragraphs[p]));
+        const auto& glyphs = shaped.emplace_back(fonts::shape(instance, paragraphs[p], text.features));
         std::size_t begin = 0, i = 0, lastBreak = 0;
         double measured = 0, left = 0, right = 0;
         while (i < glyphs.size()) {
@@ -148,7 +157,7 @@ TextLayout layoutText(const TextRun& text, double availableWidth, bool wrap) {
             const auto& glyph = glyphs[i];
             if (glyph.ink.w && glyph.ink.h) result.glyphs.push_back({{x + (glyph.offsetX + glyph.ink.x) * scale,
                 double(row) * lineHeight + baseline + (glyph.ink.y - glyph.offsetY) * scale, glyph.ink.w * scale, glyph.ink.h * scale},
-                {face.instance, glyph.glyph}});
+                {instance, glyph.glyph}});
             x += glyph.advance * scale;
         }
     }

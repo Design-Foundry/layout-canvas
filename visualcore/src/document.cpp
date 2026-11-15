@@ -46,7 +46,9 @@ bool isValidPatch(const NodePatch& patch) {
     if (patch.textStyle) {
         if (*patch.textStyle == TextStyle{}) return refuse("textStyle needs at least one field");
         TextRun run;
-        if (patch.textStyle->font) run.font = *patch.textStyle->font;
+        if (patch.textStyle->stack) run.stack = *patch.textStyle->stack;
+        if (patch.textStyle->axes) run.axes = *patch.textStyle->axes;
+        if (patch.textStyle->features) run.features = *patch.textStyle->features;
         if (patch.textStyle->fontSize) run.fontSize = *patch.textStyle->fontSize;
         if (patch.textStyle->lineHeight) run.lineHeight = *patch.textStyle->lineHeight;
         if (patch.textStyle->letterSpacing) run.letterSpacing = *patch.textStyle->letterSpacing;
@@ -99,6 +101,8 @@ bool isValidPatch(const NodePatch& patch) {
 
 Document::Document() {
     modes_.emplace(kDefaultModeId, Mode{kDefaultModeId, "Default", "a0"});
+    fonts_.emplace(kInterFontId, embeddedInterFont());
+    fontStacks_.emplace(kInterStackId, embeddedInterStack());
 }
 
 std::optional<OpBody> Document::apply(const OpBody& op) {
@@ -127,8 +131,20 @@ std::optional<OpBody> Document::apply(const OpBody& op) {
                 return replaceMode(body);
             } else if constexpr (std::is_same_v<T, SetOverride>) {
                 return setOverride(body);
-            } else {
+            } else if constexpr (std::is_same_v<T, SetComponentDefinition>) {
                 return setComponentDefinition(body);
+            } else if constexpr (std::is_same_v<T, CreateFont>) {
+                return createFont(body);
+            } else if constexpr (std::is_same_v<T, DeleteFont>) {
+                return deleteFont(body);
+            } else if constexpr (std::is_same_v<T, ReplaceFont>) {
+                return replaceFont(body);
+            } else if constexpr (std::is_same_v<T, CreateFontStack>) {
+                return createFontStack(body);
+            } else if constexpr (std::is_same_v<T, DeleteFontStack>) {
+                return deleteFontStack(body);
+            } else {
+                return replaceFontStack(body);
             }
         },
         op);

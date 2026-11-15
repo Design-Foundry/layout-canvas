@@ -13,6 +13,8 @@ export interface ComponentSnapshot {
   nodes: SnapshotNode[];
   modes: Record<string, any>[];
   tokens: Record<string, any>[];
+  fonts?: Record<string, any>[];
+  fontStacks?: Record<string, any>[];
 }
 
 export interface ComponentPackage {
@@ -43,7 +45,7 @@ function object(value: unknown): value is Record<string, any> {
 function snapshot(value: unknown): asserts value is ComponentSnapshot {
   if (
     !object(value) ||
-    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].includes(value['version']) ||
+    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25].includes(value['version']) ||
     !Array.isArray(value['nodes']) ||
     !Array.isArray(value['tokens']) ||
     !Array.isArray(value['modes']) ||
@@ -257,6 +259,23 @@ function snapshot(value: unknown): asserts value is ComponentSnapshot {
     )
       throw new Error('A text layer refers to a missing or incompatible typography token.');
   }
+  const modern = (text: any) =>
+    object(text) &&
+    (text['stack'] !== undefined || text['axes'] !== undefined || text['features'] !== undefined);
+  if (
+    value['version'] < 25 &&
+    (value['fonts'] !== undefined ||
+      value['fontStacks'] !== undefined ||
+      value['tokens'].some((token: any) => modern(token?.value)) ||
+      value['nodes'].some(
+        (node: any) =>
+          modern(node?.text) ||
+          [...(node?.overrides ?? []), ...(node?.definition?.rules ?? [])].some(
+            (item: any) => modern(item?.patch?.textStyle) || modern(item?.patch?.text),
+          ),
+      ))
+  )
+    throw new Error('Font stacks, axes and features require Canvas snapshot version 25.');
   for (const node of value['nodes']) {
     const slanted = (font: unknown) =>
       font === 'inter-oblique-v1' || font === 'inter-bold-oblique-v1';

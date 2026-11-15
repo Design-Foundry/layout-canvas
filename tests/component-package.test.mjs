@@ -514,3 +514,31 @@ test('base and visibility rules round-trip in snapshot 24 portable components an
     assert.throws(() => readComponent(JSON.stringify(bundle)), /version 24/);
   }
 });
+
+test('font stacks, axes and features round-trip in snapshot 25 and refuse older files', () => {
+  const stack = '00000000-0000-0000-0000-000000000101';
+  const source = textExchangeFixture();
+  source.snapshot.version = 25;
+  const text = source.snapshot.nodes.find((node) => node.type === 'text');
+  delete text.text.font;
+  text.text.stack = stack;
+  text.text.axes = { wght: 700, slnt: -10 };
+  text.text.features = { calt: false };
+  const read = readComponent(JSON.stringify(source));
+  assert.deepEqual(read.snapshot.nodes.find((node) => node.type === 'text').text.axes, {
+    wght: 700,
+    slnt: -10,
+  });
+  source.snapshot.version = 24;
+  assert.throws(() => readComponent(JSON.stringify(source)), /version 25/);
+  delete text.text.stack;
+  delete text.text.axes;
+  delete text.text.features;
+  text.text.font = 'inter-bold-v1';
+  source.snapshot.version = 25;
+  assert.equal(readComponent(JSON.stringify(source)).snapshot.version, 25);
+  const instance = source.snapshot.nodes.find((node) => node.type === 'instance');
+  source.snapshot.version = 24;
+  instance.overrides = [{ node: text.id, patch: { textStyle: { stack, axes: { wght: 700 } } } }];
+  assert.throws(() => readComponent(JSON.stringify(source)), /version 25/);
+});

@@ -5,6 +5,7 @@
 #include <optional>
 #include <string_view>
 #include <vector>
+#include "vc/font.hpp"
 #include "vc/math.hpp"
 
 namespace vc {
@@ -14,7 +15,10 @@ enum class TextAlign { Left, Center, Right };
 /// A single face and style for an editable text node.
 struct TextRun {
     std::string content;
-    std::string font = "inter-regular-v1";
+    Id stack = kInterStackId;
+    /// Axis values over the primary font's defaults, such as wght and slnt.
+    FontAxes axes;
+    FontFeatures features;
     double fontSize = 16.0;
     double lineHeight = 1.4;
     double letterSpacing = 0.0;
@@ -27,8 +31,10 @@ struct TextStyle {
     std::optional<double> lineHeight;
     std::optional<double> letterSpacing;
     std::optional<TextAlign> align;
-    std::optional<std::string> font;
-    /// Legacy four-metric completeness; explicit face selection has its own snapshot gate.
+    std::optional<Id> stack;
+    std::optional<FontAxes> axes;
+    std::optional<FontFeatures> features;
+    /// Legacy four-metric completeness; font selection has its own snapshot gate.
     [[nodiscard]] bool complete() const { return fontSize && lineHeight && letterSpacing && align; }
     friend bool operator==(const TextStyle&, const TextStyle&) = default;
 };
@@ -52,10 +58,15 @@ struct TextLayout {
 };
 
 /// Strict UTF-8, Latin-1 plus the documented punctuation set; no silent missing-glyph fallback.
+/// Checks the font settings' shape, not that the stack exists or allows them.
 [[nodiscard]] bool validText(const TextRun& text);
 /// Why `validText` refuses `text`, or null when it accepts it.
 [[nodiscard]] const char* textProblem(const TextRun& text);
 /// Optional greedy wrapping at spaces, with glyph breaks for words wider than the available width.
+/// `primary` is the first font of the text's stack; a font whose face is not registered lays out
+/// no glyphs.
+[[nodiscard]] TextLayout layoutText(const TextRun& text, const Font& primary, double availableWidth = -1.0, bool wrap = false);
+/// Lays out text whose stack is the embedded Inter stack; any other stack lays out no glyphs.
 [[nodiscard]] TextLayout layoutText(const TextRun& text, double availableWidth = -1.0, bool wrap = false);
 /// Id of the bundled Inter variable face.
 inline constexpr std::string_view kEmbeddedInterFace = "embedded/inter";

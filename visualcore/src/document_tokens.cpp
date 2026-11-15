@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cmath>
+#include <set>
+#include <tuple>
 #include <string>
 #include <unordered_set>
 #include "vc/diagnostics.hpp"
@@ -441,7 +443,7 @@ bool Document::isValidToken(const Token& token) const {
         if (token.type == TokenType::Typography) {
             const auto* style = std::get_if<TextStyle>(&*token.value);
             if (!style) return refuse("a typography token holds a text style");
-            if (!style->font) return refuse("a typography token needs font");
+            if (!style->stack) return refuse("a typography token needs stack");
             if (!style->fontSize) return refuse("a typography token needs fontSize");
             if (!style->lineHeight) return refuse("a typography token needs lineHeight");
             if (!style->letterSpacing) return refuse("a typography token needs letterSpacing");
@@ -449,6 +451,7 @@ bool Document::isValidToken(const Token& token) const {
             TextRun run; Node node; node.text=run; NodePatch patch; patch.textStyle=*style;
             applyPatch(node,patch);
             if (const char* why = textProblem(node.text)) return refuse(why);
+            if (const auto why = fontUseProblem(node.text.stack, node.text.axes, node.text.features)) return refuse(*why);
             return true;
         }
         if (token.type == TokenType::Border) {
@@ -559,7 +562,17 @@ bool Document::isValidPatchRefs(const NodePatch& patch) const {
                    familyName(familyOf(hint)) + " token");
         }
     });
-    return valid;
+    if (!valid) return false;
+    if (patch.text)
+        if (const auto why = fontUseProblem(patch.text->stack, patch.text->axes, patch.text->features)) return refuse("text: " + *why);
+    if (patch.textStyle) {
+        const auto& style = *patch.textStyle;
+        if ((style.axes || style.features) && !style.stack) return refuse("textStyle: a style that sets axes or features also sets stack");
+        if (style.stack)
+            if (const auto why = fontUseProblem(*style.stack, style.axes.value_or(FontAxes{}), style.features.value_or(FontFeatures{})))
+                return refuse("textStyle: " + *why);
+    }
+    return true;
 }
 
 std::optional<OpBody> Document::createToken(const CreateToken& op) {
@@ -618,6 +631,155 @@ std::optional<OpBody> Document::replaceMode(const ReplaceMode& op) {
     if (op.mode.name.empty()) return refused("a mode needs a name");
     ReplaceMode inverse{it->second};
     it->second = op.mode;
+    return inverse;
+}
+
+} // namespace vc
+
+namespace vc {
+namespace {
+template <typename T>
+std::vector<const T*> ordered(const std::unordered_map<Id, T>& items) {
+    std::vector<const T*> out;
+    for (const auto& [id, item] : items) out.push_back(&item);
+    std::sort(out.begin(), out.end(), [](const T* a, const T* b) { return std::tie(a->order, a->id) < std::tie(b->order, b->id); });
+    return out;
+}
+} // namespace
+
+const Font* Document::findFont(const Id& id) const {
+    const auto it = fonts_.find(id);
+    return it == fonts_.end() ? nullptr : &it->second;
+}
+
+std::vector<const Font*> Document::fonts() const { return ordered(fonts_); }
+
+const FontStack* Document::findFontStack(const Id& id) const {
+    const auto it = fontStacks_.find(id);
+    return it == fontStacks_.end() ? nullptr : &it->second;
+}
+
+std::vector<const FontStack*> Document::fontStacks() const { return ordered(fontStacks_); }
+
+const Font* Document::primaryFont(const Id& stack) const {
+    const FontStack* found = findFontStack(stack);
+    return found && !found->fonts.empty() ? findFont(found->fonts.front()) : nullptr;
+}
+
+TextLayout Document::layoutText(const TextRun& text, double availableWidth, bool wrap) const {
+    if (const Font* primary = primaryFont(text.stack)) return vc::layoutText(text, *primary, availableWidth, wrap);
+    return vc::layoutText(text, availableWidth, wrap);
+}
+
+std::optional<std::string> Document::fontUseProblem(const Id& stack, const FontAxes& axes, const FontFeatures& features) const {
+    const Font* primary = primaryFont(stack);
+    if (!primary) return "font stack " + stack.toString() + " does not exist";
+    return fontRefuses(*primary, axes, features);
+}
+
+template <typename Fn>
+void Document::forEachFontUse(Fn&& fn) const {
+    const auto patch = [&](const NodePatch& p) {
+        if (p.text) fn(p.text->stack, p.text->axes, p.text->features);
+        if (p.textStyle && p.textStyle->stack)
+            fn(*p.textStyle->stack, p.textStyle->axes.value_or(FontAxes{}), p.textStyle->features.value_or(FontFeatures{}));
+    };
+    for (const auto& [id, node] : nodes_) {
+        if (node.type == NodeType::Text) fn(node.text.stack, node.text.axes, node.text.features);
+        for (const auto& o : node.overrides) patch(o.patch);
+        for (const auto& rule : node.definition.rules) patch(rule.patch);
+    }
+    for (const auto& [id, token] : tokens_)
+        if (const auto* style = token.value ? std::get_if<TextStyle>(&*token.value) : nullptr; style && style->stack)
+            fn(*style->stack, style->axes.value_or(FontAxes{}), style->features.value_or(FontFeatures{}));
+}
+
+bool Document::isValidFontStack(const FontStack& stack) const {
+    if (stack.id.isNil()) return refuse("a font stack needs an id");
+    if (!isValidIdentifier(stack.identifier)) return refuse("identifier must be lowercase words separated by - or .");
+    if (stack.displayName.size() > 256) return refuse("displayName must have at most 256 characters");
+    if (stack.fonts.empty() || stack.fonts.size() > 32) return refuse("a font stack lists 1 to 32 fonts");
+    std::set<Id> seen;
+    for (const auto& font : stack.fonts) {
+        if (!seen.insert(font).second) return refuse("a font stack lists the same font twice");
+        if (!findFont(font)) return refuse("font " + font.toString() + " does not exist");
+    }
+    for (const auto& [id, other] : fontStacks_)
+        if (id != stack.id && other.identifier == stack.identifier) return refuse("another font stack already uses this identifier");
+    return true;
+}
+
+std::optional<OpBody> Document::createFont(const CreateFont& op) {
+    if (const char* why = fontProblem(op.font)) return refused(why);
+    if (fonts_.contains(op.font.id)) return refused("a font with this id already exists");
+    for (const auto& [id, font] : fonts_)
+        if (font.identifier == op.font.identifier) return refused("another font already uses this identifier");
+    fonts_.emplace(op.font.id, op.font);
+    return DeleteFont{op.font.id};
+}
+
+std::optional<OpBody> Document::deleteFont(const DeleteFont& op) {
+    const auto it = fonts_.find(op.id);
+    if (it == fonts_.end()) return refused("no font has this id");
+    if (op.id == kInterFontId) return refused("the embedded Inter font cannot be removed");
+    for (const auto& [id, stack] : fontStacks_)
+        if (std::find(stack.fonts.begin(), stack.fonts.end(), op.id) != stack.fonts.end())
+            return refused("font stack \"" + stack.identifier + "\" still lists this font, remove it first");
+    CreateFont inverse{it->second};
+    fonts_.erase(it);
+    return inverse;
+}
+
+std::optional<OpBody> Document::replaceFont(const ReplaceFont& op) {
+    const auto it = fonts_.find(op.font.id);
+    if (it == fonts_.end()) return refused("no font has this id");
+    if (op.font.id == kInterFontId) return refused("the embedded Inter font cannot change");
+    if (const char* why = fontProblem(op.font)) return refused(why);
+    for (const auto& [id, font] : fonts_)
+        if (id != op.font.id && font.identifier == op.font.identifier) return refused("another font already uses this identifier");
+    std::optional<std::string> problem;
+    forEachFontUse([&](const Id& stack, const FontAxes& axes, const FontFeatures& features) {
+        const Font* primary = primaryFont(stack);
+        if (!problem && primary && primary->id == op.font.id) problem = fontRefuses(op.font, axes, features);
+    });
+    if (problem) return refused("a text uses a setting this font would no longer allow: " + *problem);
+    ReplaceFont inverse{it->second};
+    it->second = op.font;
+    return inverse;
+}
+
+std::optional<OpBody> Document::createFontStack(const CreateFontStack& op) {
+    if (fontStacks_.contains(op.stack.id)) return refused("a font stack with this id already exists");
+    if (!isValidFontStack(op.stack)) return std::nullopt;
+    fontStacks_.emplace(op.stack.id, op.stack);
+    return DeleteFontStack{op.stack.id};
+}
+
+std::optional<OpBody> Document::deleteFontStack(const DeleteFontStack& op) {
+    const auto it = fontStacks_.find(op.id);
+    if (it == fontStacks_.end()) return refused("no font stack has this id");
+    if (op.id == kInterStackId) return refused("the embedded Inter stack cannot be removed");
+    bool used = false;
+    forEachFontUse([&](const Id& stack, const FontAxes&, const FontFeatures&) { used = used || stack == op.id; });
+    if (used) return refused("a text or typography token still uses this font stack");
+    CreateFontStack inverse{it->second};
+    fontStacks_.erase(it);
+    return inverse;
+}
+
+std::optional<OpBody> Document::replaceFontStack(const ReplaceFontStack& op) {
+    const auto it = fontStacks_.find(op.stack.id);
+    if (it == fontStacks_.end()) return refused("no font stack has this id");
+    if (op.stack.id == kInterStackId) return refused("the embedded Inter stack cannot change");
+    if (!isValidFontStack(op.stack)) return std::nullopt;
+    const Font& primary = *findFont(op.stack.fonts.front());
+    std::optional<std::string> problem;
+    forEachFontUse([&](const Id& stack, const FontAxes& axes, const FontFeatures& features) {
+        if (!problem && stack == op.stack.id) problem = fontRefuses(primary, axes, features);
+    });
+    if (problem) return refused("a text uses a setting the new first font does not allow: " + *problem);
+    ReplaceFontStack inverse{it->second};
+    it->second = op.stack;
     return inverse;
 }
 

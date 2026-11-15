@@ -1,10 +1,11 @@
 import { TestBed } from '@angular/core/testing';
+import { INTER_STACK_ID } from '@canvas/bridge';
 import type { NodeProps, TextRun } from '@canvas/bridge';
 import { TextPanel } from './text-panel';
 
 const text: TextRun = {
   content: 'Continuar',
-  font: 'inter-regular-v1',
+  stack: INTER_STACK_ID,
   fontSize: 24,
   lineHeight: 1.4,
   letterSpacing: 0,
@@ -104,11 +105,15 @@ describe('native text inspector', () => {
     const select = fixture.nativeElement.querySelector(
       '[aria-label="Font style"]',
     ) as HTMLSelectElement;
-    for (const font of ['inter-oblique-v1', 'inter-bold-oblique-v1']) {
-      select.value = font;
+    for (const [style, axes] of [
+      ['oblique', { slnt: -10 }],
+      ['bold-oblique', { wght: 700, slnt: -10 }],
+    ] as const) {
+      select.value = style;
       select.dispatchEvent(new Event('change'));
       await fixture.whenStable();
-      expect(saved.at(-1)?.font).toBe(font);
+      expect(saved.at(-1)?.stack).toBe(INTER_STACK_ID);
+      expect(saved.at(-1)?.axes).toEqual(axes);
     }
   });
   it('selects the real face on bound text and restores a native-rejected font selection', async () => {
@@ -127,16 +132,16 @@ describe('native text inspector', () => {
     const select = fixture.nativeElement.querySelector(
       '[aria-label="Font style"]',
     ) as HTMLSelectElement;
-    select.value = 'inter-bold-v1';
+    select.value = 'bold';
     select.dispatchEvent(new Event('change'));
     await fixture.whenStable();
-    expect(saved.at(-1)).toEqual({ ...text, font: 'inter-bold-v1' });
+    expect(saved.at(-1)).toEqual({ ...text, axes: { wght: 700 } });
     fixture.componentRef.setInput('save', () => false);
     await fixture.whenStable();
-    select.value = 'inter-regular-v1';
+    select.value = 'regular';
     select.dispatchEvent(new Event('change'));
     await fixture.whenStable();
-    expect(select.value).toBe('inter-bold-v1');
+    expect(select.value).toBe('bold');
     expect(saved).toHaveLength(1);
   });
   it('saves wrapping separately from bound content and restores a rejected toggle', async () => {

@@ -16,6 +16,15 @@ const request = (path, body, method = 'POST') =>
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
 
+const INTER_STACK = '00000000-0000-0000-0000-000000000101';
+const AXES = {
+  'inter-regular-v1': {},
+  'inter-bold-v1': { wght: 700 },
+  'inter-oblique-v1': { slnt: -10 },
+  'inter-bold-oblique-v1': { wght: 700, slnt: -10 },
+};
+const modern = ({ font, ...rest }) => ({ ...rest, stack: INTER_STACK, ...(font && Object.keys(AXES[font]).length ? { axes: AXES[font] } : {}) });
+
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 
 test('native lines round-trip HTTP with zero dimensions, instance overrides and downgrade protection', async () => {
@@ -131,8 +140,8 @@ test('shared typography survives native HTTP storage and refuses deletion while 
     assert.equal(response.status, 201, JSON.stringify(imported));
     documentId = imported.id;
     const loaded = await (await fetch(new URL(`/api/documents/${documentId}`, origin))).json();
-    assert.equal(loaded.snapshot.data.version, 11);
-    assert.deepEqual(loaded.snapshot.data.tokens[0].value, typography.value);
+    assert.equal(loaded.snapshot.data.version, 25);
+    assert.deepEqual(loaded.snapshot.data.tokens[0].value, modern(typography.value));
     assert.equal(loaded.snapshot.data.nodes.find((node) => node.id === id(11)).typography, id(90));
     const old = structuredClone(snapshot);
     old.version = 10;
@@ -283,7 +292,10 @@ for (const [version, font] of [
       assert.equal(created.status, 201, JSON.stringify(body));
       documentId = body.id;
       const loaded = await (await fetch(new URL(`/api/documents/${documentId}`, origin))).json();
-      assert.equal(loaded.snapshot.data.nodes.find((node) => node.type === 'text').text.font, font);
+      const stored = loaded.snapshot.data.nodes.find((node) => node.type === 'text').text;
+      assert.equal(stored.stack, INTER_STACK);
+      assert.deepEqual(stored.axes ?? {}, AXES[font]);
+      assert.equal(stored.font, undefined);
       const old = structuredClone(snapshot);
       old.version = version - 1;
       assert.equal(
@@ -360,7 +372,7 @@ test('snapshot 8 wrapping survives native HTTP import, downgrade refusal and an 
     assert.equal(created.status, 201, JSON.stringify(body));
     documentId = body.id;
     const opened = await (await fetch(new URL(`/api/documents/${documentId}`, origin))).json();
-    assert.equal(opened.snapshot.data.version, 8);
+    assert.equal(opened.snapshot.data.version, 25);
     assert.equal(opened.snapshot.data.nodes.find((n) => n.type === 'text').textWrap, true);
     const old = structuredClone(snapshot);
     old.version = 7;
@@ -508,7 +520,7 @@ test('partial text variants survive native snapshot 7 import and reload', async 
     assert.equal(response.status, 201, JSON.stringify(body));
     documentId = body.id;
     const opened = await (await fetch(new URL(`/api/documents/${documentId}`, origin))).json();
-    assert.equal(opened.snapshot.data.version, 7);
+    assert.equal(opened.snapshot.data.version, 25);
     const main = opened.snapshot.data.nodes.find((n) => n.definition?.texts?.length);
     assert.deepEqual(
       main.definition.rules.map((r) => r.patch),
@@ -586,10 +598,10 @@ test('declared text and composed strings survive native import, reload and subse
     documentId = body.id;
     const opened = await (await fetch(new URL(`/api/documents/${documentId}`, origin))).json();
     const snapshot = opened.snapshot.data;
-    assert.equal(snapshot.version, 6);
+    assert.equal(snapshot.version, 25);
     assert.deepEqual(
       snapshot.nodes.find((n) => n.type === 'text').text,
-      source.nodes.find((n) => n.type === 'text').text,
+      modern(source.nodes.find((n) => n.type === 'text').text),
     );
     const instance = snapshot.nodes.find((n) => n.type === 'instance');
     assert.equal(instance.componentValues.label, 'Guardar diseño');
@@ -656,7 +668,7 @@ test('snapshot 6 declared text defaults and long explicit instance strings survi
   const imported = await response.json();
   try {
     const opened = await (await fetch(new URL(`/api/documents/${imported.id}`, origin))).json();
-    assert.equal(opened.snapshot.data.version, 6);
+    assert.equal(opened.snapshot.data.version, 25);
     assert.equal(
       opened.snapshot.data.nodes.find((node) => node.id === id(904)).componentValues.label,
       'A'.repeat(200),
@@ -736,8 +748,8 @@ test('native text survives snapshot 5 import and reload; unsupported glyph edits
   const imported = await response.json();
   try {
     const opened = await (await fetch(new URL(`/api/documents/${imported.id}`, origin))).json();
-    assert.equal(opened.snapshot.data.version, 5);
-    assert.deepEqual(opened.snapshot.data.nodes.find((node) => node.id === id(902)).text, text);
+    assert.equal(opened.snapshot.data.version, 25);
+    assert.deepEqual(opened.snapshot.data.nodes.find((node) => node.id === id(902)).text, modern(text));
     const append = async (content, expectedStatus = 200) => {
       const response = await request(`/api/documents/${imported.id}/ops`, {
         ops: [
@@ -953,5 +965,64 @@ test('version 3 definitions, variant choices and schema protection survive the n
   } finally {
     if (documentId)
       assert.equal((await request(`/api/documents/${documentId}`, null, 'DELETE')).status, 204);
+  }
+});
+
+test('snapshot 25 stores stacks, axes and features and still accepts a legacy font id on input', async () => {
+  const text = (fields) => ({
+    content: 'Flecha ->',
+    fontSize: 24,
+    lineHeight: 1.4,
+    letterSpacing: 0,
+    align: 'left',
+    ...fields,
+  });
+  const snapshot = {
+    version: 25,
+    modes: [{ id: id(1), name: 'Default', order: 'a0' }],
+    tokens: [],
+    nodes: [
+      { id: id(10), type: 'component', order: 'a0', w: 200, h: 80 },
+      {
+        id: id(11),
+        type: 'text',
+        parent: id(10),
+        order: 'a0',
+        text: text({ stack: INTER_STACK, axes: { wght: 600 }, features: { calt: false } }),
+      },
+    ],
+  };
+  const created = await request('/api/documents/import', { name: 'Font stack QA', snapshot });
+  const body = await created.json();
+  assert.equal(created.status, 201, JSON.stringify(body));
+  try {
+    const loaded = await (await fetch(new URL(`/api/documents/${body.id}`, origin))).json();
+    assert.equal(loaded.snapshot.data.version, 25);
+    assert.deepEqual(
+      loaded.snapshot.data.nodes.find((node) => node.type === 'text').text,
+      snapshot.nodes[1].text,
+    );
+    assert.ok(Array.isArray(loaded.snapshot.data.fonts));
+    assert.ok(Array.isArray(loaded.snapshot.data.fontStacks));
+    const old = structuredClone(snapshot);
+    old.version = 24;
+    assert.equal(
+      (await request('/api/documents/import', { name: 'Invalid stack downgrade', snapshot: old }))
+        .status,
+      400,
+    );
+    const legacy = structuredClone(snapshot);
+    legacy.nodes[1].text = text({ font: 'inter-bold-v1' });
+    const accepted = await request('/api/documents/import', { name: 'Legacy font QA', snapshot: legacy });
+    const legacyBody = await accepted.json();
+    assert.equal(accepted.status, 201, JSON.stringify(legacyBody));
+    const reloaded = await (await fetch(new URL(`/api/documents/${legacyBody.id}`, origin))).json();
+    const stored = reloaded.snapshot.data.nodes.find((node) => node.type === 'text').text;
+    assert.equal(stored.stack, INTER_STACK);
+    assert.deepEqual(stored.axes, { wght: 700 });
+    assert.equal(stored.font, undefined);
+    await request(`/api/documents/${legacyBody.id}`, null, 'DELETE');
+  } finally {
+    await request(`/api/documents/${body.id}`, null, 'DELETE');
   }
 });

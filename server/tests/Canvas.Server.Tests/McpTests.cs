@@ -83,7 +83,7 @@ public sealed class McpToolsTests(CanvasFactory factory) : IClassFixture<CanvasF
     private static AgentOp Op(string kind, object data) => new(kind, JsonSerializer.SerializeToElement(data));
 
     private static object Text(string content) =>
-        new { content, font = "inter-regular-v1", fontSize = 14, lineHeight = 1.4, letterSpacing = 0, align = "left" };
+        new { content, stack = "00000000-0000-0000-0000-000000000101", axes = new { wght = 500 }, fontSize = 14, lineHeight = 1.4, letterSpacing = 0, align = "left" };
 
     [Fact]
     public async Task Ops_build_a_laid_out_frame_and_report_refusals()

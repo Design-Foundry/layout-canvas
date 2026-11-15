@@ -120,7 +120,14 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
     swapIn(inverse.textWrap, patch.textWrap, node.textWrap);
     if (patch.textStyle) {
         inverse.textStyle = TextStyle{};
-        swapIn(inverse.textStyle->font, patch.textStyle->font, node.text.font);
+        if (patch.textStyle->stack) {
+            inverse.textStyle->stack = node.text.stack;
+            inverse.textStyle->axes = node.text.axes;
+            inverse.textStyle->features = node.text.features;
+            node.text.stack = *patch.textStyle->stack;
+            node.text.axes = patch.textStyle->axes.value_or(FontAxes{});
+            node.text.features = patch.textStyle->features.value_or(FontFeatures{});
+        }
         swapIn(inverse.textStyle->fontSize, patch.textStyle->fontSize, node.text.fontSize);
         swapIn(inverse.textStyle->lineHeight, patch.textStyle->lineHeight, node.text.lineHeight);
         swapIn(inverse.textStyle->letterSpacing, patch.textStyle->letterSpacing, node.text.letterSpacing);
@@ -187,7 +194,11 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
             take(out.textStyle->lineHeight, top.textStyle->lineHeight);
             take(out.textStyle->letterSpacing, top.textStyle->letterSpacing);
             take(out.textStyle->align, top.textStyle->align);
-            take(out.textStyle->font, top.textStyle->font);
+            if (top.textStyle->stack) {
+                out.textStyle->stack = top.textStyle->stack;
+                out.textStyle->axes = top.textStyle->axes.value_or(FontAxes{});
+                out.textStyle->features = top.textStyle->features.value_or(FontFeatures{});
+            }
         }
     }
     take(out.name, top.name);

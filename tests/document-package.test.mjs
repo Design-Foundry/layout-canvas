@@ -74,7 +74,7 @@ test('document envelope refuses components, unknown formats and extra metadata',
 
 test('native snapshot envelope refuses unsupported versions and missing structural lists', () => {
   for (const snapshot of [
-    { ...fixture(), version: 25 },
+    { ...fixture(), version: 26 },
     { ...fixture(), version: 0 },
     { ...fixture(), version: 21.5 },
     { ...fixture(), nodes: [null] },

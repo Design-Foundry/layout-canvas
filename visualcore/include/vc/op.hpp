@@ -1,4 +1,5 @@
 #pragma once
+#include "vc/font.hpp"
 #include <string>
 #include <variant>
 #include "vc/node.hpp"
@@ -64,6 +65,40 @@ struct ReplaceMode {
     friend bool operator==(const ReplaceMode&, const ReplaceMode&) = default;
 };
 
+struct CreateFont {
+    Font font;
+    friend bool operator==(const CreateFont&, const CreateFont&) = default;
+};
+
+/// Removes a font no stack lists.
+struct DeleteFont {
+    Id id;
+    friend bool operator==(const DeleteFont&, const DeleteFont&) = default;
+};
+
+/// Replaces a font's definition, as long as every text that uses it stays valid.
+struct ReplaceFont {
+    Font font;
+    friend bool operator==(const ReplaceFont&, const ReplaceFont&) = default;
+};
+
+struct CreateFontStack {
+    FontStack stack;
+    friend bool operator==(const CreateFontStack&, const CreateFontStack&) = default;
+};
+
+/// Removes a stack no text or typography refers to.
+struct DeleteFontStack {
+    Id id;
+    friend bool operator==(const DeleteFontStack&, const DeleteFontStack&) = default;
+};
+
+/// Replaces a stack, as long as its first font still allows every text that refers to it.
+struct ReplaceFontStack {
+    FontStack stack;
+    friend bool operator==(const ReplaceFontStack&, const ReplaceFontStack&) = default;
+};
+
 /// Replaces an instance's override of one component node. An empty patch removes it.
 struct SetOverride {
     Id instance;
@@ -79,7 +114,8 @@ struct SetComponentDefinition {
 };
 
 using OpBody = std::variant<CreateNode, DeleteNode, SetProps, MoveNode, CreateToken, DeleteToken, ReplaceToken,
-                            CreateMode, DeleteMode, ReplaceMode, SetOverride, SetComponentDefinition>;
+                            CreateMode, DeleteMode, ReplaceMode, SetOverride, SetComponentDefinition, CreateFont,
+                            DeleteFont, ReplaceFont, CreateFontStack, DeleteFontStack, ReplaceFontStack>;
 
 /// An edit as it travels to the server: a client-generated id plus the change.
 struct Op {

@@ -39,8 +39,12 @@ All five fields are required when `layout` is present. Typical card: a `column` 
 
 ### Text
 
-`"text": { "content", "font", "fontSize", "lineHeight", "letterSpacing", "align" }`, all required.
-- `font`: `inter-regular-v1`, `inter-bold-v1`, `inter-oblique-v1` or `inter-bold-oblique-v1`.
+`"text": { "content", "stack", "axes", "features", "fontSize", "lineHeight", "letterSpacing", "align" }`; `axes` and `features` are optional, the rest required.
+- `stack`: a font stack id. Every document has the bundled Inter stack `00000000-0000-0000-0000-000000000101` (its one font is `00000000-0000-0000-0000-000000000100`).
+- `axes`: axis tag to number, within the first font's domain. Inter has `wght` 100 to 900 (default 400) and `slnt` -10 to 0 (default 0). Absent means the font's defaults.
+- `features`: OpenType tag to `true`, `false` or an alternate's integer index, such as `{ "calt": false }`. The font's default features apply unless overridden.
+- A `textStyle` patch treats `stack`, `axes` and `features` as one unit: a style that sets axes or features must also set `stack`, and setting `stack` replaces both (absent means empty).
+- Retired `font` ids are still accepted on input and mapped onto the Inter stack: `inter-regular-v1` is no axes, `inter-bold-v1` is `{ "wght": 700 }`, `inter-oblique-v1` is `{ "slnt": -10 }`, `inter-bold-oblique-v1` is both. Output always uses `stack`, `axes` and `features`.
 - `fontSize` 1 to 512; `lineHeight` 1 to 4 (a multiplier); `letterSpacing` 0 to 128; `align`: `left`, `center` or `right`.
 - Content: Latin text, accents included; `\n` for explicit lines.
 - `textWrap: true` wraps at the node's width (use `fixed` or `fill` width with `hug` height).
@@ -115,7 +119,7 @@ prototype metadata. See the usage guide for the supported scope.
   - `color`: `{ "l", "c", "h" }`
   - `dimension`: `{ "value", "unit": "px" | "rem" | "em" | "pt" }`
   - `opacity`, `ratio`: `{ "value" }`; `duration`: `{ "value", "unit": "ms" | "s" }`
-  - `typography`: `{ "font", "fontSize", "lineHeight", "letterSpacing", "align" }`
+  - `typography`: `{ "stack", "axes", "features", "fontSize", "lineHeight", "letterSpacing", "align" }`
   - `border`: `{ "width": "<dimension token id>", "style", "color": "<color token id>" }`
   - `shadow`: `{ "layers": [{ "offsetX", "offsetY", "blur", "spread", "inset", "color": "<color token id>", "colorModifiers": [...] }] }`
 - Alias instead of a value: `"source": { "<mode id>": "<token id of the same type>" }`. The default mode is required.
@@ -145,6 +149,7 @@ prototype metadata. See the usage guide for the supported scope.
 - `SetComponentDefinition` `{ "id": "<component id>", "definition": {...} }`
 - `SetOverride` `{ "id": "<instance id>", "node": "<main layer id>", "patch": {...} }`; an empty patch removes the override.
 - `CreateToken` / `ReplaceToken` `{ "token": {...} }`, `DeleteToken` `{ "id" }`
+- `CreateFont` / `ReplaceFont` `{ "font": {...} }`, `DeleteFont` `{ "id" }`; `CreateFontStack` / `ReplaceFontStack` `{ "stack": {...} }`, `DeleteFontStack` `{ "id" }`
 - `CreateMode` / `ReplaceMode` `{ "mode": {...} }`, `DeleteMode` `{ "id" }`
 
 A refused op reports `path` and `message`. Later ops that depend on it (children of a refused frame, for example) are refused too; fix the first error and resend those.
@@ -170,3 +175,11 @@ Reopening uses the existing atomic document import (2 MiB snapshot limit), creat
 a separate document on the configured server. This is local file delivery, not
 hosted sharing or a standalone HTML player. Component files keep their narrower
 portable contract.
+
+## Fonts and font stacks
+
+Snapshot version 25 adds `fonts` and `fontStacks` arrays. It is the version written whenever the document has text, a `textStyle` with a stack, a typography token, or a custom font or stack. Older versions refuse `stack`, `axes`, `features`, `fonts` and `fontStacks`.
+
+- Font: `{ "id", "identifier", "displayName", "provider", "key", "sha256", "capabilities": { "axes": [{ "tag", "domain": { "min", "max" } | { "values": [...] }, "default" }], "features": ["calt", ...] }, "order" }`. `displayName` and `sha256` are optional.
+- Font stack: `{ "id", "identifier", "displayName", "entries": ["<font id>", ...], "genericFallback": "sans-serif" | "serif" | "monospace" | "system-ui" | "none", "order" }`. Text validates its axes and features against the first entry.
+- The bundled Inter font and stack are always present and cannot be changed or deleted.

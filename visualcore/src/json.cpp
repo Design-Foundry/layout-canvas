@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 24;
+constexpr int kSnapshotVersion = 25;
 
 bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
@@ -106,8 +106,9 @@ constexpr std::array<std::pair<Align, std::string_view>, 4> kAligns{{
     {Align::Start, "start"}, {Align::Center, "center"}, {Align::End, "end"}, {Align::Stretch, "stretch"}}};
 constexpr std::array<std::pair<Sizing, std::string_view>, 3> kSizings{{
     {Sizing::Fixed, "fixed"}, {Sizing::Hug, "hug"}, {Sizing::Fill, "fill"}}};
-constexpr std::array<std::string_view, 12> kOpKinds{"CreateNode", "DeleteNode", "SetProps", "MoveNode", "CreateToken", "DeleteToken",
-                                                      "ReplaceToken", "CreateMode", "DeleteMode", "ReplaceMode", "SetOverride", "SetComponentDefinition"};
+constexpr std::array<std::string_view, 18> kOpKinds{"CreateNode", "DeleteNode", "SetProps", "MoveNode", "CreateToken", "DeleteToken",
+                                                      "ReplaceToken", "CreateMode", "DeleteMode", "ReplaceMode", "SetOverride", "SetComponentDefinition",
+                                                      "CreateFont", "DeleteFont", "ReplaceFont", "CreateFontStack", "DeleteFontStack", "ReplaceFontStack"};
 
 json token(const TokenRef& ref) {
     return {{"token", ref.token.toString()}};
@@ -178,6 +179,9 @@ json writeValues(const ComponentValues& values) {
     return out;
 }
 
+json writeAxes(const FontAxes& axes);
+json writeFeatures(const FontFeatures& features);
+
 void writePatch(json& out, const NodePatch& p) {
     if(p.prototypeStart) out["prototypeStart"]=*p.prototypeStart;
     if(p.prototypeFlowName) out["prototypeFlowName"]=*p.prototypeFlowName;
@@ -230,7 +234,11 @@ void writePatch(json& out, const NodePatch& p) {
     if (p.textStyle) {
         const auto& t = *p.textStyle;
         out["textStyle"] = json::object();
-        if (t.font) out["textStyle"]["font"] = *t.font;
+        if (t.stack) {
+            out["textStyle"]["stack"] = t.stack->toString();
+            if (t.axes && !t.axes->empty()) out["textStyle"]["axes"] = writeAxes(*t.axes);
+            if (t.features && !t.features->empty()) out["textStyle"]["features"] = writeFeatures(*t.features);
+        }
         if (t.fontSize) out["textStyle"]["fontSize"] = *t.fontSize;
         if (t.lineHeight) out["textStyle"]["lineHeight"] = *t.lineHeight;
         if (t.letterSpacing) out["textStyle"]["letterSpacing"] = *t.letterSpacing;
@@ -238,9 +246,11 @@ void writePatch(json& out, const NodePatch& p) {
     }
     if (p.text) {
         const auto& t = *p.text;
-        out["text"] = {{"content", t.content}, {"font", t.font}, {"fontSize", t.fontSize},
+        out["text"] = {{"content", t.content}, {"stack", t.stack.toString()}, {"fontSize", t.fontSize},
             {"lineHeight", t.lineHeight}, {"letterSpacing", t.letterSpacing},
             {"align", t.align == TextAlign::Center ? "center" : t.align == TextAlign::Right ? "right" : "left"}};
+        if (!t.axes.empty()) out["text"]["axes"] = writeAxes(t.axes);
+        if (!t.features.empty()) out["text"]["features"] = writeFeatures(t.features);
     }
     if (p.name) out["name"] = *p.name;
     if (p.part) out["part"] = *p.part;
@@ -368,6 +378,189 @@ std::optional<std::string> requireOrder(const json& j) {
     const auto it = j.find("order");
     if (it == j.end() || !it->is_string()) return refused("order is required: a fractional index string such as a0");
     return it->get<std::string>();
+}
+
+/// Counts reads of stack, axes, features, fonts and font stacks, which snapshots older than 25 cannot hold.
+thread_local int gFontModelReads = 0;
+
+json writeAxes(const FontAxes& axes) {
+    json out = json::object();
+    for (const auto& [tag, value] : axes) out[tag] = value;
+    return out;
+}
+
+json writeFeatures(const FontFeatures& features) {
+    json out = json::object();
+    for (const auto& [tag, value] : features) {
+        if (const auto* on = std::get_if<bool>(&value)) out[tag] = *on;
+        else out[tag] = std::get<int>(value);
+    }
+    return out;
+}
+
+std::optional<FontAxes> readAxes(const json& j) {
+    DiagnosticScope scope{"axes"};
+    if (!j.is_object()) return refused("axes must be an object of axis tag to number");
+    FontAxes axes;
+    for (const auto& [tag, value] : j.items()) {
+        DiagnosticScope field{tag};
+        if (!value.is_number()) return refused("an axis value must be a number");
+        axes[tag] = value.get<double>();
+    }
+    return axes;
+}
+
+std::optional<FontFeatures> readFeatures(const json& j) {
+    DiagnosticScope scope{"features"};
+    if (!j.is_object()) return refused("features must be an object of feature tag to true, false or an integer");
+    FontFeatures features;
+    for (const auto& [tag, value] : j.items()) {
+        DiagnosticScope field{tag};
+        if (value.is_boolean()) features[tag] = value.get<bool>();
+        else if (value.is_number_integer()) features[tag] = value.get<int>();
+        else return refused("a feature value must be true, false or an integer");
+    }
+    return features;
+}
+
+/// Reads a text's or style's font: the retired `font` id, or `stack` with optional `axes` and
+/// `features`. Leaves `stack` empty when none of the keys is present.
+bool readFontChoice(const json& j, std::optional<Id>& stack, FontAxes& axes, FontFeatures& features) {
+    const bool legacy = j.contains("font");
+    const bool modern = j.contains("stack") || j.contains("axes") || j.contains("features");
+    if (legacy && modern) return refuse("use either font or stack, axes and features, not both");
+    if (legacy) {
+        DiagnosticScope field{"font"};
+        const auto& font = j["font"];
+        const auto legacyAxes = font.is_string() ? legacyInterAxes(font.get_ref<const std::string&>()) : std::nullopt;
+        if (!legacyAxes) return refuse("font must be inter-regular-v1, inter-bold-v1, inter-oblique-v1 or inter-bold-oblique-v1");
+        stack = kInterStackId; axes = *legacyAxes; features = {};
+        return true;
+    }
+    if (!modern) return true;
+    ++gFontModelReads;
+    if (!j.contains("stack")) return refuse("axes and features need stack");
+    const auto id = requireId(j, "stack");
+    if (!id) return false;
+    stack = *id;
+    if (j.contains("axes")) { const auto read = readAxes(j["axes"]); if (!read) return false; axes = *read; }
+    if (j.contains("features")) { const auto read = readFeatures(j["features"]); if (!read) return false; features = *read; }
+    return true;
+}
+
+json writeFont(const Font& font) {
+    json axes = json::array();
+    for (const auto& axis : font.axes) {
+        json domain = axis.domain.values.empty() ? json{{"min", axis.domain.min}, {"max", axis.domain.max}} : json{{"values", axis.domain.values}};
+        json entry{{"tag", axis.tag}, {"domain", domain}};
+        if (axis.defaultValue) entry["default"] = *axis.defaultValue;
+        axes.push_back(std::move(entry));
+    }
+    json out{{"id", font.id.toString()}, {"identifier", font.identifier}, {"provider", font.provider}, {"key", font.key},
+             {"capabilities", {{"axes", axes}, {"features", font.features}}}, {"order", font.order}};
+    if (!font.displayName.empty()) out["displayName"] = font.displayName;
+    if (!font.sha256.empty()) out["sha256"] = font.sha256;
+    return out;
+}
+
+std::optional<Font> readFont(const json& j) {
+    ++gFontModelReads;
+    if (!j.is_object()) return refused("a font must be an object with id, identifier, provider, key, capabilities and order");
+    Font font;
+    const auto id = requireId(j, "id");
+    if (!id) return std::nullopt;
+    font.id = *id;
+    for (const char* key : {"identifier", "provider", "key"}) if (!require(j, key, Shape::String)) return std::nullopt;
+    font.identifier = j["identifier"]; font.provider = j["provider"]; font.key = j["key"];
+    for (const char* key : {"displayName", "sha256"})
+        if (j.contains(key)) { if (!require(j, key, Shape::String)) return std::nullopt; }
+    if (j.contains("displayName")) font.displayName = j["displayName"];
+    if (j.contains("sha256")) font.sha256 = j["sha256"];
+    const auto order = requireOrder(j);
+    if (!order) return std::nullopt;
+    font.order = *order;
+    DiagnosticScope scope{"capabilities"};
+    const auto caps = j.find("capabilities");
+    if (caps == j.end() || !caps->is_object()) return refused("capabilities is required: an object with axes and features");
+    if (caps->contains("axes")) {
+        DiagnosticScope axesScope{"axes"};
+        const auto& axes = (*caps)["axes"];
+        if (!axes.is_array()) return refused("axes must be an array");
+        for (std::size_t i = 0; i < axes.size(); ++i) {
+            DiagnosticScope entry{"[" + std::to_string(i) + "]"};
+            const auto& a = axes[i];
+            if (!a.is_object() || !require(a, "tag", Shape::String)) return refused("an axis needs a tag");
+            FontAxis axis; axis.tag = a["tag"];
+            DiagnosticScope domainScope{"domain"};
+            const auto domain = a.find("domain");
+            if (domain == a.end() || !domain->is_object()) return refused("domain is required: {min, max} or {values}");
+            if (domain->contains("values")) {
+                if (domain->contains("min") || domain->contains("max")) return refused("a domain has either min and max or values");
+                const auto& values = (*domain)["values"];
+                if (!values.is_array() || values.empty() || !std::all_of(values.begin(), values.end(), [](const json& v) { return v.is_number(); }))
+                    return refused("values must be a non-empty array of numbers");
+                for (const auto& v : values) axis.domain.values.push_back(v.get<double>());
+            } else {
+                if (!require(*domain, "min", Shape::Number) || !require(*domain, "max", Shape::Number)) return std::nullopt;
+                axis.domain.min = (*domain)["min"]; axis.domain.max = (*domain)["max"];
+            }
+            if (a.contains("default")) {
+                if (!a["default"].is_number()) return refused("default must be a number");
+                axis.defaultValue = a["default"].get<double>();
+            }
+            font.axes.push_back(std::move(axis));
+        }
+    }
+    if (caps->contains("features")) {
+        const auto& features = (*caps)["features"];
+        if (!features.is_array() || !std::all_of(features.begin(), features.end(), [](const json& f) { return f.is_string(); }))
+            return refused("features must be an array of tags");
+        for (const auto& f : features) font.features.push_back(f.get<std::string>());
+    }
+    return font;
+}
+
+json writeFontStack(const FontStack& stack) {
+    json entries = json::array();
+    for (const auto& font : stack.fonts) entries.push_back(font.toString());
+    json out{{"id", stack.id.toString()}, {"identifier", stack.identifier}, {"entries", entries},
+             {"genericFallback", genericFallbackName(stack.fallback)}, {"order", stack.order}};
+    if (!stack.displayName.empty()) out["displayName"] = stack.displayName;
+    return out;
+}
+
+std::optional<FontStack> readFontStack(const json& j) {
+    ++gFontModelReads;
+    if (!j.is_object()) return refused("a font stack must be an object with id, identifier, entries, genericFallback and order");
+    FontStack stack;
+    const auto id = requireId(j, "id");
+    if (!id) return std::nullopt;
+    stack.id = *id;
+    if (!require(j, "identifier", Shape::String)) return std::nullopt;
+    stack.identifier = j["identifier"];
+    if (j.contains("displayName")) {
+        if (!require(j, "displayName", Shape::String)) return std::nullopt;
+        stack.displayName = j["displayName"];
+    }
+    const auto order = requireOrder(j);
+    if (!order) return std::nullopt;
+    stack.order = *order;
+    {
+        DiagnosticScope scope{"entries"};
+        const auto entries = j.find("entries");
+        if (entries == j.end() || !entries->is_array()) return refused("entries is required: an array of font ids");
+        for (const auto& entry : *entries) {
+            const auto font = readId(entry);
+            if (!font) return std::nullopt;
+            stack.fonts.push_back(*font);
+        }
+    }
+    DiagnosticScope scope{"genericFallback"};
+    const auto fallback = j.find("genericFallback");
+    const auto parsed = fallback != j.end() && fallback->is_string() ? genericFallbackFromName(fallback->get_ref<const std::string&>()) : std::nullopt;
+    if (!parsed) return refused("genericFallback must be sans-serif, serif, monospace, system-ui or none");
+    stack.fallback = *parsed;
+    return stack;
 }
 
 std::optional<TokenRef> readToken(const json& j) {
@@ -561,25 +754,33 @@ std::optional<ComponentValues> readValues(const json& j) {
 }
 
 std::optional<TextStyle> readTextStyle(const json& v) {
-    if (!v.is_object() || v.empty() || v.size() > 5) return refused("must be an object with 1 to 5 of font, fontSize, lineHeight, letterSpacing and align");
+    constexpr std::string_view kKeys = "font, stack, axes, features, fontSize, lineHeight, letterSpacing and align";
+    if (!v.is_object() || v.empty() || v.size() > 7) return refused("must be an object with some of " + std::string{kKeys});
     TextStyle style; TextRun test;
     for (const auto& [key, value] : v.items()) {
         DiagnosticScope field{key};
-        if (key == "font") {
-            if (!value.is_string()) return refused("font must be a string");
-            style.font = test.font = value.get<std::string>();
-        } else if (key == "align") {
+        if (key == "font" || key == "stack" || key == "axes" || key == "features") continue;
+        if (key == "align") {
             if (!value.is_string()) return refused("align must be left, center or right");
             const std::string align = value;
             if (align != "left" && align != "center" && align != "right") return refused("align must be left, center or right");
             style.align = test.align = align == "center" ? TextAlign::Center : align == "right" ? TextAlign::Right : TextAlign::Left;
         } else {
-            if (key != "fontSize" && key != "lineHeight" && key != "letterSpacing") return refused("unknown key, use font, fontSize, lineHeight, letterSpacing or align");
+            if (key != "fontSize" && key != "lineHeight" && key != "letterSpacing") return refused("unknown key, use " + std::string{kKeys});
             if (!value.is_number()) return refused(key + " must be a number");
             if (key == "fontSize") style.fontSize = test.fontSize = value;
             else if (key == "lineHeight") style.lineHeight = test.lineHeight = value;
             else style.letterSpacing = test.letterSpacing = value;
         }
+    }
+    std::optional<Id> stack;
+    FontAxes axes;
+    FontFeatures features;
+    if (!readFontChoice(v, stack, axes, features)) return std::nullopt;
+    if (stack) {
+        style.stack = test.stack = *stack;
+        style.axes = test.axes = axes;
+        style.features = test.features = features;
     }
     if (const char* why = textProblem(test)) return refused(why);
     return style;
@@ -747,14 +948,22 @@ std::optional<NodePatch> readPatch(const json& j) {
     if (j.contains("text")) {
         DiagnosticScope scope{"text"};
         const auto& value = j["text"];
-        if (!value.is_object()) return refused("must be an object with exactly content, font, fontSize, lineHeight, letterSpacing and align");
-        const std::array<std::pair<const char*, Shape>, 6> keys{{{"content", Shape::String}, {"font", Shape::String}, {"fontSize", Shape::Number},
+        constexpr std::string_view kKeys = "content, font or stack with optional axes and features, fontSize, lineHeight, letterSpacing and align";
+        if (!value.is_object()) return refused("must be an object with " + std::string{kKeys});
+        const std::array<std::pair<const char*, Shape>, 5> keys{{{"content", Shape::String}, {"fontSize", Shape::Number},
             {"lineHeight", Shape::Number}, {"letterSpacing", Shape::Number}, {"align", Shape::String}}};
         for (const auto& [key, shape] : keys) if (!require(value, key, shape)) return std::nullopt;
-        if (value.size() != 6) return refused("has keys other than content, font, fontSize, lineHeight, letterSpacing and align");
+        for (const auto& [key, unused] : value.items())
+            if (key != "content" && key != "font" && key != "stack" && key != "axes" && key != "features" && key != "fontSize" &&
+                key != "lineHeight" && key != "letterSpacing" && key != "align") return refused("has keys other than " + std::string{kKeys});
+        std::optional<Id> stack;
+        FontAxes axes;
+        FontFeatures features;
+        if (!readFontChoice(value, stack, axes, features)) return std::nullopt;
+        if (!stack) return refused("font or stack is required");
         const auto align = value["align"].get<std::string>();
         if (align != "left" && align != "center" && align != "right") {DiagnosticScope field{"align"};return refused("align must be left, center or right");}
-        TextRun text{value["content"], value["font"], value["fontSize"], value["lineHeight"], value["letterSpacing"],
+        TextRun text{value["content"], *stack, axes, features, value["fontSize"], value["lineHeight"], value["letterSpacing"],
             align == "center" ? TextAlign::Center : align == "right" ? TextAlign::Right : TextAlign::Left};
         if (const char* why = textProblem(text)) return refused(why);
         p.text = std::move(text);
@@ -1062,10 +1271,10 @@ std::optional<Modifier> readModifier(const json& j);
 std::optional<TokenLiteral> readLiteral(TokenType type, const json& j) {
     if (!j.is_object()) return refused("a token value must be an object");
     if (type == TokenType::Typography) {
-        if (j.size()!=5) return refused("a typography value needs exactly font, fontSize, lineHeight, letterSpacing and align");
+        constexpr std::string_view kNeeds = "a typography value needs font or stack, fontSize, lineHeight, letterSpacing and align";
         const auto style=readTextStyle(j);
         if (!style) return std::nullopt;
-        if (!style->complete() || !style->font) return refused("a typography value needs exactly font, fontSize, lineHeight, letterSpacing and align");
+        if (!style->complete() || !style->stack) return refused(kNeeds);
         return *style;
     }
     if (type == TokenType::Border) {
@@ -1294,6 +1503,23 @@ std::optional<OpBody> readOp(std::string_view kind, const json& j) {
         return ReplaceMode{std::move(*mode)};
     }
 
+    if (kind == "CreateFont" || kind == "ReplaceFont") {
+        DiagnosticScope field{"font"};
+        if (!j.contains("font")) return refused("font is required: a font object");
+        auto font = readFont(j["font"]);
+        if (!font) return std::nullopt;
+        if (kind == "CreateFont") return CreateFont{std::move(*font)};
+        return ReplaceFont{std::move(*font)};
+    }
+    if (kind == "CreateFontStack" || kind == "ReplaceFontStack") {
+        DiagnosticScope field{"stack"};
+        if (!j.contains("stack")) return refused("stack is required: a font stack object");
+        auto stack = readFontStack(j["stack"]);
+        if (!stack) return std::nullopt;
+        if (kind == "CreateFontStack") return CreateFontStack{std::move(*stack)};
+        return ReplaceFontStack{std::move(*stack)};
+    }
+
     if (kind == "CreateNode") {
         DiagnosticScope field{"node"};
         if (!j.contains("node")) return refused("node is required: a node object");
@@ -1326,6 +1552,12 @@ std::optional<OpBody> readOp(std::string_view kind, const json& j) {
     }
     if (kind == "DeleteMode") {
         return DeleteMode{*id};
+    }
+    if (kind == "DeleteFont") {
+        return DeleteFont{*id};
+    }
+    if (kind == "DeleteFontStack") {
+        return DeleteFontStack{*id};
     }
     if (kind == "SetProps") {
         auto patch = requirePatch(j);
@@ -1372,6 +1604,10 @@ json writeOp(const OpBody& op) {
                 return {{"id", body.instance.toString()}, {"node", body.node.toString()}, {"patch", patch}};
             } else if constexpr (std::is_same_v<T, SetComponentDefinition>) {
                 return {{"id", body.component.toString()}, {"definition", writeDefinition(body.definition)}};
+            } else if constexpr (std::is_same_v<T, CreateFont> || std::is_same_v<T, ReplaceFont>) {
+                return {{"font", writeFont(body.font)}};
+            } else if constexpr (std::is_same_v<T, CreateFontStack> || std::is_same_v<T, ReplaceFontStack>) {
+                return {{"stack", writeFontStack(body.stack)}};
             } else {
                 return {{"id", body.id.toString()}};
             }
@@ -1531,8 +1767,7 @@ std::string snapshotToJson(const Document& document) {
     bool textProperties = false;
     bool partialTextStyles = false;
     bool wrapping = false;
-    bool fontSelection = false;
-    bool oblique = false;
+    bool fontModel = false;
     bool typography = false;
     bool line = false;
     bool path = false;
@@ -1548,7 +1783,8 @@ std::string snapshotToJson(const Document& document) {
     bool parts = false;
     bool cellVisibility = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
-    const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
+    for (const Font* font : document.fonts()) fontModel = fontModel || font->id != kInterFontId;
+    for (const FontStack* stack : document.fontStacks()) fontModel = fontModel || stack->id != kInterStackId;
     document.forEachInPaintOrder([&](const Node& node) {
         nodes.push_back(write(node)); declared = declared || !node.definition.empty() || !node.componentValues.empty();
         typography = typography || !node.typography.isNil();
@@ -1567,8 +1803,7 @@ std::string snapshotToJson(const Document& document) {
         swaps = swaps || !node.definition.swaps.empty();
         text = text || node.type == NodeType::Text;
         wrapping = wrapping || node.textWrap;
-        fontSelection = fontSelection || node.text.font != "inter-regular-v1";
-        oblique = oblique || slanted(node.text.font);
+        fontModel = fontModel || node.type == NodeType::Text;
         textProperties = textProperties || !node.definition.texts.empty();
         const auto styleVersion = [&](const NodePatch& patch) {
             path = path || patch.path.has_value();
@@ -1581,10 +1816,8 @@ std::string snapshotToJson(const Document& document) {
             multipleInteractions = multipleInteractions || patch.interactions.has_value();
             componentStates = componentStates || (patch.interaction && statePrototype(*patch.interaction)) || (patch.interactions && std::any_of(patch.interactions->begin(),patch.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));
             curved = curved || (patch.path && (patch.path->filled || !patch.path->inHandles.empty()));
-            oblique = oblique || (patch.text && slanted(patch.text->font)) || (patch.textStyle && patch.textStyle->font && slanted(*patch.textStyle->font));
             wrapping = wrapping || patch.textWrap.has_value();
-            fontSelection = fontSelection || (patch.text && patch.text->font != "inter-regular-v1") ||
-                (patch.textStyle && patch.textStyle->font.has_value());
+            fontModel = fontModel || patch.text.has_value() || (patch.textStyle && patch.textStyle->stack.has_value());
             text = text || patch.text.has_value(); textProperties = textProperties || patch.textStyle.has_value();
             partialTextStyles = partialTextStyles || (patch.textStyle && !patch.textStyle->complete());
         };
@@ -1594,7 +1827,16 @@ std::string snapshotToJson(const Document& document) {
             cellVisibility = cellVisibility || r.when.empty() || r.patch.visible.has_value();
         }
     });
-    return json{{"version", cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
+    fontModel = fontModel || typography;
+    json out{{"version", fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
+    if (fontModel) {
+        json fonts = json::array(), stacks = json::array();
+        for (const Font* font : document.fonts()) fonts.push_back(writeFont(*font));
+        for (const FontStack* stack : document.fontStacks()) stacks.push_back(writeFontStack(*stack));
+        out["fonts"] = std::move(fonts);
+        out["fontStacks"] = std::move(stacks);
+    }
+    return out.dump();
 }
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
@@ -1635,11 +1877,37 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
                 }
             }
         }
+        if (version >= 25) {
+            for (const char* key : {"fonts", "fontStacks"}) {
+                if (!j.contains(key) || !j[key].is_array()) {
+                    DiagnosticScope field{key};
+                    return refused(std::string{key} + " is required from snapshot version 25: an array");
+                }
+            }
+            {
+                DiagnosticScope list{"fonts"};
+                for (std::size_t i = 0; i < j["fonts"].size(); ++i) {
+                    DiagnosticScope entry{slot(i)};
+                    auto font = readFont(j["fonts"][i]);
+                    if (!font) return std::nullopt;
+                    if (font->id != kInterFontId) ops.push_back(CreateFont{std::move(*font)});
+                }
+            }
+            DiagnosticScope list{"fontStacks"};
+            for (std::size_t i = 0; i < j["fontStacks"].size(); ++i) {
+                DiagnosticScope entry{slot(i)};
+                auto stack = readFontStack(j["fontStacks"][i]);
+                if (!stack) return std::nullopt;
+                if (stack->id != kInterStackId) ops.push_back(CreateFontStack{std::move(*stack)});
+            }
+        }
         DiagnosticScope list{"tokens"};
         for (std::size_t i = 0; i < j["tokens"].size(); ++i) {
             DiagnosticScope entry{slot(i)};
+            const int fontReads = gFontModelReads;
             auto token = readTokenDef(j["tokens"][i]);
             if (!token) return std::nullopt;
+            if (version < 25 && gFontModelReads != fontReads) return refused("font stacks, axes and features need snapshot version 25 or later");
             if (version < 11 && token->type == TokenType::Typography) {
                 DiagnosticScope field{"type"};
                 return refused("typography tokens need snapshot version 11 or later");
@@ -1656,8 +1924,10 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
     DiagnosticScope nodeList{"nodes"};
     for (std::size_t index = 0; index < j["nodes"].size(); ++index) {
         DiagnosticScope entry{slot(index)};
+        const int fontReads = gFontModelReads;
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
+        if (version < 25 && gFontModelReads != fontReads) return refused("font stacks, axes and features need snapshot version 25 or later");
         if(version<24 && std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.when.empty() || r.patch.visible.has_value();})) return refused("base rules and rules that set visible need snapshot version 24 or later");
         if(version<23 && (j["nodes"][index].contains("part") || !node->part.empty())) return refused("component part names need snapshot version 23 or later");
         if(version<22 && (j["nodes"][index].contains("prototypeFlowName") || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.prototypeFlowName.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.prototypeFlowName.has_value();}))) return refused("named flows need snapshot version 22 or later");
@@ -1689,21 +1959,21 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         if (version < 12 && node->type == NodeType::Line) return refused("line layers need snapshot version 12 or later");
         if (version < 11 && !node->typography.isNil()) return refused("text bound to shared typography needs snapshot version 11 or later");
         if (version < 10) {
-            const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
+            const auto slanted = [](const FontAxes& axes) { return axes.contains("slnt"); };
             const auto selected = [&](const NodePatch& patch) {
-                return (patch.text && slanted(patch.text->font)) || (patch.textStyle && patch.textStyle->font && slanted(*patch.textStyle->font));
+                return (patch.text && slanted(patch.text->axes)) || (patch.textStyle && patch.textStyle->axes && slanted(*patch.textStyle->axes));
             };
             constexpr std::string_view oblique = "oblique fonts need snapshot version 10 or later";
-            if (slanted(node->text.font)) return refused(oblique);
+            if (slanted(node->text.axes)) return refused(oblique);
             for (const auto& o : node->overrides) if (selected(o.patch)) return refused(oblique);
             for (const auto& r : node->definition.rules) if (selected(r.patch)) return refused(oblique);
         }
         if (version < 9) {
             const auto selectedFont = [](const NodePatch& patch) {
-                return (patch.text && patch.text->font != "inter-regular-v1") || (patch.textStyle && patch.textStyle->font.has_value());
+                return (patch.text && !patch.text->axes.empty()) || (patch.textStyle && patch.textStyle->stack.has_value());
             };
             constexpr std::string_view fonts = "selecting a font needs snapshot version 9 or later";
-            if (node->text.font != "inter-regular-v1") return refused(fonts);
+            if (!node->text.axes.empty()) return refused(fonts);
             for (const auto& o : node->overrides) if (selectedFont(o.patch)) return refused(fonts);
             for (const auto& r : node->definition.rules) if (selectedFont(r.patch)) return refused(fonts);
         }
@@ -1803,6 +2073,13 @@ std::string modesToJson(const Document& document) {
         rows.push_back(row);
     }
     return rows.dump();
+}
+
+std::string fontsToJson(const Document& document) {
+    json fonts = json::array(), stacks = json::array();
+    for (const Font* font : document.fonts()) fonts.push_back(writeFont(*font));
+    for (const FontStack* stack : document.fontStacks()) stacks.push_back(writeFontStack(*stack));
+    return json{{"fonts", fonts}, {"fontStacks", stacks}}.dump();
 }
 
 std::optional<Token> tokenFromJson(std::string_view data) {

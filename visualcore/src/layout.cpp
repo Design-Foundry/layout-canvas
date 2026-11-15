@@ -61,11 +61,11 @@ private:
         Size size{node.w, node.h};
         if (availableWidth >= 0) size.w = availableWidth;
         if (node.type == NodeType::Text) {
-            const auto text = layoutText(node.text);
+            const auto text = document_.layoutText(node.text);
             if (node.widthSizing == Sizing::Hug) size.w = text.width;
             if (availableWidth >= 0) size.w = availableWidth;
             size.w = clampWidth(node, size.w);
-            if (node.heightSizing == Sizing::Hug) size.h = node.textWrap ? layoutText(node.text, size.w, true).height : text.height;
+            if (node.heightSizing == Sizing::Hug) size.h = node.textWrap ? document_.layoutText(node.text, size.w, true).height : text.height;
         }
         if (hasAutoLayout(node) && (node.widthSizing == Sizing::Hug || node.heightSizing == Sizing::Hug)) {
             const bool row = node.layout.type == LayoutType::Row;
