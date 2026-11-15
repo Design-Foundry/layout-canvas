@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 22;
+constexpr int kSnapshotVersion = 24;
 
 bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
@@ -243,6 +243,7 @@ void writePatch(json& out, const NodePatch& p) {
             {"align", t.align == TextAlign::Center ? "center" : t.align == TextAlign::Right ? "right" : "left"}};
     }
     if (p.name) out["name"] = *p.name;
+    if (p.part) out["part"] = *p.part;
     if (p.x) out["x"] = *p.x;
     if (p.y) out["y"] = *p.y;
     if (p.w) out["w"] = *p.w;
@@ -758,6 +759,8 @@ std::optional<NodePatch> readPatch(const json& j) {
         if (const char* why = textProblem(text)) return refused(why);
         p.text = std::move(text);
     }
+    if (!readField(j, "part", p.part, readString)) return std::nullopt;
+    if (p.part && !p.part->empty() && !validKebabName(*p.part)) {DiagnosticScope field{"part"};return refused("part must be lowercase kebab-case starting with a letter, up to 64 characters");}
     const bool fillCleared = j.contains("fill") && j["fill"].is_null();
     const bool ok = readField(j, "name", p.name, readString) && readField(j, "x", p.x, readNumber) &&
                     readField(j, "y", p.y, readNumber) && readField(j, "w", p.w, readNumber) &&
@@ -1443,6 +1446,7 @@ std::string inspectNodeJson(const Document& document, const Node& source, const 
         out["swapBound"] = document.isSwapTarget(document.sourceOf(source.id));
     }
     if (source.type == NodeType::Component) out["inUse"] = document.isComponentUsed(source.id);
+    if (document.ownerOf(source.id) == source.id && !document.enclosingComponent(source.id).isNil()) out["inComponent"] = true;
     if (const Id owner = document.ownerOf(source.id); owner != source.id) {
         out["inInstance"] = true;
         if (document.isSwapTarget(owner)) out["swapBound"] = true;
@@ -1541,6 +1545,8 @@ std::string snapshotToJson(const Document& document) {
     bool multipleInteractions = false;
     bool componentStates = false;
     bool namedFlows = false;
+    bool parts = false;
+    bool cellVisibility = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     const auto slanted = [](const std::string& font) { return font == "inter-oblique-v1" || font == "inter-bold-oblique-v1"; };
     document.forEachInPaintOrder([&](const Node& node) {
@@ -1554,6 +1560,7 @@ std::string snapshotToJson(const Document& document) {
         extended = extended || extendedPrototype(node.interaction);
         positioned = positioned || positionedPrototype(node.interaction);
         namedFlows = namedFlows || !node.prototypeFlowName.empty();
+        parts = parts || !node.part.empty();
         scrolling = scrolling || node.prototypeOverflow!=PrototypeOverflow::None;
         multipleInteractions = multipleInteractions || !node.interactions.empty();
         componentStates = componentStates || statePrototype(node.interaction) || std::any_of(node.interactions.begin(),node.interactions.end(),[](const auto& e){return statePrototype(e.interaction);});
@@ -1582,9 +1589,12 @@ std::string snapshotToJson(const Document& document) {
             partialTextStyles = partialTextStyles || (patch.textStyle && !patch.textStyle->complete());
         };
         for (const auto& o : node.overrides) styleVersion(o.patch);
-        for (const auto& r : node.definition.rules) styleVersion(r.patch);
+        for (const auto& r : node.definition.rules) {
+            styleVersion(r.patch);
+            cellVisibility = cellVisibility || r.when.empty() || r.patch.visible.has_value();
+        }
     });
-    return json{{"version", namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
+    return json{{"version", cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : oblique ? 10 : fontSelection ? 9 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}}.dump();
 }
 
 std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
@@ -1648,6 +1658,8 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         DiagnosticScope entry{slot(index)};
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
+        if(version<24 && std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.when.empty() || r.patch.visible.has_value();})) return refused("base rules and rules that set visible need snapshot version 24 or later");
+        if(version<23 && (j["nodes"][index].contains("part") || !node->part.empty())) return refused("component part names need snapshot version 23 or later");
         if(version<22 && (j["nodes"][index].contains("prototypeFlowName") || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.prototypeFlowName.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.prototypeFlowName.has_value();}))) return refused("named flows need snapshot version 22 or later");
         const auto statePatch=[](const NodePatch& p){return (p.interaction && statePrototype(*p.interaction)) || (p.interactions && std::any_of(p.interactions->begin(),p.interactions->end(),[](const auto& e){return statePrototype(e.interaction);}));};
         if(version<21 && (statePrototype(node->interaction) || std::any_of(node->interactions.begin(),node->interactions.end(),[](const auto& e){return statePrototype(e.interaction);}) || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return statePatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return statePatch(r.patch);}))) return refused("component state actions and smart-animate need snapshot version 21 or later");

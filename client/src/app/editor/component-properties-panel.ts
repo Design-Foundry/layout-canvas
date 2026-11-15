@@ -22,6 +22,7 @@ const RULE_FIELDS: Record<string, string> = {
   'textStyle.lineHeight': 'Line height',
   'textStyle.letterSpacing': 'Letter spacing',
   'textStyle.align': 'Text alignment',
+  visible: 'Visible',
 };
 
 @Component({
@@ -378,6 +379,8 @@ export class ComponentPropertiesPanel {
           value: String(metric),
           editable: typeof metric === 'number' || field === 'align',
         }));
+      if (key === 'visible')
+        return [{ key, label: RULE_FIELDS[key], value: value ? 'on' : 'off', editable: true }];
       return [
         {
           key,
@@ -419,6 +422,23 @@ export class ComponentPropertiesPanel {
     if (!rule || !field?.editable) return;
     const restore = () =>
       control.control.setValue(field.value, { emitEvent: false, emitViewToModelChange: false });
+    if (key === 'visible') {
+      if (raw !== 'on' && raw !== 'off') {
+        this.error.set('Choose on or off.');
+        restore();
+        return;
+      }
+      if (
+        !this.store({
+          ...definition,
+          rules: definition.rules.map((current, i) =>
+            i === index ? { ...rule, patch: { ...rule.patch, visible: raw === 'on' } } : current,
+          ),
+        })
+      )
+        restore();
+      return;
+    }
     const value = key === 'textStyle.align' ? raw : Number(raw);
     const max =
       key === 'opacity'
@@ -457,6 +477,7 @@ export class ComponentPropertiesPanel {
       restore();
   }
   protected ruleLabel(when: Readonly<Record<string, string>>): string {
+    if (!Object.keys(when).length) return 'Base';
     return Object.entries(when)
       .map(([name, value]) => `${name}: ${value}`)
       .join(' · ');
@@ -468,6 +489,7 @@ export class ComponentPropertiesPanel {
       fill: 'Background color',
       opacity: 'Opacity',
       cornerRadius: 'Corner radius',
+      visible: 'Visible',
     };
     return Object.entries(patch)
       .filter(([name]) => name !== 'fillVisible')
@@ -478,21 +500,27 @@ export class ComponentPropertiesPanel {
               .join(', ')
           : typeof value === 'object'
             ? labels[name] || name
-            : `${labels[name] || name}: ${value}`,
+            : name === 'visible'
+              ? `${labels[name]}: ${value ? 'on' : 'off'}`
+              : `${labels[name] || name}: ${value}`,
       )
       .join(', ');
   }
   protected addRule(): void {
     const when = Object.fromEntries(Object.entries(this.cell).filter(([, value]) => value));
     const target = this.ruleTarget;
-    if (!target || !Object.keys(when).length) {
-      this.error.set(
-        'Choose a layer and at least one variant value. Any keeps the other axes independent.',
-      );
+    if (!target) {
+      this.error.set('Choose a layer.');
       return;
     }
     let patch: NodePatch;
-    if (['fontSize', 'lineHeight', 'letterSpacing', 'align'].includes(this.ruleField)) {
+    if (this.ruleField === 'visible') {
+      if (this.ruleValue !== 'on' && this.ruleValue !== 'off') {
+        this.error.set('Choose on or off.');
+        return;
+      }
+      patch = { visible: this.ruleValue === 'on' };
+    } else if (['fontSize', 'lineHeight', 'letterSpacing', 'align'].includes(this.ruleField)) {
       const value = this.ruleField === 'align' ? this.ruleValue : Number(this.ruleValue);
       if (
         !this.textRuleTarget() ||
@@ -552,6 +580,11 @@ export class ComponentPropertiesPanel {
         },
       };
     this.store({ ...definition, rules });
+  }
+  protected selectRuleField(field: string): void {
+    this.ruleField = field;
+    if (field === 'visible') this.ruleValue = 'off';
+    else if (this.ruleValue === 'on' || this.ruleValue === 'off') this.ruleValue = '8';
   }
   protected textRuleTarget(): boolean {
     return this.targets().some((target) => target.id === this.ruleTarget && target.type === 'text');

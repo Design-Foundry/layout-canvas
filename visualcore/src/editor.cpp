@@ -1217,6 +1217,7 @@ std::optional<Id> Editor::detachInstance(const Id& instanceId) {
         node.parent = parent;
         node.definition = {};
         node.componentValues.clear();
+        node.part.clear();
         if (node.type == NodeType::Instance) {
             node.type = NodeType::Frame;
             node.component = {};
@@ -1228,6 +1229,7 @@ std::optional<Id> Editor::detachInstance(const Id& instanceId) {
     };
     copy(instanceId, instance->parent, copy);
     copies.front().order = instance->order;
+    copies.front().part = instance->part;
 
     std::vector<OpBody> ops{DeleteNode{instanceId}};
     for (const Node& node : copies) ops.push_back(CreateNode{node});
@@ -1667,6 +1669,11 @@ void Editor::updateMove(Vec2 world) {
     const Vec2 origin = originOf(container);
 
     std::vector<OpBody> ops;
+    std::vector<Id> incoming;
+    for (const Moving& m : moving_) if (document.find(m.id)->parent != container) incoming.push_back(m.id);
+    NodePatch clearPart;
+    clearPart.part = std::string{};
+    for (const Id& id : document.partsToClear(incoming, container)) ops.push_back(SetProps{id, clearPart});
     if (target && target->layout.type != LayoutType::None) {
         const bool row = target->layout.type == LayoutType::Row;
         std::vector<const Node*> flow;

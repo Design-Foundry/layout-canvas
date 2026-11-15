@@ -27,6 +27,7 @@ bool nonNegative(const Value<double>& value) {
 constexpr std::string_view kFrameStyling = "text, lines, paths and images take no stroke, shadows, corner radius or auto layout";
 
 bool isValidPatch(const NodePatch& patch) {
+    if(patch.part && !patch.part->empty() && !validKebabName(*patch.part)) return refuse("part must be lowercase kebab-case starting with a letter, up to 64 characters");
     if(patch.prototypeFlowName && !validPrototypeFlowName(*patch.prototypeFlowName)) return refuse("prototypeFlowName must be single-line text of at most 128 UTF-8 bytes");
     if(patch.interactions && !validTriggeredInteractions(*patch.interactions)) return refuse("interactions needs at most 16 valid trigger actions");
     if(patch.interaction && patch.interaction->action!=PrototypeAction::None && patch.interactions && !patch.interactions->empty()) return refuse("interaction and interactions cannot both be active");
@@ -234,6 +235,11 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
     if (node.id.isNil()) return refused("a node needs an id");
     if (nodes_.contains(node.id)) return refused("a node with this id already exists");
     if (!isValidParent(node.parent)) return refused("the parent does not exist or cannot have children");
+    if (!node.part.empty()) {
+        const Id owner = node.type == NodeType::Component ? node.id : enclosingComponent(node.parent);
+        if (owner.isNil()) return refused("a part names a layer inside a main component");
+        if (findPart(owner, node.part)) return refused("another layer of this component already has this part");
+    }
     if (!isValidPatch(fullPatch(node)) || !isValidNodeRefs(node)) return std::nullopt;
     if (node.type == NodeType::Instance && !isValidInstance(node)) {
         return refused("an instance needs an existing main component it cannot contain, nested at most 16 levels");
@@ -246,6 +252,7 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
         if(o.patch.prototypeOverflow) return refused("overrides cannot set prototypeOverflow");
         if(o.patch.prototypeFlowName) return refused("overrides cannot set prototypeFlowName");
         if(o.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
+        if(o.patch.part) return refused("overrides cannot set part");
     }
     if (!node.overrides.empty()) {
         Document preview = *this;
@@ -361,6 +368,19 @@ std::optional<OpBody> Document::setProps(const SetProps& op) {
         if (current.type != NodeType::Instance) return refused("only instances take component");
         if (!isValidInstance(candidate)) return refused("an instance needs an existing main component it cannot contain, nested at most 16 levels");
     }
+    if (op.patch.part && !op.patch.part->empty()) {
+        const Id owner = nextType == NodeType::Component ? op.id : enclosingComponent(current.parent);
+        if (owner.isNil()) return refused("a part names a layer inside a main component");
+        const auto holder = findPart(owner, *op.patch.part);
+        if (holder && *holder != op.id) return refused("another layer of this component already has this part");
+    }
+    if (nextType != current.type && current.type == NodeType::Component) {
+        const std::vector<Id> blocked = partsToClear({op.id}, current.parent, nextType);
+        if (!blocked.empty()) {
+            if (enclosingComponent(current.parent).isNil()) return refused("clear the parts of this component's layers before turning it into a frame");
+            return refused("the part \"" + nodes_.at(blocked.front()).part + "\" is already used by the enclosing component; clear it before turning this component into a frame");
+        }
+    }
     return SetProps{op.id, applyPatch(it->second, op.patch)};
 }
 
@@ -372,6 +392,7 @@ std::optional<OpBody> Document::move(const MoveNode& op) {
     if (!op.parent.isNil() && isAncestorOrSelf(op.id, op.parent)) {
         return refused("a node cannot move into itself or its descendants");
     }
+    if (!partsToClear({op.id}, op.parent).empty()) return refused("a layer with a part cannot move out of its component or into one that already uses the part; clear the part first");
     bool cycle = false;
     if (op.parent != it->second.parent) {
         const auto inside = [&](const Id& target) { return isAncestorOrSelf(op.id, target); };
@@ -472,6 +493,7 @@ std::optional<OpBody> Document::setOverride(const SetOverride& op) {
     if(op.patch.prototypeOverflow) return refused("overrides cannot set prototypeOverflow");
     if(op.patch.prototypeFlowName) return refused("overrides cannot set prototypeFlowName");
     if(op.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
+    if(op.patch.part) return refused("overrides cannot set part");
     if(op.patch.interaction && !validInteraction(*op.patch.interaction)) return std::nullopt;
     if(op.patch.interactions) for(const auto& entry:*op.patch.interactions) if(!validInteraction(entry.interaction)) return std::nullopt;
     if (isSwapTarget(op.instance) && op.node != it->second.component && op.patch != NodePatch{}) return refused("an instance swap property controls this instance; override its root only");
@@ -559,10 +581,6 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
         return refuse("a definition has at most 64 text, boolean and swap properties each");
     if (definition.axes.size() > 8) return refuse("a definition has at most 8 variant axes");
     if (definition.rules.size() > 256) return refuse("a definition has at most 256 rules");
-    const auto validName = [](const std::string& name) {
-        return !name.empty() && name.size() <= 64 && name[0] >= 'a' && name[0] <= 'z' &&
-            std::all_of(name.begin(), name.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
-    };
     constexpr std::string_view kNameRule = "names and axis values are lowercase kebab-case starting with a letter, up to 64 characters";
     const auto inComponent = [&](const Id& target) { return enclosingComponent(target) == component; };
     std::unordered_set<std::string> names;
@@ -572,7 +590,7 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
         const DiagnosticScope scope{"texts[" + std::to_string(i) + "]"};
         TextRun run; run.content = text.defaultValue;
         const Node* target = find(text.target);
-        if (!validName(text.name)) return refuse(kNameRule);
+        if (!validKebabName(text.name)) return refuse(kNameRule);
         if (!names.insert(text.name).second) return refuse("another property or axis already uses this name");
         if (!targets.insert(text.target).second) return refuse("another text property already targets this layer");
         if (!target || target->type != NodeType::Text || !inComponent(text.target)) return refuse("a text property targets a text layer inside the component");
@@ -588,7 +606,7 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
     for (std::size_t i = 0; i < definition.properties.size(); ++i) {
         const auto& property = definition.properties[i];
         const DiagnosticScope scope{"properties[" + std::to_string(i) + "]"};
-        if (!validName(property.name)) return refuse(kNameRule);
+        if (!validKebabName(property.name)) return refuse(kNameRule);
         if (!names.insert(property.name).second) return refuse("another property or axis already uses this name");
         if (!targets.insert(property.target).second) return refuse("another boolean property already targets this layer");
         if (!inComponent(property.target)) return refuse("a boolean property targets a layer inside the component");
@@ -596,13 +614,13 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
     for (std::size_t i = 0; i < definition.axes.size(); ++i) {
         const auto& axis = definition.axes[i];
         const DiagnosticScope scope{"axes[" + std::to_string(i) + "]"};
-        if (!validName(axis.name)) return refuse(kNameRule);
+        if (!validKebabName(axis.name)) return refuse(kNameRule);
         if (!names.insert(axis.name).second) return refuse("another property or axis already uses this name");
         if (axis.values.empty() || axis.values.size() > 32) return refuse("an axis has 1 to 32 values");
         if (std::find(axis.values.begin(), axis.values.end(), axis.defaultValue) == axis.values.end()) return refuse("the default must be one of the axis values");
         std::unordered_set<std::string> choices;
         for (const auto& value : axis.values) {
-            if (!validName(value)) return refuse(kNameRule);
+            if (!validKebabName(value)) return refuse(kNameRule);
             if (!choices.insert(value).second) return refuse("axis values must be unique");
         }
     }
@@ -611,7 +629,7 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
         const auto& swap = definition.swaps[i];
         const DiagnosticScope scope{"swaps[" + std::to_string(i) + "]"};
         const Node* target = find(swap.target);
-        if (!validName(swap.name)) return refuse(kNameRule);
+        if (!validKebabName(swap.name)) return refuse(kNameRule);
         if (!names.insert(swap.name).second) return refuse("another property or axis already uses this name");
         if (!targets.insert(swap.target).second) return refuse("another swap property already targets this instance");
         if (!target || target->type != NodeType::Instance || !inComponent(swap.target)) return refuse("a swap property targets an instance inside the component");
@@ -633,7 +651,6 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
         const NodePatch& p = rule.patch;
         const Node* target = find(rule.target);
         if (!target || !inComponent(rule.target)) return refuse("a rule targets a layer inside the component");
-        if (rule.when.empty()) return refuse("a rule needs at least one axis value in when");
         for (const auto& [name, value] : rule.when) {
             const auto axis = std::find_if(definition.axes.begin(), definition.axes.end(), [&](const VariantAxis& a) { return a.name == name; });
             if (axis == definition.axes.end()) return refuse("when names an axis the definition does not declare: " + name);
@@ -656,8 +673,8 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
             return refuse("a text property controls this layer's content; change its metrics with textStyle instead of text");
         if (textTarget && !validTextPaint(p)) return refuse(kFrameStyling);
         if (!isValidPatch(p) || !isValidPatchRefs(p)) return false;
-        if (p.type || p.component || p.componentValues || p.typography || p.name || p.visible || p.locked || p.absolute || p.widthSizing || p.heightSizing)
-            return refuse("rules cannot change type, component, componentValues, typography, name, visible, locked, absolute or sizing");
+        if (p.type || p.component || p.componentValues || p.typography || p.name || p.part || p.locked || p.absolute || p.widthSizing || p.heightSizing)
+            return refuse("rules cannot change type, component, componentValues, typography, name, part, locked, absolute or sizing");
         if (rule.target == component && (p.x || p.y || p.w || p.h)) return refuse("rules cannot move or resize the component itself");
     }
     return true;
@@ -696,6 +713,46 @@ Id Document::enclosingComponent(const Id& id) const {
         if (node->type == NodeType::Component) return node->id;
     }
     return {};
+}
+
+std::optional<Id> Document::findPart(const Id& component, std::string_view part) const {
+    const Node* main = find(component);
+    if (!main || main->type != NodeType::Component || part.empty()) return std::nullopt;
+    std::optional<Id> found;
+    const auto search = [&](const Id& id, auto&& self) -> void {
+        const Node& node = nodes_.at(id);
+        if (found || (id != component && node.type == NodeType::Component)) return;
+        if (node.part == part) {
+            found = id;
+            return;
+        }
+        for (const Id& child : children(id)) self(child, self);
+    };
+    search(component, search);
+    return found;
+}
+
+std::vector<Id> Document::partsToClear(const std::vector<Id>& roots, const Id& parent, std::optional<NodeType> rootType) const {
+    const Id destination = enclosingComponent(parent);
+    std::vector<Id> cleared;
+    std::unordered_set<std::string> claimed;
+    for (const Id& root : roots) {
+        const Node* rootNode = find(root);
+        const bool dissolves = rootType && rootNode && rootNode->type == NodeType::Component && *rootType != NodeType::Component;
+        if (!rootNode || (!dissolves && !destination.isNil() && enclosingComponent(rootNode->parent) == destination)) continue;
+        const auto visitNode = [&](const Id& id, bool ownedInside, auto&& self) -> void {
+            const Node& node = nodes_.at(id);
+            const NodeType type = id == root && rootType ? *rootType : node.type;
+            ownedInside = ownedInside || type == NodeType::Component;
+            if (!ownedInside && !node.part.empty()) {
+                if (destination.isNil() || claimed.contains(node.part) || findPart(destination, node.part)) cleared.push_back(id);
+                else claimed.insert(node.part);
+            }
+            for (const Id& child : children(id)) self(child, ownedInside, self);
+        };
+        visitNode(root, false, visitNode);
+    }
+    return cleared;
 }
 
 bool Document::isTextTarget(const Id& id) const {
@@ -929,6 +986,7 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
         effective.visible = original.visible && effective.visible;
         effective.locked = original.locked;
         effective.name = original.name;
+        effective.part = original.part;
         effective.order = original.order;
         applyLayers(effective);
         inner = {{&original.overrides, {}, &component->definition, &values}};

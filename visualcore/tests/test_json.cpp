@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <vector>
 #include "vc/json.hpp"
 
@@ -212,4 +213,177 @@ TEST_CASE("frame labels sit at each top-level frame's screen corner") {
     const std::string labels = vc::frameLabelsToJson(doc, camera, vc::kDefaultModeId);
     REQUIRE(labels.find("\"name\":\"Home\"") != std::string::npos);
     REQUIRE(labels.find("\"w\":400.0,\"x\":200.0,\"y\":100.0") != std::string::npos);
+}
+
+TEST_CASE("part names round trip and need snapshot version 23") {
+    vc::Document doc;
+    Node main;
+    main.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000101");
+    main.type = vc::NodeType::Component;
+    main.order = "a0";
+    Node label;
+    label.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000102");
+    label.parent = main.id;
+    label.order = "a0";
+    REQUIRE(doc.apply(CreateNode{main}));
+    REQUIRE(doc.apply(CreateNode{label}));
+
+    const std::string plain = vc::snapshotToJson(doc);
+    REQUIRE(plain.find("\"part\"") == std::string::npos);
+    REQUIRE(plain.find("\"version\":2}") != std::string::npos);
+
+    vc::NodePatch patch;
+    patch.part = "label";
+    REQUIRE(doc.apply(vc::SetProps{label.id, patch}));
+    const std::string json = vc::snapshotToJson(doc);
+    REQUIRE(json.find("\"part\":\"label\"") != std::string::npos);
+    REQUIRE(json.find("\"version\":23") != std::string::npos);
+
+    const auto ops = vc::snapshotFromJson(json);
+    REQUIRE(ops.has_value());
+    vc::Document loaded;
+    for (const OpBody& op : *ops) REQUIRE(loaded.apply(op));
+    REQUIRE(loaded.find(label.id)->part == "label");
+    REQUIRE(*loaded.find(label.id) == *doc.find(label.id));
+
+    auto old = json;
+    old.replace(old.find("\"version\":23"), 12, "\"version\":22");
+    REQUIRE_FALSE(vc::snapshotFromJson(old).has_value());
+    auto emptyPart = plain;
+    emptyPart.replace(emptyPart.find("\"version\":2}"), 11, "\"version\":22");
+    emptyPart.replace(emptyPart.find("\"parent\""), 0, "\"part\":\"\",");
+    REQUIRE_FALSE(vc::snapshotFromJson(emptyPart).has_value());
+
+    patch.part = "";
+    REQUIRE(doc.apply(vc::SetProps{label.id, patch}));
+    REQUIRE(vc::snapshotToJson(doc).find("\"version\":2}") != std::string::npos);
+}
+
+TEST_CASE("snapshots refuse invalid, duplicate and component-less parts") {
+    const auto snapshot = [](const std::string& nodes) {
+        return R"({"version":23,"modes":[],"tokens":[],"nodes":[)" + nodes + "]}";
+    };
+    const std::string main = R"({"id":"0192a4b1-7c3d-4e5f-8a6b-000000000101","type":"component","order":"a0"})";
+    const auto child = [](const char* id, const std::string& part) {
+        return std::string{R"({"id":")"} + id + R"(","type":"rect","order":"a0","parent":"0192a4b1-7c3d-4e5f-8a6b-000000000101","part":")" + part + R"("})";
+    };
+    const auto loads = [](const std::string& json) {
+        const auto ops = vc::snapshotFromJson(json);
+        if (!ops) return false;
+        vc::Document document;
+        for (const OpBody& op : *ops) if (!document.apply(op)) return false;
+        return true;
+    };
+    constexpr const char* a = "0192a4b1-7c3d-4e5f-8a6b-000000000102";
+    constexpr const char* b = "0192a4b1-7c3d-4e5f-8a6b-000000000103";
+    REQUIRE(loads(snapshot(main + "," + child(a, "label") + "," + child(b, "icon"))));
+    REQUIRE_FALSE(loads(snapshot(main + "," + child(a, "label") + "," + child(b, "label"))));
+    REQUIRE_FALSE(vc::snapshotFromJson(snapshot(main + "," + child(a, "Label"))).has_value());
+    REQUIRE_FALSE(loads(snapshot(R"({"id":"0192a4b1-7c3d-4e5f-8a6b-000000000104","type":"frame","order":"a0","part":"label"})")));
+    REQUIRE_FALSE(loads(snapshot(main + R"(,{"id":"0192a4b1-7c3d-4e5f-8a6b-000000000105","type":"instance","order":"a1","component":"0192a4b1-7c3d-4e5f-8a6b-000000000101","overrides":[{"node":"0192a4b1-7c3d-4e5f-8a6b-000000000101","patch":{"part":"label"}}]})")));
+}
+
+TEST_CASE("patches carry part names on the wire") {
+    const auto patch = vc::patchFromJson(R"({"part":"label"})");
+    REQUIRE(patch.has_value());
+    REQUIRE(patch->part == "label");
+    REQUIRE(vc::patchFromJson(R"({"part":""})").has_value());
+    REQUIRE_FALSE(vc::patchFromJson(R"({"part":"Label"})").has_value());
+    REQUIRE_FALSE(vc::patchFromJson(R"({"part":4})").has_value());
+
+    const vc::OpBody op = vc::SetProps{*Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000101"), *patch};
+    REQUIRE(*vc::opFromJson(vc::opKind(op), vc::opToJson(op)) == op);
+}
+
+TEST_CASE("inspected component layers report that they can carry a part") {
+    vc::Document doc;
+    Node main;
+    main.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000101");
+    main.type = vc::NodeType::Component;
+    main.order = "a0";
+    Node child;
+    child.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000102");
+    child.parent = main.id;
+    child.order = "a0";
+    Node loose;
+    loose.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000103");
+    loose.order = "a1";
+    Node instance;
+    instance.id = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000104");
+    instance.type = vc::NodeType::Instance;
+    instance.component = main.id;
+    instance.order = "a2";
+    for (const Node& n : {main, child, loose, instance}) REQUIRE(doc.apply(CreateNode{n}));
+
+    const auto inspect = [&](const Node& n) { return vc::inspectNodeJson(doc, n, vc::kDefaultModeId); };
+    REQUIRE(inspect(main).find("\"inComponent\":true") != std::string::npos);
+    REQUIRE(inspect(child).find("\"inComponent\":true") != std::string::npos);
+    REQUIRE(inspect(loose).find("inComponent") == std::string::npos);
+    REQUIRE(inspect(instance).find("inComponent") == std::string::npos);
+    const Id copy = doc.viewChildren(instance.id).at(0);
+    REQUIRE(inspect(*doc.view(copy)).find("inComponent") == std::string::npos);
+}
+
+TEST_CASE("base rules and rules that set visible need snapshot version 24") {
+    const Id mainId = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000201");
+    const Id labelId = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000202");
+    const auto build = [&](const std::vector<vc::VariantRule>& extra) {
+        auto doc = std::make_unique<vc::Document>();
+        Node main;
+        main.id = mainId;
+        main.type = vc::NodeType::Component;
+        main.order = "a0";
+        Node label;
+        label.id = labelId;
+        label.parent = mainId;
+        label.order = "a0";
+        REQUIRE(doc->apply(CreateNode{main}));
+        REQUIRE(doc->apply(CreateNode{label}));
+        vc::ComponentDefinition definition;
+        definition.axes.push_back({"size", {"small", "large"}, "small"});
+        vc::NodePatch wide;
+        wide.w = 90;
+        definition.rules.push_back({{{"size", "large"}}, labelId, wide});
+        for (const auto& rule : extra) definition.rules.push_back(rule);
+        REQUIRE(doc->apply(vc::SetComponentDefinition{mainId, definition}));
+        return doc;
+    };
+    const auto versionOf = [](const std::string& json) { return json.find("\"version\":24") != std::string::npos; };
+
+    REQUIRE(vc::snapshotToJson(*build({})).find("\"version\":3}") != std::string::npos);
+
+    vc::NodePatch faded;
+    faded.opacity = 0.5;
+    vc::NodePatch hidden;
+    hidden.visible = false;
+    const std::vector<std::vector<vc::VariantRule>> cases{
+        {{{}, labelId, faded}},
+        {{{{"size", "small"}}, labelId, hidden}},
+        {{{}, labelId, hidden}},
+    };
+    for (const auto& extra : cases) {
+        const auto doc = build(extra);
+        const std::string json = vc::snapshotToJson(*doc);
+        REQUIRE(versionOf(json));
+        const auto ops = vc::snapshotFromJson(json);
+        REQUIRE(ops.has_value());
+        vc::Document loaded;
+        for (const OpBody& op : *ops) REQUIRE(loaded.apply(op));
+        REQUIRE(loaded.find(mainId)->definition == doc->find(mainId)->definition);
+        REQUIRE(vc::snapshotToJson(loaded) == json);
+
+        auto old = json;
+        old.replace(old.find("\"version\":24"), 12, "\"version\":23");
+        REQUIRE_FALSE(vc::snapshotFromJson(old).has_value());
+    }
+}
+
+TEST_CASE("rule patches carry visible and an empty cell on the wire") {
+    const Id target = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000202");
+    vc::NodePatch hidden;
+    hidden.visible = false;
+    vc::ComponentDefinition definition;
+    definition.rules.push_back({{}, target, hidden});
+    const vc::OpBody op = vc::SetComponentDefinition{*Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000201"), definition};
+    REQUIRE(*vc::opFromJson(vc::opKind(op), vc::opToJson(op)) == op);
 }

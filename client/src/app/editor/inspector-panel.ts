@@ -68,6 +68,8 @@ const NEW_SHADOW: ShadowProps = {
   visible: true,
 };
 
+const PART_NAME = /^[a-z][a-z0-9-]{0,63}$/;
+
 const SIDE_LABELS = ['T', 'R', 'B', 'L'] as const;
 const CORNER_LABELS = ['TL', 'TR', 'BR', 'BL'] as const;
 const JUSTIFY_OPTIONS: { label: string; value: Justify }[] = [
@@ -140,6 +142,7 @@ export class InspectorPanel {
   readonly prototypeScreens = input<readonly import('@canvas/bridge').PrototypeScreen[]>([]);
   readonly prototypeStateAxes = input<readonly import('@canvas/bridge').VariantAxis[]>([]);
   protected readonly mode = signal<'design' | 'prototype'>('design');
+  protected readonly partError = signal('');
   readonly saveLine = input<(id: string, patch: NodePatch) => boolean>(() => false);
   readonly saveStyleBinding = input<(id: string, patch: NodePatch) => boolean>(() => false);
   readonly saveWrap = input<(id: string, wrap: boolean) => boolean>(() => false);
@@ -234,6 +237,7 @@ export class InspectorPanel {
     effect(() => {
       const node = this.node();
       if (!node) return;
+      this.partError.set('');
       this.justifyControl.setValue(node.layout.justify, { emitEvent: false });
       this.styleControl.setValue(this.stroke()?.style ?? 'solid', { emitEvent: false });
       this.clipControl.setValue(node.clipContent, { emitEvent: false });
@@ -274,6 +278,24 @@ export class InspectorPanel {
         this.edit.emit({ component });
       }
     });
+  }
+
+  protected setPart(event: Event): void {
+    const control = event.target as HTMLInputElement;
+    const node = this.node();
+    if (!node) return;
+    const part = control.value.trim();
+    if (part !== '' && !PART_NAME.test(part)) {
+      control.value = node.part ?? '';
+      this.partError.set('Use lowercase letters, digits and hyphens, starting with a letter.');
+      return;
+    }
+    if (this.saveStyleBinding()(node.id, { part })) {
+      this.partError.set('');
+      return;
+    }
+    control.value = node.part ?? '';
+    this.partError.set('This part was refused. Another layer in the component may already use it.');
   }
 
   // ----- Field keys -----
