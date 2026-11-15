@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include "fonts.hpp"
@@ -68,8 +69,31 @@ std::optional<Face> faceFor(const TextRun& text, const Font& font) {
     return Face{std::uint32_t(instance), oblique};
 }
 
-/// One paragraph shaped in runs of the face that covers each character.
+std::vector<fonts::ShapedGlyph> shapeRuns(std::string_view paragraph, const std::vector<Face>& faces, const FontFeatures& features);
+
+/// One paragraph shaped in runs of the face that covers each character, cached by faces, features
+/// and text.
 std::vector<fonts::ShapedGlyph> shapeParagraph(std::string_view paragraph, const std::vector<Face>& faces, const FontFeatures& features) {
+    static std::mutex lock;
+    static std::unordered_map<std::string, std::vector<fonts::ShapedGlyph>> cache;
+    std::string key;
+    for (const auto& face : faces) key += std::to_string(face.instance) + ',';
+    for (const auto& [tag, value] : features)
+        key += tag + '=' + std::to_string(std::holds_alternative<bool>(value) ? int(std::get<bool>(value)) : std::get<int>(value)) + ',';
+    key += '\x1f';
+    key += paragraph;
+    {
+        const std::scoped_lock guard(lock);
+        if (const auto found = cache.find(key); found != cache.end()) return found->second;
+    }
+    auto shaped = shapeRuns(paragraph, faces, features);
+    const std::scoped_lock guard(lock);
+    if (cache.size() >= 4096) cache.clear();
+    cache.emplace(std::move(key), shaped);
+    return shaped;
+}
+
+std::vector<fonts::ShapedGlyph> shapeRuns(std::string_view paragraph, const std::vector<Face>& faces, const FontFeatures& features) {
     std::vector<Character> characters;
     decode(paragraph, characters);
     std::vector<std::size_t> chosen(characters.size(), 0);
