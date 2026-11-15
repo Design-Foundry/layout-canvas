@@ -17,11 +17,9 @@ FetchContent_Declare(
     harfbuzz
     URL https://github.com/harfbuzz/harfbuzz/releases/download/15.0.0/harfbuzz-15.0.0.tar.xz
     URL_HASH SHA256=968536e9abd782f07f7954044c0c4020199fcdd39b41d221ec42d2a3be4a44df
+    SOURCE_SUBDIR amalgamated-only
 )
-FetchContent_GetProperties(harfbuzz)
-if(NOT harfbuzz_POPULATED)
-    FetchContent_Populate(harfbuzz)
-endif()
+FetchContent_MakeAvailable(harfbuzz)
 add_library(vc_harfbuzz STATIC ${harfbuzz_SOURCE_DIR}/src/harfbuzz.cc)
 target_include_directories(vc_harfbuzz PUBLIC ${harfbuzz_SOURCE_DIR}/src)
 target_compile_definitions(vc_harfbuzz PRIVATE HB_NO_AAT HB_NO_PAINT HB_NO_COLOR HB_NO_LEGACY HB_NO_BUFFER_SERIALIZE

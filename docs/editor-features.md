@@ -7,8 +7,8 @@ contracts. This is an editor foundation increment, not a claim of full Figma par
 | Area | Available | Current limits |
 | --- | --- | --- |
 | Components | Main components, linked instances, boolean/text/swap properties, variant axes, per-field rule editing, independent overrides, guarded main switching, reset/detach | Some edits that would invalidate existing override addresses are refused |
-| Text | On-canvas and inspector editing, multiline/wrapping, Hug sizing, metric overrides and declared string properties | A bounded single run of supported Latin glyphs; no rich runs, complex shaping or glyph-level canvas caret |
-| Typography | Bundled Inter Regular/Bold/Oblique/Bold Oblique, actual font metrics/kerning, local shared typography tokens, per-field instance inheritance | Fixed trusted faces, literal shared style metrics; no font uploads, fallback or aliases/modes for composite typography |
+| Text | On-canvas and inspector editing, multiline/wrapping, Hug sizing, metric overrides and declared string properties | A bounded single run of supported Latin glyphs; no rich runs, right-to-left layout or glyph-level canvas caret |
+| Typography | Bundled Inter Regular/Bold/Oblique/Bold Oblique as instances of one variable font, HarfBuzz shaping with the font's kerning and default features, local shared typography tokens, per-field instance inheritance | Four fixed faces in documents, literal shared style metrics; faces can be registered from hash-verified bytes but documents cannot reference them yet; no fallback or aliases/modes for composite typography |
 | Vectors | Rectangles, ellipses, editable round-cap lines, cubic paths, anchor/control editing, even-odd fills, color tokens and opacity | Up to 64 anchors; one contour and common fill/stroke paint; no boolean operations or cap/join choices |
 | Drawing | Pen click/drag, Pencil, five-sided Polygon, five-point Star, Shift constraints, Alt-centered shapes, gesture cancellation | Pencil reduces to 64 samples and does not retain pressure or smooth; polygons/stars become editable paths without parametric controls |
 | Images | Local static PNG/JPEG import, native RGBA pixels, SHA-256 identity, fixed geometry, contain/cover/stretch, normalized crop, opacity and clipping | 4 MB input, 4096 px source side, explicit downsample to 512 px, eight identities and 1,400,000 encoded pixel characters per document; no original-resolution recovery, animation or effects |
@@ -62,8 +62,9 @@ Native validation checks the digest, dimensions and canonical base64. GPU upload
 are premultiplied for filtering, while persisted pixels remain unchanged. Component
 copies share content identity and may override crop/fit independently of the source.
 
-Fonts and third-party notices are in `visualcore/assets/fonts/` and
-`visualcore/third_party/stb/`. No externally loaded fonts or image URLs are needed.
+Fonts and third-party notices are in `visualcore/assets/fonts/`,
+`visualcore/third_party/stb/` and `visualcore/third_party/harfbuzz/`. No externally
+loaded fonts or image URLs are needed.
 
 Prototyping also supports named root-frame flow entries (snapshot 22), visual
 hotspot-to-screen connection authoring with a keyboard alternative, focus-aware
