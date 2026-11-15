@@ -4,6 +4,7 @@
 #include <vector>
 #include "vc/json.hpp"
 #include "vc/native.h"
+#include "vc/text.hpp"
 
 using vc::Id;
 using vc::Node;
@@ -61,6 +62,17 @@ TEST_CASE("the native library applies ops and reports the ones it refuses") {
     REQUIRE(vc_last_error() == nullptr);
     REQUIRE(vc_document_apply(doc.get(), "not json") == nullptr);
     REQUIRE(vc_last_error() != nullptr);
+}
+
+TEST_CASE("the native library registers font faces only with a matching hash") {
+    const unsigned char bytes[] = {1, 2, 3};
+    REQUIRE(vc_register_font_face("native-test/face", bytes, sizeof bytes, std::string(64, 'a').c_str()) == 0);
+    REQUIRE(take(vc_last_error()) == R"({"path":"font","message":"font bytes do not match sha256"})");
+    REQUIRE(vc_register_font_face(nullptr, bytes, sizeof bytes, "") == 0);
+    REQUIRE(vc_last_error() != nullptr);
+    const std::string hash = vc::fontFaceSha256(vc::kEmbeddedInterFace);
+    REQUIRE(vc_register_font_face(std::string(vc::kEmbeddedInterFace).c_str(), bytes, sizeof bytes, hash.c_str()) == 1);
+    REQUIRE(vc_last_error() == nullptr);
 }
 
 TEST_CASE("opening a snapshot explains the first layer it refuses") {

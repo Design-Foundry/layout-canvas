@@ -506,6 +506,14 @@ export class VisualCore {
     return JSON.parse(this.module.takeOutbox());
   }
 
+  /**
+   * Registers font `bytes` as face `id` when their SHA-256 is `sha256` in lowercase hex. Returns null,
+   * or why it refused.
+   */
+  registerFontFace(id: string, bytes: Uint8Array, sha256: string): string | null {
+    return this.module.registerFontFace(id, bytes, sha256) || null;
+  }
+
   /** The whole document, to store as a server snapshot. */
   snapshot(): unknown {
     return JSON.parse(this.module.snapshot());
