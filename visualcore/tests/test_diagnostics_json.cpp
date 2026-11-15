@@ -115,8 +115,16 @@ TEST_CASE("snapshot version gates name the feature and the version", "[diagnosti
     REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"nodes[0]", "curved or filled paths need snapshot version 14 or later"});
 
     vc::clearDiagnostic();
+    REQUIRE_FALSE(vc::snapshotFromJson(snapshot(22, "[" + node("rect", R"(,"part":"label")") + "]")).has_value());
+    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"nodes[0]", "component part names need snapshot version 23 or later"});
+
+    vc::clearDiagnostic();
+    REQUIRE_FALSE(vc::snapshotFromJson(snapshot(23, "[" + node("rect", R"(,"part":"Label")") + "]")).has_value());
+    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"nodes[0].part", "part must be lowercase kebab-case starting with a letter, up to 64 characters"});
+
+    vc::clearDiagnostic();
     REQUIRE_FALSE(vc::snapshotFromJson(R"({"version":99,"nodes":[]})").has_value());
-    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"version", "version must be from 1 to 22"});
+    REQUIRE(vc::lastDiagnostic() == vc::Diagnostic{"version", "version must be from 1 to 23"});
 }
 
 TEST_CASE("snapshot top level shape is explained", "[diagnostics][json]") {

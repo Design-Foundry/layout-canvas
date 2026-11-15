@@ -139,6 +139,60 @@ describe('component inspector', () => {
     expect(element.textContent).not.toContain('Main component');
     expect(element.querySelector('button[aria-label="Detach instance"]')).toBeNull();
   });
+  describe('part name', () => {
+    const field = (fixture: { nativeElement: HTMLElement }) =>
+      fixture.nativeElement.querySelector('input[aria-label="Part"]') as HTMLInputElement | null;
+    const type = (input: HTMLInputElement, value: string) => {
+      input.value = value;
+      input.dispatchEvent(new Event('change'));
+    };
+    it('is offered for a stored layer inside a main component', async () => {
+      expect(field(await setup({ ...node('rect'), inComponent: true }))).not.toBeNull();
+    });
+    it('is not offered outside a component', async () => {
+      expect(field(await setup(node('rect')))).toBeNull();
+    });
+    it('is not offered for a copy inside an instance', async () => {
+      expect(
+        field(await setup({ ...node('rect'), inComponent: true, inInstance: true })),
+      ).toBeNull();
+    });
+    it('saves a kebab-case name and clears it with an empty value', async () => {
+      const fixture = await setup({ ...node('rect'), inComponent: true, part: 'label' });
+      const saved: [string, NodePatch][] = [];
+      fixture.componentRef.setInput('saveStyleBinding', (id: string, patch: NodePatch) => {
+        saved.push([id, patch]);
+        return true;
+      });
+      const input = field(fixture)!;
+      expect(input.value).toBe('label');
+      type(input, 'icon-2');
+      type(input, '');
+      expect(saved).toEqual([
+        ['instance', { part: 'icon-2' }],
+        ['instance', { part: '' }],
+      ]);
+    });
+    it('restores the saved value and says so when the name is invalid or refused', async () => {
+      const fixture = await setup({ ...node('rect'), inComponent: true, part: 'label' });
+      const saved: NodePatch[] = [];
+      fixture.componentRef.setInput('saveStyleBinding', (_: string, patch: NodePatch) => {
+        saved.push(patch);
+        return false;
+      });
+      const input = field(fixture)!;
+      type(input, 'Not Kebab');
+      await fixture.whenStable();
+      expect(saved).toEqual([]);
+      expect(input.value).toBe('label');
+      expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
+      type(input, 'taken');
+      await fixture.whenStable();
+      expect(saved).toEqual([{ part: 'taken' }]);
+      expect(input.value).toBe('label');
+      expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
+    });
+  });
   it('shows image fit and crop with opacity but hides unsupported paint and sizing controls', async () => {
     const fixture = await setup({
       ...node('image'),

@@ -34,6 +34,15 @@ test('whole-document round trip preserves every screen, relative state action, f
   assert.equal(bundle.snapshot.nodes[1].interactions[0].target, id(4));
 });
 
+test('whole-document round trip preserves component part names in snapshot 23', () => {
+  const snapshot = fixture();
+  snapshot.version = 23;
+  snapshot.nodes.push({ id: id(8), type: 'rect', parent: id(6), order: 'a0', part: 'icon' });
+  const bundle = readDocument(JSON.stringify(exportDocument(snapshot, 'Demo')));
+  assert.equal(bundle.snapshot.version, 23);
+  assert.deepEqual(bundle.snapshot, snapshot);
+});
+
 test('export captures a detached snapshot instead of retaining mutable authoring references', () => {
   const snapshot = fixture();
   const bundle = exportDocument(snapshot, 'Demo');
@@ -53,7 +62,7 @@ test('document envelope refuses components, unknown formats and extra metadata',
 
 test('native snapshot envelope refuses unsupported versions and missing structural lists', () => {
   for (const snapshot of [
-    { ...fixture(), version: 23 },
+    { ...fixture(), version: 24 },
     { ...fixture(), version: 0 },
     { ...fixture(), version: 21.5 },
     { ...fixture(), nodes: [null] },

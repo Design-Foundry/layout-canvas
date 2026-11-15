@@ -168,3 +168,17 @@
   background: var(--color--semantic--surface-base);
   border-radius: 4px;
 }
+
+.part-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dimension--primitive--spacing-1);
+  color: var(--color--semantic--text-subtle);
+}
+.part-field input {
+  color: var(--color--semantic--text-strong);
+  background: var(--color--semantic--surface-base);
+  border: 1px solid var(--color--semantic--border-subtle);
+  border-radius: var(--dimension--primitive--radius-sm);
+  padding: var(--dimension--primitive--spacing-1) var(--dimension--primitive--spacing-2);
+}

@@ -3,6 +3,7 @@
 #include <deque>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 #include "vc/math.hpp"
@@ -78,6 +79,15 @@ public:
     [[nodiscard]] bool isComponentUsed(const Id& component) const;
     [[nodiscard]] bool isSwapTarget(const Id& id) const;
     [[nodiscard]] bool isTextTarget(const Id& id) const;
+    /// The component `id` sits in (itself if it is one), or nil.
+    [[nodiscard]] Id enclosingComponent(const Id& id) const;
+    /// The layer of main component `component` whose part is `part`, if any.
+    [[nodiscard]] std::optional<Id> findPart(const Id& component, std::string_view part) const;
+    /// The layers whose parts would stop being valid if `roots` moved under `parent`, listed in
+    /// order: the part would sit outside any component, or another layer of the destination
+    /// component already has it. `rootType` replaces the type of a single root, for type changes.
+    [[nodiscard]] std::vector<Id> partsToClear(const std::vector<Id>& roots, const Id& parent,
+                                               std::optional<NodeType> rootType = std::nullopt) const;
 
     /// The node's box relative to its parent after auto layout, in `mode`. Cached until the next
     /// edit or a different mode.
@@ -131,8 +141,6 @@ private:
     [[nodiscard]] bool hasDependentOverrides(const Id& component) const;
     [[nodiscard]] bool swapValuesWouldStrandOverrides(const Node& instance, const ComponentValues& values) const;
 
-    /// The component `id` sits in (itself if it is one), or nil.
-    [[nodiscard]] Id enclosingComponent(const Id& id) const;
     /// True if `component`'s subtree contains an instance of `target`, directly or through other
     /// instances.
     [[nodiscard]] bool componentUses(const Id& component, const Id& target) const;
