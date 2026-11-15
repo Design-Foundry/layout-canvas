@@ -1,9 +1,10 @@
 import { TestBed } from '@angular/core/testing';
+import { INTER_STACK_ID } from '@canvas/bridge';
 import type { NodeProps, TextRun } from '@canvas/bridge';
 import { InlineTextEditor } from './inline-text-editor';
 const text: TextRun = {
   content: 'Texto original',
-  font: 'inter-regular-v1',
+  stack: INTER_STACK_ID,
   fontSize: 24,
   lineHeight: 1.4,
   letterSpacing: 1,
@@ -19,7 +20,7 @@ async function setup(bound = false, accept = true) {
     type: 'text',
     text,
     textBound: bound,
-  } as NodeProps);
+  } as unknown as NodeProps);
   fixture.componentRef.setInput('save', (_id: string, next: TextRun) => {
     saved.push(next);
     return accept;
@@ -36,16 +37,16 @@ async function setup(bound = false, accept = true) {
 describe('text editing on canvas', () => {
   it('uses the actual slant axis and weight, then restores upright editing on face change', async () => {
     const { fixture, field, edit, saved } = await setup();
-    for (const [font, weight, slant] of [
-      ['inter-oblique-v1', '400', "'slnt' -10"],
-      ['inter-bold-oblique-v1', '700', "'slnt' -10"],
-      ['inter-regular-v1', '400', "'slnt' 0"],
-    ]) {
+    for (const [axes, weight, slant] of [
+      [{ slnt: -10 }, '400', "'wght' 400, 'slnt' -10"],
+      [{ wght: 700, slnt: -10 }, '700', "'wght' 700, 'slnt' -10"],
+      [{}, '400', "'wght' 400, 'slnt' 0"],
+    ] as const) {
       fixture.componentRef.setInput('node', {
         id: 'label',
         type: 'text',
-        text: { ...text, font },
-      } as NodeProps);
+        text: { ...text, axes },
+      } as unknown as NodeProps);
       await fixture.whenStable();
       expect(field.style.fontWeight).toBe(weight);
       expect(field.style.fontVariationSettings).toBe(slant);
@@ -53,25 +54,26 @@ describe('text editing on canvas', () => {
     fixture.componentRef.setInput('node', {
       id: 'label',
       type: 'text',
-      text: { ...text, font: 'inter-bold-oblique-v1' },
-    } as NodeProps);
+      text: { ...text, axes: { wght: 700, slnt: -10 } },
+    } as unknown as NodeProps);
     await fixture.whenStable();
     edit('Inclinado');
     field.dispatchEvent(new Event('blur'));
-    expect(saved.at(-1)?.font).toBe('inter-bold-oblique-v1');
+    expect(saved.at(-1)?.axes).toEqual({ wght: 700, slnt: -10 });
   });
-  it('uses the selected bold weight while retaining the native face identifier on save', async () => {
+  it('uses the selected bold weight and feature settings and keeps them on save', async () => {
     const { fixture, field, edit, saved } = await setup();
     fixture.componentRef.setInput('node', {
       id: 'label',
       type: 'text',
-      text: { ...text, font: 'inter-bold-v1' },
-    } as NodeProps);
+      text: { ...text, axes: { wght: 700 }, features: { calt: false } },
+    } as unknown as NodeProps);
     await fixture.whenStable();
     expect(field.style.fontWeight).toBe('700');
+    expect(field.style.fontFeatureSettings).toBe("'calt' 0");
     edit('Texto negrita');
     field.dispatchEvent(new Event('blur'));
-    expect(saved.at(-1)?.font).toBe('inter-bold-v1');
+    expect(saved.at(-1)?.axes).toEqual({ wght: 700 });
   });
   it('commits normalized multiline content once and preserves typography', async () => {
     const { field, edit, saved, closed } = await setup();

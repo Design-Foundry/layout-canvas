@@ -11,6 +11,21 @@ using namespace vc;
 using Catch::Matchers::WithinAbs;
 
 namespace {
+void setLegacyFont(Id& stack, FontAxes& axes, std::string_view id) {
+    if (const auto legacy=legacyInterAxes(id)) {stack=kInterStackId; axes=*legacy;}
+    else {stack=Id{9,9}; axes={};}
+}
+void setFont(TextRun& text, std::string_view id) { setLegacyFont(text.stack,text.axes,id); }
+void setFont(TextStyle& style, std::string_view id) {
+    Id stack; FontAxes axes; setLegacyFont(stack,axes,id); style.stack=stack; style.axes=axes; style.features=FontFeatures{};
+}
+std::string fontId(const TextRun& text) {
+    if (text.stack != kInterStackId) return "other";
+    for (const auto id : {"inter-regular-v1","inter-bold-v1","inter-oblique-v1","inter-bold-oblique-v1"})
+        if (*legacyInterAxes(id) == text.axes) return id;
+    return "other";
+}
+
 struct PropertyFixture {
     Session session{IdGenerator{74}};
     Camera camera;
@@ -56,11 +71,11 @@ TEST_CASE("Declared text uses snapshot 6 and accepts long strings without weaken
     REQUIRE(f.editor.setComponentDefinition(f.main, d));
     NodePatch choice; choice.componentValues = ComponentValues{{"label", std::string(200, 'A')}, {"size", std::string("large")}};
     REQUIRE(f.editor.setProps(f.first, choice));
-    const auto saved = snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":6") != std::string::npos);
+    const auto saved = snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":25") != std::string::npos);
     auto ops = snapshotFromJson(saved); REQUIRE(ops.has_value()); Document loaded;
     for (const auto& op : *ops) REQUIRE(loaded.apply(op));
     REQUIRE(loaded.view(loaded.viewChildren(f.first).at(0))->text.content == std::string(200, 'A'));
-    auto old = saved; old.replace(old.find("\"version\":6"), 11, "\"version\":5"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    auto old = saved; old.replace(old.find("\"version\":25"), 12, "\"version\":5"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
     choice.componentValues = ComponentValues{{"size", std::string(200, 'A')}}; REQUIRE_FALSE(f.editor.setProps(f.first, choice));
     choice.componentValues = ComponentValues{{"label", true}}; REQUIRE_FALSE(f.editor.setProps(f.first, choice));
     choice.componentValues = ComponentValues{{"label", std::string("\xf0\x9f\x98\x80")}}; REQUIRE_FALSE(f.editor.setProps(f.first, choice));
@@ -150,11 +165,11 @@ TEST_CASE("Partial text variant fields compose across axes and require snapshot 
     REQUIRE(f.editor.setProps(f.first, choice));
     auto view = f.session.document().view(f.copy(f.first));
     REQUIRE(view->text.fontSize == 30); REQUIRE(view->text.lineHeight == 2); REQUIRE(view->text.letterSpacing == 3); REQUIRE(view->text.align == TextAlign::Center);
-    const auto saved = snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":7") != std::string::npos);
+    const auto saved = snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":25") != std::string::npos);
     auto ops = snapshotFromJson(saved); REQUIRE(ops.has_value()); Document loaded;
     for (const auto& op : *ops) REQUIRE(loaded.apply(op));
     REQUIRE(loaded.view(loaded.viewChildren(f.first).at(0))->text == view->text);
-    auto old = saved; old.replace(old.find("\"version\":7"), 11, "\"version\":6"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    auto old = saved; old.replace(old.find("\"version\":25"), 12, "\"version\":6"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
     NodePatch invalid; invalid.textStyle = TextStyle{}; REQUIRE_FALSE(f.editor.setProps(f.label, invalid));
     invalid.textStyle->fontSize = 0; REQUIRE_FALSE(f.editor.setProps(f.label, invalid));
     REQUIRE_FALSE(patchFromJson(R"({"textStyle":{}})").has_value());
@@ -250,11 +265,11 @@ TEST_CASE("Wrapping inherits independently, persists in snapshot 8 and protects 
     REQUIRE(f.editor.setProps(copy, local));
     REQUIRE(f.session.document().box(copy).h == 16 * 1.4);
     const auto saved = snapshotToJson(f.session.document());
-    REQUIRE(saved.find("\"version\":8") != std::string::npos);
+    REQUIRE(saved.find("\"version\":25") != std::string::npos);
     auto ops = snapshotFromJson(saved); REQUIRE(ops.has_value());
     Document loaded; for (const auto& op : *ops) REQUIRE(loaded.apply(op));
     REQUIRE_FALSE(loaded.view(copy)->textWrap);
-    auto old = saved; old.replace(old.find("\"version\":8"),11,"\"version\":7"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    auto old = saved; old.replace(old.find("\"version\":25"),12,"\"version\":7"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
     REQUIRE(f.editor.resetOverrides(copy)); REQUIRE(f.session.document().view(copy)->textWrap);
     REQUIRE(f.editor.undo()); REQUIRE_FALSE(f.session.document().view(copy)->textWrap);
     REQUIRE(f.editor.redo()); REQUIRE(f.session.document().view(copy)->textWrap);
@@ -311,14 +326,14 @@ TEST_CASE("A Fill-width Hug-height container in a row remeasures its wrapped tex
 
 TEST_CASE("Bundled bold uses a distinct trusted face with its own metrics, glyphs and kerning") {
     TextRun regular; regular.content="Continuar: José";
-    auto bold=regular; bold.font="inter-bold-v1";
+    auto bold=regular; setFont(bold, "inter-bold-v1");
     REQUIRE(validText(bold));
     REQUIRE(layoutText(bold).width > layoutText(regular).width);
     REQUIRE(layoutText(bold).glyphs.front().key.instance != layoutText(regular).glyphs.front().key.instance);
     bold.content="AV"; const auto pair=layoutText(bold).width;
     bold.content="A"; const auto a=layoutText(bold).width; bold.content="V";
     REQUIRE(pair < a + layoutText(bold).width);
-    bold.font="inter-fake-v1"; REQUIRE_FALSE(validText(bold));
+    setFont(bold, "inter-fake-v1"); REQUIRE_FALSE(Document{}.apply(CreateNode{[&]{Node n; n.id=Id{1,1}; n.type=NodeType::Text; n.order="a0"; n.text=bold; return n;}()}));
 }
 
 TEST_CASE("Shared typography updates native instances after variants and preserves per-field overrides") {
@@ -334,37 +349,37 @@ TEST_CASE("Shared typography updates native instances after variants and preserv
     const auto afterBinding=f.session.tokenRevision(); NodePatch geometry; geometry.x=15; REQUIRE(f.editor.setProps(f.label,geometry));
     REQUIRE(f.session.tokenRevision() == afterBinding);
     REQUIRE_FALSE(f.session.edit(DeleteToken{id}));
-    const auto copy=f.copy(f.first); NodePatch local; local.text=f.session.document().view(copy)->text; local.text->font="inter-bold-v1";
+    const auto copy=f.copy(f.first); NodePatch local; local.text=f.session.document().view(copy)->text; setFont(*local.text, "inter-bold-v1");
     REQUIRE(f.editor.setProps(copy,local));
     auto token=*f.session.document().findToken(id); auto& style=std::get<TextStyle>(*token.value);
-    style.fontSize=36; style.font="inter-oblique-v1"; style.letterSpacing=1;
+    style.fontSize=36; setFont(style, "inter-oblique-v1"); style.letterSpacing=1;
     REQUIRE(f.session.edit(ReplaceToken{token}));
-    REQUIRE(f.session.document().view(f.label)->text.font == "inter-oblique-v1");
-    REQUIRE(f.session.document().view(copy)->text.font == "inter-bold-v1");
+    REQUIRE(fontId(f.session.document().view(f.label)->text) == "inter-oblique-v1");
+    REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-bold-v1");
     REQUIRE(f.session.document().view(copy)->text.fontSize == 36);
     REQUIRE(f.session.document().view(copy)->text.letterSpacing == 2);
     REQUIRE(f.content(f.first) == "Continuar");
     REQUIRE(f.session.document().find(f.label)->text.fontSize == 16);
     REQUIRE(f.session.document().box(copy).h == 36*1.4);
-    const auto saved=snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":11") != std::string::npos);
+    const auto saved=snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":25") != std::string::npos);
     const auto ops=snapshotFromJson(saved); REQUIRE(ops.has_value()); Document loaded; for(const auto& op:*ops) REQUIRE(loaded.apply(op));
-    REQUIRE(loaded.view(copy)->text.font == "inter-bold-v1"); REQUIRE(loaded.view(copy)->text.fontSize == 36);
-    auto old=saved; old.replace(old.find("\"version\":11"),12,"\"version\":10"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    REQUIRE(fontId(loaded.view(copy)->text) == "inter-bold-v1"); REQUIRE(loaded.view(copy)->text.fontSize == 36);
+    auto old=saved; old.replace(old.find("\"version\":25"),12,"\"version\":10"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
     REQUIRE(f.editor.undo()); REQUIRE(f.session.document().view(copy)->text.fontSize == 16);
     REQUIRE(f.editor.redo()); REQUIRE(f.session.document().view(copy)->text.fontSize == 36);
-    REQUIRE(f.editor.resetOverrides(copy)); REQUIRE(f.session.document().view(copy)->text.font == "inter-oblique-v1");
+    REQUIRE(f.editor.resetOverrides(copy)); REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-oblique-v1");
 }
 
 TEST_CASE("Detaching shared typography preserves resolved metrics and undo restores the live binding") {
     PropertyFixture f; REQUIRE(f.editor.setComponentDefinition(f.main,f.definition()));
     const auto id=*f.editor.addToken(TokenType::Typography); auto token=*f.session.document().findToken(id);
-    std::get<TextStyle>(*token.value).fontSize=40; std::get<TextStyle>(*token.value).font="inter-bold-oblique-v1";
+    std::get<TextStyle>(*token.value).fontSize=40; setFont(std::get<TextStyle>(*token.value), "inter-bold-oblique-v1");
     REQUIRE(f.session.edit(ReplaceToken{token})); NodePatch bind; bind.typography=id; REQUIRE(f.editor.setProps(f.label,bind));
     NodePatch detach; detach.typography=Id{}; detach.textStyle=std::get<TextStyle>(*token.value);
     REQUIRE(f.editor.setProps(f.label,detach));
     REQUIRE(f.session.document().view(f.label)->typography.isNil());
     REQUIRE(f.session.document().view(f.label)->text.fontSize == 40);
-    REQUIRE(f.session.document().view(f.label)->text.font == "inter-bold-oblique-v1");
+    REQUIRE(fontId(f.session.document().view(f.label)->text) == "inter-bold-oblique-v1");
     REQUIRE(f.session.document().find(f.label)->text.content == "Texto base");
     REQUIRE(f.editor.undo()); REQUIRE(f.session.document().view(f.label)->typography == id);
     REQUIRE(f.session.document().find(f.label)->text.fontSize == 16);
@@ -377,9 +392,9 @@ TEST_CASE("Shared typography rejects invalid resources and binding changes in co
     const auto original=*f.session.document().findToken(id);
     for (int invalid=0;invalid<5;++invalid) {
         auto token=original; auto& style=std::get<TextStyle>(*token.value);
-        if (invalid==0) style.font.reset();
+        if (invalid==0) style.stack.reset();
         if (invalid==1) style.fontSize=std::numeric_limits<double>::infinity();
-        if (invalid==2) style.font="remote";
+        if (invalid==2) setFont(style, "remote");
         if (invalid==3) token.modifiers.push_back(MagnitudeModifier{});
         if (invalid==4) {token.value.reset(); token.source[kDefaultModeId]=id;}
         REQUIRE_FALSE(f.session.edit(ReplaceToken{token}));
@@ -413,14 +428,14 @@ TEST_CASE("Editing content of shared-style source text keeps its raw fallback an
 TEST_CASE("Detaching an instance bakes differing typography and keeps matching shared styles live") {
     PropertyFixture f; REQUIRE(f.editor.setComponentDefinition(f.main,f.definition()));
     const auto id=*f.editor.addToken(TokenType::Typography); NodePatch bind; bind.typography=id; REQUIRE(f.editor.setProps(f.label,bind));
-    NodePatch local; local.text=f.session.document().view(f.copy(f.first))->text; local.text->font="inter-bold-v1";
+    NodePatch local; local.text=f.session.document().view(f.copy(f.first))->text; setFont(*local.text, "inter-bold-v1");
     REQUIRE(f.editor.setProps(f.copy(f.first),local));
     const auto frame=f.editor.detachInstance(f.first); REQUIRE(frame.has_value());
     const auto child=f.session.document().viewChildren(*frame).front();
-    REQUIRE(f.session.document().view(child)->text.font == "inter-bold-v1");
+    REQUIRE(fontId(f.session.document().view(child)->text) == "inter-bold-v1");
     REQUIRE(f.session.document().view(child)->typography.isNil());
-    REQUIRE(f.editor.undo()); REQUIRE(f.session.document().view(f.copy(f.first))->text.font == "inter-bold-v1");
-    REQUIRE(f.editor.redo()); REQUIRE(f.session.document().view(child)->text.font == "inter-bold-v1");
+    REQUIRE(f.editor.undo()); REQUIRE(fontId(f.session.document().view(f.copy(f.first))->text) == "inter-bold-v1");
+    REQUIRE(f.editor.redo()); REQUIRE(fontId(f.session.document().view(child)->text) == "inter-bold-v1");
     const auto second=f.editor.detachInstance(f.second); REQUIRE(second.has_value());
     const auto matching=f.session.document().viewChildren(*second).front();
     REQUIRE(f.session.document().view(matching)->typography == id);
@@ -431,7 +446,7 @@ TEST_CASE("Detaching an instance bakes differing typography and keeps matching s
 
 TEST_CASE("Real oblique faces keep ink inside Hug bounds and account for overhang when wrapping") {
     for (const auto font : {"inter-oblique-v1", "inter-bold-oblique-v1"}) {
-        TextRun text; text.font=font; text.fontSize=48;
+        TextRun text; setFont(text, font); text.fontSize=48;
         for (const auto content : {"f", "j", "Tj", "AV", "Diseño: José", "  f  ", "f\nj"}) {
             text.content=content; REQUIRE(validText(text));
             const auto result=layoutText(text);
@@ -448,7 +463,7 @@ TEST_CASE("Real oblique faces keep ink inside Hug bounds and account for overhan
         const auto wrapped=layoutText(text,full.width-.01,true);
         REQUIRE(wrapped.height == full.height*2);
         REQUIRE(layoutText(text,0,true).glyphs.size() == 2);
-        auto upright=text; upright.font=font==std::string("inter-oblique-v1") ? "inter-regular-v1" : "inter-bold-v1";
+        auto upright=text; setFont(upright, font==std::string("inter-oblique-v1") ? "inter-regular-v1" : "inter-bold-v1");
         REQUIRE(full.glyphs.front().key.instance != layoutText(upright).glyphs.front().key.instance);
     }
 }
@@ -456,69 +471,69 @@ TEST_CASE("Real oblique faces keep ink inside Hug bounds and account for overhan
 TEST_CASE("Oblique bound overrides inherit metrics and require snapshot 10 even only in a variant rule") {
     PropertyFixture f; REQUIRE(f.editor.setComponentDefinition(f.main,f.definition()));
     const auto copy=f.copy(f.first);
-    NodePatch local; local.text=f.session.document().view(copy)->text; local.text->font="inter-bold-oblique-v1";
+    NodePatch local; local.text=f.session.document().view(copy)->text; setFont(*local.text, "inter-bold-oblique-v1");
     REQUIRE(f.editor.setProps(copy,local));
-    NodePatch source; source.text=f.session.document().view(f.label)->text; source.text->fontSize=36; source.text->font="inter-oblique-v1";
+    NodePatch source; source.text=f.session.document().view(f.label)->text; source.text->fontSize=36; setFont(*source.text, "inter-oblique-v1");
     REQUIRE(f.editor.setProps(f.label,source));
     REQUIRE(f.session.document().view(copy)->text.fontSize == 36);
-    REQUIRE(f.session.document().view(copy)->text.font == "inter-bold-oblique-v1");
+    REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-bold-oblique-v1");
     REQUIRE(f.content(f.first) == "Continuar");
-    const auto saved=snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":10") != std::string::npos);
+    const auto saved=snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":25") != std::string::npos);
     const auto ops=snapshotFromJson(saved); REQUIRE(ops.has_value()); Document loaded; for(const auto& op:*ops) REQUIRE(loaded.apply(op));
-    REQUIRE(loaded.view(copy)->text.font == "inter-bold-oblique-v1");
-    auto old=saved; old.replace(old.find("\"version\":10"),12,"\"version\":9"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
-    REQUIRE(f.editor.resetOverrides(copy)); REQUIRE(f.session.document().view(copy)->text.font == "inter-oblique-v1");
-    REQUIRE(f.editor.undo()); REQUIRE(f.session.document().view(copy)->text.font == "inter-bold-oblique-v1");
-    REQUIRE(f.editor.redo()); REQUIRE(f.session.document().view(copy)->text.font == "inter-oblique-v1");
+    REQUIRE(fontId(loaded.view(copy)->text) == "inter-bold-oblique-v1");
+    auto old=saved; old.replace(old.find("\"version\":25"),12,"\"version\":9"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    REQUIRE(f.editor.resetOverrides(copy)); REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-oblique-v1");
+    REQUIRE(f.editor.undo()); REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-bold-oblique-v1");
+    REQUIRE(f.editor.redo()); REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-oblique-v1");
     PropertyFixture variant; auto definition=variant.definition();
     definition.axes.push_back({"tone", {"normal", "emphasis"}, "normal"});
-    NodePatch emphasis; emphasis.textStyle=TextStyle{}; emphasis.textStyle->font="inter-oblique-v1";
+    NodePatch emphasis; emphasis.textStyle=TextStyle{}; setFont(*emphasis.textStyle, "inter-oblique-v1");
     definition.rules={{{{"tone","emphasis"}},variant.label,emphasis}};
     REQUIRE(variant.editor.setComponentDefinition(variant.main,definition));
     const auto dormant=snapshotToJson(variant.session.document());
-    REQUIRE(dormant.find("\"version\":10") != std::string::npos);
+    REQUIRE(dormant.find("\"version\":25") != std::string::npos);
     REQUIRE(snapshotFromJson(dormant).has_value());
-    old=dormant; old.replace(old.find("\"version\":10"),12,"\"version\":9"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    old=dormant; old.replace(old.find("\"version\":25"),12,"\"version\":9"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
 }
 
 TEST_CASE("Bound font choices remain independent from content and inherited metrics in snapshot 9") {
     PropertyFixture f; REQUIRE(f.editor.setComponentDefinition(f.main,f.definition()));
     const auto copy=f.copy(f.first);
-    NodePatch local; local.text=f.session.document().view(copy)->text; local.text->font="inter-bold-v1";
+    NodePatch local; local.text=f.session.document().view(copy)->text; setFont(*local.text, "inter-bold-v1");
     REQUIRE(f.editor.setProps(copy,local));
     const auto& patch=f.session.document().find(f.first)->overrides.at(0).patch;
-    REQUIRE(patch.textStyle->font == "inter-bold-v1"); REQUIRE_FALSE(patch.textStyle->fontSize.has_value()); REQUIRE_FALSE(patch.text.has_value());
+    REQUIRE(patch.textStyle->axes == FontAxes{{"wght",700}}); REQUIRE_FALSE(patch.textStyle->fontSize.has_value()); REQUIRE_FALSE(patch.text.has_value());
     NodePatch source; source.text=f.session.document().view(f.label)->text; source.text->fontSize=32;
     REQUIRE(f.editor.setProps(f.label,source));
     REQUIRE(f.session.document().view(copy)->text.fontSize == 32);
-    REQUIRE(f.session.document().view(copy)->text.font == "inter-bold-v1");
-    local.text=f.session.document().view(copy)->text; local.text->font="inter-regular-v1";
+    REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-bold-v1");
+    local.text=f.session.document().view(copy)->text; setFont(*local.text, "inter-regular-v1");
     REQUIRE(f.editor.setProps(copy,local));
-    source.text=f.session.document().view(f.label)->text; source.text->font="inter-bold-v1";
+    source.text=f.session.document().view(f.label)->text; setFont(*source.text, "inter-bold-v1");
     REQUIRE(f.editor.setProps(f.label,source));
-    REQUIRE(f.session.document().view(copy)->text.font == "inter-regular-v1");
-    REQUIRE(f.session.document().view(f.copy(f.second))->text.font == "inter-bold-v1");
+    REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-regular-v1");
+    REQUIRE(fontId(f.session.document().view(f.copy(f.second))->text) == "inter-bold-v1");
     REQUIRE(f.content(f.first) == "Continuar");
-    const auto saved=snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":9") != std::string::npos);
+    const auto saved=snapshotToJson(f.session.document()); REQUIRE(saved.find("\"version\":25") != std::string::npos);
     const auto ops=snapshotFromJson(saved); REQUIRE(ops.has_value()); Document loaded; for(const auto& op:*ops) REQUIRE(loaded.apply(op));
-    REQUIRE(loaded.view(copy)->text.font == "inter-regular-v1");
-    auto old=saved; old.replace(old.find("\"version\":9"),11,"\"version\":8"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
-    REQUIRE(f.editor.resetOverrides(copy)); REQUIRE(f.session.document().view(copy)->text.font == "inter-bold-v1");
-    REQUIRE(f.editor.undo()); REQUIRE(f.session.document().view(copy)->text.font == "inter-regular-v1");
-    REQUIRE(f.editor.redo()); REQUIRE(f.session.document().view(copy)->text.font == "inter-bold-v1");
+    REQUIRE(fontId(loaded.view(copy)->text) == "inter-regular-v1");
+    auto old=saved; old.replace(old.find("\"version\":25"),12,"\"version\":8"); REQUIRE_FALSE(snapshotFromJson(old).has_value());
+    REQUIRE(f.editor.resetOverrides(copy)); REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-bold-v1");
+    REQUIRE(f.editor.undo()); REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-regular-v1");
+    REQUIRE(f.editor.redo()); REQUIRE(fontId(f.session.document().view(copy)->text) == "inter-bold-v1");
     REQUIRE_FALSE(patchFromJson(R"({"textStyle":{"font":"remote"}})").has_value());
 }
 
 TEST_CASE("Changing the real font face reflows wrapped text and restores the prior layout on undo") {
     Session session{IdGenerator{89}}; Camera camera; Editor editor{session,camera};
     Node text; text.id=session.newId(); text.type=NodeType::Text; text.order="a0"; text.text.content="Continuar con diseño";
-    auto bold=text.text; bold.font="inter-bold-v1";
+    auto bold=text.text; setFont(bold, "inter-bold-v1");
     text.w=(layoutText(text.text).width+layoutText(bold).width)/2; text.heightSizing=Sizing::Hug; text.textWrap=true;
     REQUIRE(session.edit(CreateNode{text})); const auto before=session.document().box(text.id).h;
     NodePatch patch; patch.text=bold; REQUIRE(editor.setProps(text.id,patch));
     REQUIRE(session.document().box(text.id).h > before);
     REQUIRE(editor.undo()); REQUIRE(session.document().box(text.id).h == before);
-    REQUIRE(editor.redo()); REQUIRE(session.document().view(text.id)->text.font == "inter-bold-v1");
+    REQUIRE(editor.redo()); REQUIRE(fontId(session.document().view(text.id)->text) == "inter-bold-v1");
 }
 
 TEST_CASE("Bundled font measures accented Latin, kerning, alignment and explicit lines") {
@@ -553,7 +568,8 @@ TEST_CASE("Text refuses unsupported scripts, malformed UTF-8 and untrusted fonts
         text.content = value;
         REQUIRE_FALSE(validText(text));
     }
-    text = {}; text.font = "remote-font"; REQUIRE_FALSE(validText(text));
+    text = {}; setFont(text, "remote-font");
+    REQUIRE_FALSE(Document{}.apply(CreateNode{[&]{Node n; n.id=Id{1,1}; n.type=NodeType::Text; n.order="a0"; n.text=text; return n;}()}));
     text = {}; text.fontSize = std::numeric_limits<double>::infinity(); REQUIRE_FALSE(validText(text));
     text = {}; text.lineHeight = .5; REQUIRE_FALSE(validText(text));
 }
@@ -576,13 +592,13 @@ TEST_CASE("Text is editable native anatomy, inherits and overrides with independ
     REQUIRE(editor.undo()); REQUIRE(session.document().view(copy)->text.content == "Continuar");
     REQUIRE(editor.redo());
     auto snapshot = snapshotToJson(session.document());
-    REQUIRE(snapshot.find("\"version\":5") != std::string::npos);
+    REQUIRE(snapshot.find("\"version\":25") != std::string::npos);
     auto ops = snapshotFromJson(snapshot); REQUIRE(ops.has_value());
     Document restored; for (const auto& op : *ops) REQUIRE(restored.apply(op));
     REQUIRE(restored.view(restored.viewChildren(*instance).at(0))->text.content == patch.text->content);
-    auto downgrade = snapshot; downgrade.replace(downgrade.find("\"version\":5"), 11, "\"version\":4");
+    auto downgrade = snapshot; downgrade.replace(downgrade.find("\"version\":25"), 12, "\"version\":4");
     REQUIRE_FALSE(snapshotFromJson(downgrade).has_value());
-    patch.text->font = "external"; REQUIRE_FALSE(editor.setProps(copy, patch));
+    setFont(*patch.text, "external"); REQUIRE_FALSE(editor.setProps(copy, patch));
     REQUIRE(editor.resetOverrides(copy));
     REQUIRE(session.document().view(copy)->text.content == "Continuar");
 }

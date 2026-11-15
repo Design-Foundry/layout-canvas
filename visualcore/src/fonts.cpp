@@ -162,7 +162,7 @@ hb_draw_funcs_t* outlineFuncs() {
 
 namespace fonts {
 
-std::uint32_t tag(const char (&name)[5]) { return HB_TAG(name[0], name[1], name[2], name[3]); }
+std::uint32_t tag(std::string_view name) { return name.size() == 4 ? HB_TAG(name[0], name[1], name[2], name[3]) : 0; }
 
 int instanceIndex(std::string_view faceId, std::span<const Variation> variations) {
     std::vector<Variation> sorted(variations.begin(), variations.end());
@@ -206,9 +206,15 @@ Metrics metrics(std::uint32_t instance) {
     return s.instances.at(instance)->metrics;
 }
 
-std::vector<ShapedGlyph> shape(std::uint32_t instanceIndex, std::string_view text) {
+std::vector<ShapedGlyph> shape(std::uint32_t instanceIndex, std::string_view text, const FontFeatures& features) {
     auto& s = state();
     std::string key = std::to_string(instanceIndex);
+    std::vector<hb_feature_t> settings;
+    for (const auto& [tag, value] : features) {
+        const unsigned number = std::holds_alternative<bool>(value) ? unsigned(std::get<bool>(value)) : unsigned(std::get<int>(value));
+        settings.push_back({fonts::tag(tag), number, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END});
+        key += '|' + tag + '=' + std::to_string(number);
+    }
     key += '\x1f';
     key += text;
     hb_font_t* font = nullptr;
@@ -220,7 +226,7 @@ std::vector<ShapedGlyph> shape(std::uint32_t instanceIndex, std::string_view tex
     hb_buffer_t* buffer = hb_buffer_create();
     hb_buffer_add_utf8(buffer, text.data(), int(text.size()), 0, int(text.size()));
     hb_buffer_guess_segment_properties(buffer);
-    hb_shape(font, buffer, nullptr, 0);
+    hb_shape(font, buffer, settings.data(), unsigned(settings.size()));
     unsigned count = 0;
     const auto* info = hb_buffer_get_glyph_infos(buffer, &count);
     const auto* positions = hb_buffer_get_glyph_positions(buffer, &count);
@@ -237,6 +243,40 @@ std::vector<ShapedGlyph> shape(std::uint32_t instanceIndex, std::string_view tex
     hb_buffer_destroy(buffer);
     if (s.shaped.size() >= kShapeCacheLimit) s.shaped.clear();
     s.shaped.emplace(std::move(key), out);
+    return out;
+}
+
+std::optional<Capabilities> capabilities(std::string_view faceId) {
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    const auto found = s.faces.find(faceId);
+    if (found == s.faces.end()) return std::nullopt;
+    hb_face_t* face = found->second->face;
+    Capabilities out;
+    unsigned count = hb_ot_var_get_axis_count(face);
+    std::vector<hb_ot_var_axis_info_t> axes(count);
+    hb_ot_var_get_axis_infos(face, 0, &count, axes.data());
+    for (unsigned i = 0; i < count; ++i) {
+        char tag[5] = {};
+        hb_tag_to_string(axes[i].tag, tag);
+        out.axes.push_back({tag, axes[i].min_value, axes[i].max_value, axes[i].default_value});
+    }
+    for (hb_tag_t table : {HB_OT_TAG_GSUB, HB_OT_TAG_GPOS}) {
+        for (unsigned start = 0;;) {
+            hb_tag_t tags[64];
+            unsigned n = 64;
+            const unsigned total = hb_ot_layout_table_get_feature_tags(face, table, start, &n, tags);
+            for (unsigned i = 0; i < n; ++i) {
+                char tag[5] = {};
+                hb_tag_to_string(tags[i], tag);
+                out.features.emplace_back(tag);
+            }
+            start += n;
+            if (n == 0 || start >= total) break;
+        }
+    }
+    std::sort(out.features.begin(), out.features.end());
+    out.features.erase(std::unique(out.features.begin(), out.features.end()), out.features.end());
     return out;
 }
 

@@ -56,6 +56,8 @@ namespace vc {
 [[nodiscard]] std::string tokensToJson(const Document& document, const Id& mode);
 /// Modes in order, the default one flagged `isDefault`.
 [[nodiscard]] std::string modesToJson(const Document& document);
+/// `{ fonts, fontStacks }` in order, in the snapshot's shape.
+[[nodiscard]] std::string fontsToJson(const Document& document);
 /// Parse a token or mode definition in the same shape the ops use.
 [[nodiscard]] std::optional<Token> tokenFromJson(std::string_view data);
 [[nodiscard]] std::optional<Mode> modeFromJson(std::string_view data);

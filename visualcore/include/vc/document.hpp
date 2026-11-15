@@ -9,6 +9,7 @@
 #include "vc/math.hpp"
 #include "vc/node.hpp"
 #include "vc/op.hpp"
+#include "vc/text.hpp"
 #include "vc/tokens.hpp"
 
 namespace vc {
@@ -40,7 +41,7 @@ public:
     [[nodiscard]] std::shared_ptr<Document> detachedCopy() const {
         auto copy=std::make_shared<Document>();
         copy->nodes_=nodes_;copy->children_=children_;
-        copy->tokens_=tokens_;copy->modes_=modes_;
+        copy->tokens_=tokens_;copy->modes_=modes_;copy->fonts_=fonts_;copy->fontStacks_=fontStacks_;
         copy->playbackValues_=playbackValues_;
         return copy;
     }
@@ -102,6 +103,17 @@ public:
     [[nodiscard]] const Mode* findMode(const Id& id) const;
     /// All modes in order. The default mode is always present.
     [[nodiscard]] std::vector<const Mode*> modes() const;
+    [[nodiscard]] const Font* findFont(const Id& id) const;
+    /// All fonts in order. The embedded Inter is always present.
+    [[nodiscard]] std::vector<const Font*> fonts() const;
+    [[nodiscard]] const FontStack* findFontStack(const Id& id) const;
+    [[nodiscard]] std::vector<const FontStack*> fontStacks() const;
+    /// The first font of `stack`, which text validates against, or null for an unknown stack.
+    [[nodiscard]] const Font* primaryFont(const Id& stack) const;
+    /// Why the document refuses a text that uses `stack` with `axes` and `features`, or nothing.
+    [[nodiscard]] std::optional<std::string> fontUseProblem(const Id& stack, const FontAxes& axes, const FontFeatures& features) const;
+    /// `text` laid out with the first font of its stack.
+    [[nodiscard]] TextLayout layoutText(const TextRun& text, double availableWidth = -1.0, bool wrap = false) const;
     /// True if a node or another token refers to `token`.
     [[nodiscard]] bool isTokenReferenced(const Id& token) const;
 
@@ -133,6 +145,16 @@ private:
     std::optional<OpBody> replaceMode(const ReplaceMode& op);
     std::optional<OpBody> setOverride(const SetOverride& op);
     std::optional<OpBody> setComponentDefinition(const SetComponentDefinition& op);
+    std::optional<OpBody> createFont(const CreateFont& op);
+    std::optional<OpBody> deleteFont(const DeleteFont& op);
+    std::optional<OpBody> replaceFont(const ReplaceFont& op);
+    std::optional<OpBody> createFontStack(const CreateFontStack& op);
+    std::optional<OpBody> deleteFontStack(const DeleteFontStack& op);
+    std::optional<OpBody> replaceFontStack(const ReplaceFontStack& op);
+    [[nodiscard]] bool isValidFontStack(const FontStack& stack) const;
+    /// Calls `fn(stack, axes, features)` for every text, style and typography token that names a stack.
+    template <typename Fn>
+    void forEachFontUse(Fn&& fn) const;
     [[nodiscard]] bool validDefinition(const Id& component, const ComponentDefinition& definition) const;
     [[nodiscard]] bool validComponentValues(const ComponentDefinition& definition, const ComponentValues& values) const;
     [[nodiscard]] bool definitionTargets(const Id& id) const;
@@ -183,6 +205,8 @@ private:
     std::unordered_map<Id, std::vector<Id>> children_;
     std::unordered_map<Id, Token> tokens_;
     std::unordered_map<Id, Mode> modes_;
+    std::unordered_map<Id, Font> fonts_;
+    std::unordered_map<Id, FontStack> fontStacks_;
     struct PlaybackValues { Id component; ComponentValues values; };
     std::unordered_map<Id, PlaybackValues> playbackValues_;
 

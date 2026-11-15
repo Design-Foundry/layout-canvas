@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { TokenInspector } from './token-inspector';
+import { INTER_STACK_ID } from '@canvas/bridge';
 import type { TokenRow, TokenDef } from '@canvas/bridge';
 
 describe('shared typography token authoring', () => {
@@ -15,7 +16,7 @@ describe('shared typography token authoring', () => {
       order: 'a0',
       referenced: true,
       value: {
-        font: 'inter-regular-v1',
+        stack: INTER_STACK_ID,
         fontSize: 20,
         lineHeight: 1.4,
         letterSpacing: 0,
@@ -38,7 +39,7 @@ describe('shared typography token authoring', () => {
     const select = fixture.nativeElement.querySelector(
       '[aria-label="Font style"]',
     ) as HTMLSelectElement;
-    select.value = 'inter-bold-oblique-v1';
+    select.value = 'bold-oblique';
     select.dispatchEvent(new Event('change'));
     await fixture.whenStable();
     expect(saved.at(-1)).toEqual({
@@ -48,7 +49,8 @@ describe('shared typography token authoring', () => {
       displayName: 'Body',
       order: 'a0',
       value: {
-        font: 'inter-bold-oblique-v1',
+        stack: INTER_STACK_ID,
+        axes: { wght: 700, slnt: -10 },
         fontSize: 20,
         lineHeight: 1.4,
         letterSpacing: 0,
@@ -57,10 +59,10 @@ describe('shared typography token authoring', () => {
     });
     fixture.componentRef.setInput('replace', () => false);
     await fixture.whenStable();
-    select.value = 'inter-regular-v1';
+    select.value = 'regular';
     select.dispatchEvent(new Event('change'));
     await fixture.whenStable();
-    expect(select.value).toBe('inter-bold-oblique-v1');
+    expect(select.value).toBe('bold-oblique');
     expect(saved).toHaveLength(1);
   });
 });

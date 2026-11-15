@@ -32,7 +32,10 @@ bool changesStructure(const OpBody& op) {
 bool changesTokens(const OpBody& op) {
     return std::holds_alternative<CreateToken>(op) || std::holds_alternative<DeleteToken>(op) ||
            std::holds_alternative<ReplaceToken>(op) || std::holds_alternative<CreateMode>(op) ||
-           std::holds_alternative<DeleteMode>(op) || std::holds_alternative<ReplaceMode>(op);
+           std::holds_alternative<DeleteMode>(op) || std::holds_alternative<ReplaceMode>(op) ||
+           std::holds_alternative<CreateFont>(op) || std::holds_alternative<DeleteFont>(op) ||
+           std::holds_alternative<ReplaceFont>(op) || std::holds_alternative<CreateFontStack>(op) ||
+           std::holds_alternative<DeleteFontStack>(op) || std::holds_alternative<ReplaceFontStack>(op);
 }
 
 // Token rows also expose whether a resource is referenced by scene data. Refresh

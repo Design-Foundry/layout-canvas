@@ -1,15 +1,22 @@
 import { Component, computed, effect, input, signal } from '@angular/core';
 import { FormsModule, type NgModel } from '@angular/forms';
+import { INTER_STACK_ID } from '@canvas/bridge';
 import type { NodeProps, TextRun, NodePatch, TokenRow } from '@canvas/bridge';
 import { NumberField } from './number-field';
 
 const INITIAL: TextRun = {
   content: '',
-  font: 'inter-regular-v1',
+  stack: INTER_STACK_ID,
   fontSize: 16,
   lineHeight: 1.4,
   letterSpacing: 0,
   align: 'left',
+};
+const FONT_STYLES: Record<string, Record<string, number>> = {
+  regular: {},
+  bold: { wght: 700 },
+  oblique: { slnt: -10 },
+  'bold-oblique': { wght: 700, slnt: -10 },
 };
 const ALLOWED =
   /^[\x20-\x7e\xa0-\xff\n\u2013\u2014\u2018\u2019\u201a\u201c\u201d\u201e\u2022\u2026\u2039\u203a\u20ac\u2122]*$/;
@@ -65,14 +72,14 @@ const ALLOWED =
         >Font style<select
           aria-label="Font style"
           [disabled]="!!node().typography && !node().inInstance"
-          [ngModel]="value().font"
+          [ngModel]="fontStyle()"
           #fontControl="ngModel"
           (ngModelChange)="fontChanged($event, fontControl)"
         >
-          <option value="inter-regular-v1">Inter Regular</option>
-          <option value="inter-bold-v1">Inter Bold</option>
-          <option value="inter-oblique-v1">Inter Oblique</option>
-          <option value="inter-bold-oblique-v1">Inter Bold Oblique</option>
+          <option value="regular">Inter Regular</option>
+          <option value="bold">Inter Bold</option>
+          <option value="oblique">Inter Oblique</option>
+          <option value="bold-oblique">Inter Bold Oblique</option>
         </select></label
       >
       <p class="typography-caption">Inter · included locally</p>
@@ -279,9 +286,21 @@ export class TextPanel {
     if (value !== null) this.change({ [key]: value });
   }
 
-  protected fontChanged(font: TextRun['font'], control: NgModel): void {
-    const previous = this.value().font;
-    if (!this.change({ font }))
+  protected fontStyle(): string {
+    const { stack, axes = {}, features } = this.value();
+    if (stack !== INTER_STACK_ID || (features && Object.keys(features).length)) return '';
+    const key = JSON.stringify(Object.entries(axes).sort());
+    return (
+      Object.entries(FONT_STYLES).find(
+        ([, axes]) => JSON.stringify(Object.entries(axes).sort()) === key,
+      )?.[0] ?? ''
+    );
+  }
+
+  protected fontChanged(style: string, control: NgModel): void {
+    const previous = this.fontStyle();
+    const axes = FONT_STYLES[style];
+    if (!axes || !this.change({ stack: INTER_STACK_ID, axes, features: undefined }))
       control.control.setValue(previous, { emitEvent: false, emitViewToModelChange: false });
   }
 

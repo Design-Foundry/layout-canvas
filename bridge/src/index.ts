@@ -25,10 +25,54 @@ export type Tool =
 export type NodeType =
   'frame' | 'rect' | 'ellipse' | 'component' | 'instance' | 'text' | 'line' | 'path' | 'image';
 
+/** The stack every document has: the bundled Inter variable font. */
+export const INTER_STACK_ID = '00000000-0000-0000-0000-000000000101';
+/** The bundled Inter font, the only font of {@link INTER_STACK_ID}. */
+export const INTER_FONT_ID = '00000000-0000-0000-0000-000000000100';
+
+/** Axis tag, such as `wght` or `slnt`, to value. */
+export type FontAxes = Readonly<Record<string, number>>;
+/** OpenType feature tag to on, off, or an alternate's index. */
+export type FontFeatures = Readonly<Record<string, boolean | number>>;
+
+export interface AxisDomain {
+  readonly min?: number;
+  readonly max?: number;
+  /** When present, the only values the axis accepts. */
+  readonly values?: readonly number[];
+}
+
+export interface Font {
+  readonly id: string;
+  readonly identifier: string;
+  readonly displayName?: string;
+  readonly provider: string;
+  readonly key: string;
+  readonly sha256?: string;
+  readonly capabilities: {
+    readonly axes: readonly { readonly tag: string; readonly domain: AxisDomain; readonly default?: number }[];
+    readonly features: readonly string[];
+  };
+  readonly order: string;
+}
+
+export type GenericFallback = 'sans-serif' | 'serif' | 'monospace' | 'system-ui' | 'none';
+
+export interface FontStack {
+  readonly id: string;
+  readonly identifier: string;
+  readonly displayName?: string;
+  /** Font ids in order. Text validates against the first. */
+  readonly entries: readonly string[];
+  readonly genericFallback: GenericFallback;
+  readonly order: string;
+}
+
 export interface TextRun {
   readonly content: string;
-  readonly font:
-    'inter-regular-v1' | 'inter-bold-v1' | 'inter-oblique-v1' | 'inter-bold-oblique-v1';
+  readonly stack: string;
+  readonly axes?: FontAxes;
+  readonly features?: FontFeatures;
   readonly fontSize: number;
   readonly lineHeight: number;
   readonly letterSpacing: number;
@@ -665,6 +709,11 @@ export class VisualCore {
 
   modes(): ModeRow[] {
     return JSON.parse(this.module.modes());
+  }
+
+  /** The document's fonts and font stacks in order, the bundled Inter included. */
+  fonts(): { fonts: Font[]; fontStacks: FontStack[] } {
+    return JSON.parse(this.module.fonts());
   }
 
   /** The mode the canvas and the tokens panel resolve in. Switching it is not an edit. */

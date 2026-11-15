@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { INTER_STACK_ID } from '@canvas/bridge';
 import type { NodeProps, NodePatch } from '@canvas/bridge';
 import { InspectorPanel } from './inspector-panel';
 
@@ -51,7 +52,7 @@ describe('component inspector', () => {
       layout: { ...node('text').layout, type: 'none' },
       text: {
         content: 'Texto',
-        font: 'inter-regular-v1',
+        stack: INTER_STACK_ID,
         fontSize: 24,
         lineHeight: 1.4,
         letterSpacing: 0,

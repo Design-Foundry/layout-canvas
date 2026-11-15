@@ -95,7 +95,7 @@ TEST_CASE("token refusals explain the rule that was broken") {
         token.type = TokenType::Typography;
         token.identifier = "body";
         vc::TextStyle style;
-        style.font = "inter-regular-v1";
+        style.stack = vc::kInterStackId;
         style.fontSize = 16;
         style.lineHeight = 1.5;
         style.letterSpacing = -1;

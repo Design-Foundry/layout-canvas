@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   ElementRef,
   afterNextRender,
   input,
@@ -23,10 +24,9 @@ import type { NodeProps, TextRun } from '@canvas/bridge';
           wrap="off"
           rows="3"
           [readOnly]="node().textBound"
-          [style.font-weight]="node().text?.font?.includes('bold') ? 700 : 400"
-          [style.font-variation-settings]="
-            node().text?.font?.includes('oblique') ? slanted : upright
-          "
+          [style.font-weight]="weight()"
+          [style.font-variation-settings]="variations()"
+          [style.font-feature-settings]="features()"
           [ngModel]="draft()"
           (ngModelChange)="draft.set($event)"
           (blur)="commit()"
@@ -73,12 +73,6 @@ import type { NodeProps, TextRun } from '@canvas/bridge';
       font:
         20px/1.4 CanvasInter,
         sans-serif;
-      font-variation-settings: 'slnt' 0;
-      font-feature-settings:
-        'calt' 0,
-        'ccmp' 0,
-        'locl' 0,
-        'mark' 0;
       color: inherit;
       background: transparent;
       width: 100%;
@@ -106,9 +100,17 @@ import type { NodeProps, TextRun } from '@canvas/bridge';
   `,
 })
 export class InlineTextEditor {
-  readonly slanted = "'slnt' -10";
-  readonly upright = "'slnt' 0";
   readonly node = input.required<NodeProps>();
+  readonly weight = computed(() => this.node().text?.axes?.['wght'] ?? 400);
+  readonly variations = computed(
+    () => `'wght' ${this.weight()}, 'slnt' ${this.node().text?.axes?.['slnt'] ?? 0}`,
+  );
+  readonly features = computed(
+    () =>
+      Object.entries(this.node().text?.features ?? {})
+        .map(([tag, value]) => `'${tag}' ${value === true ? 1 : value === false ? 0 : value}`)
+        .join(', ') || null,
+  );
   readonly save = input.required<(id: string, text: TextRun) => boolean>();
   readonly closed = output<void>();
   protected readonly draft = signal('');

@@ -217,7 +217,7 @@ private:
                 identify(ownStart,id);continue;
             }
             if (node.type == NodeType::Text) {
-                const auto text = layoutText(node.text, box.w, node.textWrap);
+                const auto text = document_.layoutText(node.text, box.w, node.textWrap);
                 const auto fill = document_.resolveColor(node.fill, mode_);
                 Color color = fill ? withAlpha(*fill, alpha) : kUnresolvedColor;
                 if (!fill) color.a = static_cast<float>(alpha);

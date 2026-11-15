@@ -301,6 +301,10 @@ std::string modes() {
     return rt ? vc::modesToJson(rt->session.document()) : "[]";
 }
 
+std::string fonts() {
+    return rt ? vc::fontsToJson(rt->session.document()) : vc::fontsToJson(vc::Document{});
+}
+
 std::string activeMode() {
     return rt ? rt->editor.activeMode().toString() : vc::kDefaultModeId.toString();
 }
@@ -504,6 +508,7 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("tokenRevision", &tokenRevision);
     function("tokens", &tokens);
     function("modes", &modes);
+    function("fonts", &fonts);
     function("activeMode", &activeMode);
     function("setActiveMode", &setActiveMode);
     function("setCanvasBackground", &setCanvasBackground);

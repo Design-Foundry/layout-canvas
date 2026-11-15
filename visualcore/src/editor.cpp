@@ -524,7 +524,7 @@ std::optional<Id> Editor::addToken(TokenType type) {
     }
     switch (type) {
     case TokenType::Typography:
-        token.value = TextStyle{16.0, 1.4, 0.0, TextAlign::Left, std::string("inter-regular-v1")};
+        token.value = TextStyle{16.0, 1.4, 0.0, TextAlign::Left, kInterStackId, FontAxes{}, FontFeatures{}};
         break;
     case TokenType::Color:
         token.value = Oklch{0.6, 0.0, 0.0};
@@ -935,7 +935,11 @@ std::vector<OpBody> Editor::propsOps(const Id& id, const NodePatch& patch) const
     const Document& document = session_.document();
     const auto textChanges = [](const TextRun& before, const TextRun& after) {
         TextStyle out;
-        if (before.font != after.font) out.font = after.font;
+        if (before.stack != after.stack || before.axes != after.axes || before.features != after.features) {
+            out.stack = after.stack;
+            out.axes = after.axes;
+            out.features = after.features;
+        }
         if (before.fontSize != after.fontSize) out.fontSize = after.fontSize;
         if (before.lineHeight != after.lineHeight) out.lineHeight = after.lineHeight;
         if (before.letterSpacing != after.letterSpacing) out.letterSpacing = after.letterSpacing;

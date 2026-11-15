@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "../src/sha256.hpp"
+#include "vc/font.hpp"
 #include "vc/text.hpp"
 
 namespace {
@@ -23,7 +24,8 @@ std::vector<std::uint8_t> interBytes() {
 
 vc::TextRun run(const char* font, const char* content) {
     vc::TextRun text;
-    text.font = font;
+    text.stack = vc::kInterStackId;
+    text.axes = *vc::legacyInterAxes(font);
     text.content = content;
     return text;
 }

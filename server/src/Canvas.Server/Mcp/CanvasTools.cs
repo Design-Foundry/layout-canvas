@@ -32,7 +32,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         store.CreateAsync(name, ct);
 
     [McpServerTool(Name = "import_document")]
-    [Description("Creates a document from a whole snapshot ({ version, modes, tokens, nodes }, at most 2 MB). Nothing is created if any part is invalid; the error names where and why.")]
+    [Description("Creates a document from a whole snapshot ({ version, modes, tokens, fonts, fontStacks, nodes }, at most 2 MB). Nothing is created if any part is invalid; the error names where and why.")]
     public async Task<DocumentSummary> ImportDocument(
         [Description("Document name, up to 200 characters.")] string name,
         [Description("The snapshot, in the shape the format guide describes.")] JsonElement snapshot,
