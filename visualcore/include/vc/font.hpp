@@ -69,6 +69,9 @@ inline constexpr Id kInterFontId{0, 0x100};
 inline constexpr Id kInterStackId{0, 0x101};
 [[nodiscard]] const Font& embeddedInterFont();
 [[nodiscard]] const FontStack& embeddedInterStack();
+/// The bundled face that renders the end of a stack: Inter for sans-serif and system-ui, Source
+/// Serif 4 for serif, JetBrains Mono for monospace. Null for none.
+[[nodiscard]] const Font* genericFont(GenericFallback fallback);
 
 /// Four printable ASCII characters, as OpenType tags are.
 [[nodiscard]] bool isValidFontTag(std::string_view tag);

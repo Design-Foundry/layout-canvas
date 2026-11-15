@@ -667,8 +667,12 @@ const Font* Document::primaryFont(const Id& stack) const {
 }
 
 TextLayout Document::layoutText(const TextRun& text, double availableWidth, bool wrap) const {
-    if (const Font* primary = primaryFont(text.stack)) return vc::layoutText(text, *primary, availableWidth, wrap);
-    return vc::layoutText(text, availableWidth, wrap);
+    TextFonts fonts;
+    if (const FontStack* stack = findFontStack(text.stack)) {
+        for (const Id& id : stack->fonts) fonts.fonts.push_back(findFont(id));
+        fonts.fallback = stack->fallback;
+    }
+    return vc::layoutText(text, fonts, availableWidth, wrap);
 }
 
 std::optional<std::string> Document::fontUseProblem(const Id& stack, const FontAxes& axes, const FontFeatures& features) const {

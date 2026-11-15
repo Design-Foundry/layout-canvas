@@ -716,7 +716,7 @@ test('snapshot 6 declared text defaults and long explicit instance strings survi
   }
 });
 
-test('native text survives snapshot 5 import and reload; unsupported glyph edits and downgrades are rejected', async () => {
+test('native text survives snapshot 5 import and reload; control-character edits and downgrades are rejected', async () => {
   const source = packageFixture().snapshot;
   source.version = 5;
   const root = source.nodes.find((node) => node.type === 'component');
@@ -764,7 +764,7 @@ test('native text survives snapshot 5 import and reload; unsupported glyph edits
       if (expectedStatus !== 200) return null;
       return (await response.json()).acks[0];
     };
-    assert.equal(await append('😀', 400), null);
+    assert.equal(await append('a\u0007b', 400), null);
     assert.ok((await append('Guardar diseño')).seq > 1);
     const storedOps = await (
       await fetch(new URL(`/api/documents/${imported.id}/ops?after=1`, origin))
@@ -772,7 +772,7 @@ test('native text survives snapshot 5 import and reload; unsupported glyph edits
     assert.equal(storedOps.ops.length, 1);
     assert.equal(storedOps.ops[0].data.patch.text.content, 'Guardar diseño');
     const invalid = structuredClone(source);
-    invalid.nodes.find((node) => node.id === id(902)).text.content = '😀';
+    invalid.nodes.find((node) => node.id === id(902)).text.content = 'a\u0007b';
     const rejected = await request('/api/documents/import', {
       name: 'Rejected text QA',
       snapshot: invalid,

@@ -231,7 +231,7 @@ describe('native text inspector', () => {
       return true;
     });
     const textarea = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
-    textarea.value = 'Hola 😀';
+    textarea.value = 'Hola\u0007';
     textarea.dispatchEvent(new Event('input'));
     textarea.dispatchEvent(new Event('blur'));
     await fixture.whenStable();
@@ -239,6 +239,23 @@ describe('native text inspector', () => {
     expect(fixture.nativeElement.querySelector('[role="alert"]').textContent).toContain(
       'unsupported',
     );
+  });
+  it('accepts Cyrillic, Greek, Arabic, CJK and emoji content', async () => {
+    const saved: TextRun[] = [];
+    const fixture = await setup((_, next) => {
+      saved.push(next);
+      return true;
+    });
+    const textarea = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
+    const samples = ['Привет', 'Γειά σου', 'مرحبا', '你好こんにちは', 'Hola 😀'];
+    for (const value of samples) {
+      textarea.value = value;
+      textarea.dispatchEvent(new Event('input'));
+      textarea.dispatchEvent(new Event('blur'));
+      await fixture.whenStable();
+    }
+    expect(saved.map((run) => run.content)).toEqual(samples);
+    expect(fixture.nativeElement.querySelector('[role="alert"]')).toBeNull();
   });
   it('keeps the saved style when the native layer refuses a change', async () => {
     const fixture = await setup(() => false);

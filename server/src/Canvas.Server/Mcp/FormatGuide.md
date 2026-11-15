@@ -46,7 +46,7 @@ All five fields are required when `layout` is present. Typical card: a `column` 
 - A `textStyle` patch treats `stack`, `axes` and `features` as one unit: a style that sets axes or features must also set `stack`, and setting `stack` replaces both (absent means empty).
 - Retired `font` ids are still accepted on input and mapped onto the Inter stack: `inter-regular-v1` is no axes, `inter-bold-v1` is `{ "wght": 700 }`, `inter-oblique-v1` is `{ "slnt": -10 }`, `inter-bold-oblique-v1` is both. Output always uses `stack`, `axes` and `features`.
 - `fontSize` 1 to 512; `lineHeight` 1 to 4 (a multiplier); `letterSpacing` 0 to 128; `align`: `left`, `center` or `right`.
-- Content: Latin text, accents included; `\n` for explicit lines.
+- Content: any UTF-8 without control characters other than `\n` (explicit lines); each character falls back through the font stack, then the generic family face; no right-to-left reordering yet.
 - `textWrap: true` wraps at the node's width (use `fixed` or `fill` width with `hug` height).
 - `typography: "<typography token id>"` binds shared metrics; keep `text` metrics equal to the token's.
 - Color comes from `fill`. Text takes no stroke, shadows, radius or layout.

@@ -44,6 +44,34 @@ const Font& embeddedInterFont() {
     return font;
 }
 
+namespace {
+Font readEmbedded(Id id, std::string identifier, std::string displayName, std::string key, std::string_view face) {
+    Font out;
+    out.id = id;
+    out.identifier = std::move(identifier);
+    out.displayName = std::move(displayName);
+    out.provider = "embedded";
+    out.key = std::move(key);
+    out.sha256 = fontFaceSha256(face);
+    const auto read = *fonts::capabilities(face);
+    for (const auto& axis : read.axes) out.axes.push_back({axis.tag, {axis.min, axis.max, {}}, axis.defaultValue});
+    out.features = read.features;
+    out.order = "a0";
+    return out;
+}
+} // namespace
+
+const Font* genericFont(GenericFallback fallback) {
+    static const Font serif = readEmbedded({0, 0x102}, "source-serif-4", "Source Serif 4", "source-serif-4", fonts::kSerifFace);
+    static const Font mono = readEmbedded({0, 0x103}, "jetbrains-mono", "JetBrains Mono", "jetbrains-mono", fonts::kMonoFace);
+    switch (fallback) {
+    case GenericFallback::Serif: return &serif;
+    case GenericFallback::Monospace: return &mono;
+    case GenericFallback::None: return nullptr;
+    default: return &embeddedInterFont();
+    }
+}
+
 const FontStack& embeddedInterStack() {
     static const FontStack stack{kInterStackId, "inter", "Inter", {kInterFontId}, GenericFallback::SansSerif, "a0"};
     return stack;

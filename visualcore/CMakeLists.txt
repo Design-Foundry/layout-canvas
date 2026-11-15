@@ -31,12 +31,18 @@ if(EMSCRIPTEN)
 endif()
 
 # The exact trusted font bytes are shared by native layout and the WASM glyph atlas.
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter.ttf")
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter.ttf" VC_FONT_HEX HEX)
-string(REGEX REPLACE "(..)" "0x\\1," VC_FONT_ARRAY "${VC_FONT_HEX}")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/vc_inter_font.inc" "${VC_FONT_ARRAY}")
-file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter.ttf" VC_INTER_SHA256)
+foreach(FACE IN ITEMS "inter;Inter" "serif;SourceSerif4" "mono;JetBrainsMono")
+    list(GET FACE 0 FACE_NAME)
+    list(GET FACE 1 FACE_FILE)
+    string(TOUPPER "${FACE_NAME}" FACE_UPPER)
+    set(FACE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/${FACE_FILE}.ttf")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${FACE_PATH}")
+    file(READ "${FACE_PATH}" FACE_HEX HEX)
+    string(REGEX REPLACE "(..)" "0x\\1," FACE_ARRAY "${FACE_HEX}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/vc_${FACE_NAME}_font.inc" "${FACE_ARRAY}")
+    file(SHA256 "${FACE_PATH}" VC_${FACE_UPPER}_SHA256)
+endforeach()
 
 # ---------------------------------------------------------------------------
 # vc_core: plain C++. No browser, no GPU. Compiles and tests natively.
@@ -68,7 +74,7 @@ add_library(vc_core STATIC
 target_include_directories(vc_core PUBLIC include)
 target_include_directories(vc_core PRIVATE third_party "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(vc_core PRIVATE nlohmann_json::nlohmann_json vc_harfbuzz)
-target_compile_definitions(vc_core PRIVATE VC_INTER_SHA256="${VC_INTER_SHA256}")
+target_compile_definitions(vc_core PRIVATE VC_INTER_SHA256="${VC_INTER_SHA256}" VC_SERIF_SHA256="${VC_SERIF_SHA256}" VC_MONO_SHA256="${VC_MONO_SHA256}")
 
 if(MSVC)  # true for clang-cl too
     target_compile_options(vc_core PRIVATE /W4)
@@ -147,6 +153,7 @@ else()
             tests/test_text.cpp
             tests/test_font_registry.cpp
             tests/test_font_model.cpp
+            tests/test_font_stacks.cpp
             tests/test_line.cpp
             tests/test_path.cpp
             tests/test_prototype_model.cpp

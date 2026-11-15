@@ -57,16 +57,22 @@ struct TextLayout {
     std::vector<TextGlyph> glyphs;
 };
 
-/// Strict UTF-8, Latin-1 plus the documented punctuation set; no silent missing-glyph fallback.
-/// Checks the font settings' shape, not that the stack exists or allows them.
+/// Strict UTF-8 without control characters other than newline. Checks the font settings' shape, not
+/// that the stack exists or allows them.
 [[nodiscard]] bool validText(const TextRun& text);
 /// Why `validText` refuses `text`, or null when it accepts it.
 [[nodiscard]] const char* textProblem(const TextRun& text);
+/// The fonts of a text's stack in order and the generic family that ends it.
+struct TextFonts {
+    std::vector<const Font*> fonts;
+    GenericFallback fallback = GenericFallback::SansSerif;
+};
 /// Optional greedy wrapping at spaces, with glyph breaks for words wider than the available width.
-/// `primary` is the first font of the text's stack; a font whose face is not registered lays out
-/// no glyphs.
-[[nodiscard]] TextLayout layoutText(const TextRun& text, const Font& primary, double availableWidth = -1.0, bool wrap = false);
-/// Lays out text whose stack is the embedded Inter stack; any other stack lays out no glyphs.
+/// Each character comes from the first font that covers it, skipping fonts whose face is not
+/// registered, then from the generic family's bundled face. A character nothing covers draws the
+/// first available font's missing-glyph mark. Kerning applies only between glyphs of one font.
+[[nodiscard]] TextLayout layoutText(const TextRun& text, const TextFonts& fonts, double availableWidth = -1.0, bool wrap = false);
+/// Lays out text on the embedded Inter stack, whatever stack it names.
 [[nodiscard]] TextLayout layoutText(const TextRun& text, double availableWidth = -1.0, bool wrap = false);
 /// Id of the bundled Inter variable face.
 inline constexpr std::string_view kEmbeddedInterFace = "embedded/inter";

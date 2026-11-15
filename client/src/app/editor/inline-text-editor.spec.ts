@@ -95,7 +95,7 @@ describe('text editing on canvas', () => {
   });
   it('keeps unsupported input and long drafts local without closing', async () => {
     const { fixture, field, edit, saved, closed } = await setup();
-    for (const value of ['Hola 😀', 'a'.repeat(2049), 'a\t']) {
+    for (const value of ['a'.repeat(2049), 'a\t', 'a\u0085', 'a\u007f']) {
       edit(value);
       field.dispatchEvent(new Event('blur'));
       await fixture.whenStable();
