@@ -246,6 +246,10 @@ TEST_CASE("older snapshots refuse the font model and map legacy font ids to Inte
     const auto& text = document.find(id)->text;
     CHECK(text.stack == kInterStackId);
     CHECK(text.axes == FontAxes{{"wght", 700}});
+
+    const auto modern = load(snapshot(25, R"("stack":")" + stackId + R"(","axes":{"wght":650})"));
+    CHECK(modern.find(id)->text.axes == FontAxes{{"wght", 650}});
+    CHECK_FALSE(snapshotFromJson(R"({"version":25,"modes":[],"tokens":[],"fonts":{},"nodes":[]})").has_value());
 }
 
 TEST_CASE("font ops round trip through JSON") {

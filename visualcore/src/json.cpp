@@ -1879,24 +1879,27 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         }
         if (version >= 25) {
             for (const char* key : {"fonts", "fontStacks"}) {
-                if (!j.contains(key) || !j[key].is_array()) {
+                if (j.contains(key) && !j[key].is_array()) {
                     DiagnosticScope field{key};
-                    return refused(std::string{key} + " is required from snapshot version 25: an array");
+                    return refused(std::string{key} + " must be an array");
                 }
             }
+            const json none = json::array();
+            const json& fontList = j.contains("fonts") ? j["fonts"] : none;
+            const json& stackList = j.contains("fontStacks") ? j["fontStacks"] : none;
             {
                 DiagnosticScope list{"fonts"};
-                for (std::size_t i = 0; i < j["fonts"].size(); ++i) {
+                for (std::size_t i = 0; i < fontList.size(); ++i) {
                     DiagnosticScope entry{slot(i)};
-                    auto font = readFont(j["fonts"][i]);
+                    auto font = readFont(fontList[i]);
                     if (!font) return std::nullopt;
                     if (font->id != kInterFontId) ops.push_back(CreateFont{std::move(*font)});
                 }
             }
             DiagnosticScope list{"fontStacks"};
-            for (std::size_t i = 0; i < j["fontStacks"].size(); ++i) {
+            for (std::size_t i = 0; i < stackList.size(); ++i) {
                 DiagnosticScope entry{slot(i)};
-                auto stack = readFontStack(j["fontStacks"][i]);
+                auto stack = readFontStack(stackList[i]);
                 if (!stack) return std::nullopt;
                 if (stack->id != kInterStackId) ops.push_back(CreateFontStack{std::move(*stack)});
             }

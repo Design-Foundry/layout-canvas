@@ -178,7 +178,7 @@ portable contract.
 
 ## Fonts and font stacks
 
-Snapshot version 25 adds `fonts` and `fontStacks` arrays. It is the version written whenever the document has text, a `textStyle` with a stack, a typography token, or a custom font or stack. Older versions refuse `stack`, `axes`, `features`, `fonts` and `fontStacks`.
+Snapshot version 25 adds optional `fonts` and `fontStacks` arrays; the bundled Inter font and stack exist without being listed. It is the version written whenever the document has text, a `textStyle` with a stack, a typography token, or a custom font or stack. Older versions refuse `stack`, `axes`, `features`, `fonts` and `fontStacks`.
 
 - Font: `{ "id", "identifier", "displayName", "provider", "key", "sha256", "capabilities": { "axes": [{ "tag", "domain": { "min", "max" } | { "values": [...] }, "default" }], "features": ["calt", ...] }, "order" }`. `displayName` and `sha256` are optional.
 - Font stack: `{ "id", "identifier", "displayName", "entries": ["<font id>", ...], "genericFallback": "sans-serif" | "serif" | "monospace" | "system-ui" | "none", "order" }`. Text validates its axes and features against the first entry.
