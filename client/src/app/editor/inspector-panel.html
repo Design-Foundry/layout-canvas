@@ -614,6 +614,9 @@
       }
     </fieldset>
   }
+  @if (exportTargets().length) {
+    <app-export-panel [targets]="exportTargets()" [render]="exportRender()" />
+  }
 
   <ng-template
     cdkConnectedOverlay

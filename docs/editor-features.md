@@ -72,3 +72,12 @@ player controls and full-document `.canvas.json` export/reopen in Assets. The fi
 preserves all authored screens, components, tokens and embedded images. Reopening
 uses the configured server's native validator to create a separate document;
 keep that server local for private local delivery. Hosted sharing and partial-tree Smart Animate matching remain pending.
+
+## PNG export
+
+The Export section of the inspector saves each selected node as `<name>@<scale>x.png` at 1x, 2x or 3x.
+The node and its descendants are rendered offscreen by the canvas renderer, in the active token mode and
+with the current font availability, cropped to the node's bounds and clipped by its ancestors. Selection,
+handles, frame labels, grid and prototype connections are not part of the image, and unpainted areas are
+transparent. Targets larger than 4096 px per side render in tiles. Images beyond 16384 px per side or
+64 million pixels reduce the scale, and the file name and panel report the scale used.

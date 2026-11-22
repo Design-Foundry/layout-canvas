@@ -18,6 +18,7 @@
 #include "vc/color.hpp"
 #include "vc/draw_list.hpp"
 #include "vc/geometry.hpp"
+#include "vc/image_export.hpp"
 
 namespace vc::render {
 namespace {
@@ -87,6 +88,16 @@ wgpu::ShaderModule createShader(const wgpu::Device& device, const std::string& c
 
 } // namespace
 
+struct ExportJob {
+    Id node;
+    Id mode;
+    Rect bounds;
+    ExportPlan plan;
+    std::uint32_t next = 0;
+    ExportTileCallback onTile;
+    ExportDoneCallback onDone;
+};
+
 struct Renderer::State {
     std::string selector;
     const Camera& camera;
@@ -139,6 +150,7 @@ struct Renderer::State {
     Vec2 origin;
 
     bool running = false;
+    bool exporting = false;
     bool looping = false;
     double lastTime = 0.0;
     FrameStats stats;
@@ -157,6 +169,8 @@ struct Renderer::State {
     bool resizeIfNeeded();
     void writeFrameUniform();
     void buildInstances();
+    void finishInstances();
+    void exportStep(const std::shared_ptr<ExportJob>& job);
     void uploadImages();
     void uploadGlyphAtlas(int x, int y, int w, int h);
     void addSelectionOutlines();
@@ -194,6 +208,116 @@ void Renderer::start() {
 
 void Renderer::setBackground(float r, float g, float b, float a) {
     state_->background = {r, g, b, a};
+}
+
+void Renderer::exportNode(const Id& id, double scale, ExportPlanCallback onPlan, ExportTileCallback onTile,
+                          ExportDoneCallback onDone) {
+    State& s = *state_;
+    if (!s.device) return onDone("renderer is not ready");
+    if (s.exporting) return onDone("another export is running");
+    if (s.editor.presenting()) return onDone("exports are unavailable while presenting");
+    const auto bounds = worldBounds(s.document, id, s.editor.activeMode());
+    if (!bounds) return onDone("node not found");
+    wgpu::Limits limits{};
+    s.device.GetLimits(&limits);
+    const auto plan = planExport(*bounds, scale, limits.maxTextureDimension2D);
+    if (!plan) return onDone("node has no size to export");
+    onPlan(*plan);
+    auto job = std::make_shared<ExportJob>();
+    job->node = id;
+    job->mode = s.editor.activeMode();
+    job->bounds = *bounds;
+    job->plan = *plan;
+    job->onTile = std::move(onTile);
+    job->onDone = std::move(onDone);
+    s.exporting = true;
+    s.exportStep(job);
+}
+
+void Renderer::State::exportStep(const std::shared_ptr<ExportJob>& job) {
+    const ExportPlan& plan = job->plan;
+    if (job->next >= plan.columns * plan.rows) {
+        exporting = false;
+        return job->onDone("");
+    }
+    const std::uint32_t column = job->next % plan.columns, row = job->next / plan.columns;
+    ++job->next;
+    const Rect world = exportTileWorld(plan, job->bounds, column, row);
+    const TilePixels tile = exportTilePixels(plan, column, row);
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        const auto atlasGeneration = textAtlasGeneration();
+        if (!buildExportDrawList(document, job->node, world, job->mode, drawItems)) {
+            exporting = false;
+            return job->onDone("node is no longer available");
+        }
+        if (textAtlasGeneration() == atlasGeneration) break;
+    }
+    origin = {world.x, world.y};
+    finishInstances();
+
+    const FrameUniform uniform{{float(tile.w), float(tile.h)}, float(plan.scale), 1.0f, {0, 0}, 1.0f, 0.0f, 0.0f, 0.0f};
+    device.GetQueue().WriteBuffer(frameBuffer, 0, &uniform, sizeof(uniform));
+
+    wgpu::TextureDescriptor textureDesc{};
+    textureDesc.size = {tile.w, tile.h, 1};
+    textureDesc.format = format;
+    textureDesc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc;
+    wgpu::Texture target = device.CreateTexture(&textureDesc);
+
+    const std::uint32_t rowBytes = (tile.w * 4 + 255) / 256 * 256;
+    wgpu::BufferDescriptor readDesc{};
+    readDesc.size = std::uint64_t(rowBytes) * tile.h;
+    readDesc.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
+    wgpu::Buffer readback = device.CreateBuffer(&readDesc);
+
+    wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
+    wgpu::RenderPassColorAttachment color{};
+    color.view = target.CreateView();
+    color.loadOp = wgpu::LoadOp::Clear;
+    color.storeOp = wgpu::StoreOp::Store;
+    color.clearValue = {0, 0, 0, 0};
+    wgpu::RenderPassDescriptor passDesc{};
+    passDesc.colorAttachmentCount = 1;
+    passDesc.colorAttachments = &color;
+    wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
+    pass.SetBindGroup(0, bindGroup);
+    if (!instances.empty()) {
+        pass.SetPipeline(shapesPipeline);
+        pass.Draw(4, static_cast<uint32_t>(instances.size()));
+    }
+    pass.End();
+    wgpu::TexelCopyTextureInfo source{};
+    source.texture = target;
+    wgpu::TexelCopyBufferInfo destination{};
+    destination.buffer = readback;
+    destination.layout.bytesPerRow = rowBytes;
+    destination.layout.rowsPerImage = tile.h;
+    const wgpu::Extent3D extent{tile.w, tile.h, 1};
+    encoder.CopyTextureToBuffer(&source, &destination, &extent);
+    wgpu::CommandBuffer commands = encoder.Finish();
+    device.GetQueue().Submit(1, &commands);
+
+    const bool bgra = format == wgpu::TextureFormat::BGRA8Unorm || format == wgpu::TextureFormat::BGRA8UnormSrgb;
+    const std::uint64_t readSize = readDesc.size;
+    readback.MapAsync(wgpu::MapMode::Read, 0, readSize, wgpu::CallbackMode::AllowSpontaneous,
+        [this, job, readback, target, tile, rowBytes, bgra](wgpu::MapAsyncStatus status, wgpu::StringView) {
+            if (status != wgpu::MapAsyncStatus::Success) {
+                exporting = false;
+                target.Destroy();
+                return job->onDone("could not read back the rendered image");
+            }
+            const auto* mapped = static_cast<const std::uint8_t*>(readback.GetConstMappedRange(0, std::size_t(rowBytes) * tile.h));
+            std::vector<std::uint8_t> pixels(std::size_t(tile.w) * tile.h * 4);
+            for (std::uint32_t y = 0; y < tile.h; ++y)
+                std::copy_n(mapped + std::size_t(y) * rowBytes, std::size_t(tile.w) * 4, pixels.data() + std::size_t(y) * tile.w * 4);
+            readback.Unmap();
+            readback.Destroy();
+            target.Destroy();
+            unpremultiplyPixels(pixels.data(), std::size_t(tile.w) * tile.h, bgra);
+            job->onTile(tile, std::move(pixels));
+            exportStep(job);
+        });
 }
 
 void Renderer::stop() {
@@ -584,6 +708,10 @@ void Renderer::State::buildInstances() {
         if(!editor.presenting()) addSelectionOutlines();
         if(textAtlasGeneration()==atlasGeneration) break;
     }
+    finishInstances();
+}
+
+void Renderer::State::finishInstances() {
     if(glyphTexture) if(const auto region=takeTextAtlasChanges()) uploadGlyphAtlas(region->x,region->y,region->w,region->h);
     uploadImages();
 

@@ -39,6 +39,7 @@ import { LinePanel } from './line-panel';
 import { PathPanel } from './path-panel';
 import { ImagePanel } from './image-panel';
 import { PrototypePanel } from './prototype-panel';
+import { ExportPanel, ExportTarget } from './export-panel';
 
 /**
  * Identifies one bindable property so a single picker can serve them all: corner0..3 (top-start,
@@ -134,6 +135,7 @@ function replaceAt<T>(items: Four<T>, index: number, value: T): Four<T> {
     ColorField,
     TokenPicker,
     ComponentPropertiesPanel,
+    ExportPanel,
   ],
   templateUrl: './inspector-panel.html',
   styleUrls: ['./panel.scss', './inspector-panel.scss'],
@@ -155,6 +157,10 @@ export class InspectorPanel {
   );
   readonly saveValues = input<(id: string, values: ComponentValues) => boolean>(() => false);
   readonly node = input<NodeProps | null>(null);
+  readonly exportTargets = input<readonly ExportTarget[]>([]);
+  readonly exportRender = input<
+    (id: string, scale: number) => Promise<import('@canvas/bridge').ExportedImage>
+  >(() => Promise.reject(new Error('Export is unavailable')));
   protected readonly hasComponentValues = computed(
     () => Object.keys(this.node()?.componentValues ?? {}).length > 0,
   );

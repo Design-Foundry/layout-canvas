@@ -55,6 +55,7 @@ import { PrototypeControls } from './prototype-controls';
 import { DocumentDelivery } from './document-delivery';
 import { PrototypeConnections, type PrototypeConnectionTarget } from './prototype-connections';
 import type { ComponentSnapshot } from './component-package';
+import type { ExportTarget } from './export-panel';
 
 const STATS_INTERVAL_MS = 500;
 
@@ -136,6 +137,11 @@ export class EditorPage {
   protected readonly layers = signal<readonly LayerRow[]>([]);
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   protected readonly selectedNode = signal<NodeProps | null>(null);
+  protected readonly exportTargets = signal<readonly ExportTarget[]>([]);
+  protected readonly exportRender = (id: string, scale: number) => {
+    const core = this.core();
+    return core ? core.exportNode(id, scale) : Promise.reject(new Error('Editor is not ready'));
+  };
   protected readonly presentation = signal<PrototypeState>({
     active: false,
     screen: null,
@@ -551,6 +557,12 @@ export class EditorPage {
           this.selectedIds.set(new Set(selection));
           const selectedNode = selection.length === 1 ? core.node(selection[0]) : null;
           this.selectedNode.set(selectedNode);
+          const targets = selection.flatMap((id) => {
+            const target = core.node(id);
+            return target ? [{ id, name: target.name }] : [];
+          });
+          if (JSON.stringify(targets) !== JSON.stringify(this.exportTargets()))
+            this.exportTargets.set(targets);
           this.prototypeStateAxes.set(findPrototypeStateAxes(selectedNode, (id) => core.node(id)));
           this.tool.set(core.tool);
         }
