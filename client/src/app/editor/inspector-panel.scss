@@ -169,13 +169,19 @@
   border-radius: 4px;
 }
 
-.part-field {
+.part-field,
+.notes-field {
   display: flex;
   flex-direction: column;
   gap: var(--dimension--primitive--spacing-1);
   color: var(--color--semantic--text-subtle);
 }
-.part-field input {
+.notes-field textarea {
+  resize: vertical;
+  font: inherit;
+}
+.part-field input,
+.notes-field textarea {
   color: var(--color--semantic--text-strong);
   background: var(--color--semantic--surface-base);
   border: 1px solid var(--color--semantic--border-subtle);

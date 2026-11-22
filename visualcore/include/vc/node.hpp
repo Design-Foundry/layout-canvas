@@ -16,6 +16,9 @@ namespace vc {
 /// Empty clears a flow label; names are bounded single-line bundled-font text.
 bool validPrototypeFlowName(const std::string& name);
 
+/// Plain note text: valid UTF-8, up to 4096 bytes and 2048 characters, newlines allowed, empty clears it.
+bool validNotes(const std::string& notes);
+
 /// Lowercase kebab-case starting with a letter, up to 64 characters: the shape of component property
 /// names and part names.
 bool validKebabName(const std::string& name);
@@ -172,6 +175,8 @@ struct NodePatch {
     std::optional<bool> textWrap;
     std::optional<TextStyle> textStyle;
     std::optional<std::string> name;
+    /// Plain note text that is never rendered; empty clears it.
+    std::optional<std::string> notes;
     /// Style-addressable name inside a main component; empty clears it.
     std::optional<std::string> part;
     std::optional<double> x;
@@ -279,6 +284,8 @@ struct Node {
     std::string order;
 
     std::string name;
+    /// Plain note text that is never rendered.
+    std::string notes;
     /// Empty, or a kebab-case name unique within the owning main component.
     std::string part;
     /// Position relative to the parent, in world units. Ignored for children placed by auto layout.

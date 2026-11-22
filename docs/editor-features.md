@@ -28,6 +28,14 @@ copies. Dragging a layer into another component keeps its part unless that compo
 already uses it, and dragging it out of every component clears it; both are one undo
 step. SetProps, CreateNode and MoveNode operations refuse duplicate parts.
 
+## Notes
+
+Any layer can carry notes: plain text of up to 2048 characters and 4096 UTF-8 bytes,
+newlines allowed, never rendered. The inspector shows a Notes field for the selected
+layer, except for copies inside instances. Notes survive duplicate, clone, undo, redo and
+export. They need snapshot 26 and are written only when a layer has some. Overrides and
+variant rules cannot set them.
+
 ## Variant rules
 
 A rule with an empty cell is the base rule: it applies in every cell, and more specific
@@ -43,7 +51,7 @@ Snapshots remain versioned by the features they contain. Text starts at version 
 independent metrics, wrapping, face selection and shared typography progressively
 require versions 6–11. Lines use 12, straight unfilled paths 13, curved/filled paths
 14, raster images 15, click prototypes 16, overlay/dissolve options 17 and directional
-transitions/overlay placement 18, component part names 23, and base variant rules or rules that set visibility 24. Earlier documents retain their minimum version. Downlevel
+transitions/overlay placement 18, component part names 23, base variant rules or rules that set visibility 24, and node notes 26. Earlier documents retain their minimum version. Downlevel
 snapshots containing unsupported newer data are refused.
 
 Prototype playback uses the same native renderer and does not produce document

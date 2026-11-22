@@ -140,6 +140,46 @@ describe('component inspector', () => {
     expect(element.textContent).not.toContain('Main component');
     expect(element.querySelector('button[aria-label="Detach instance"]')).toBeNull();
   });
+  describe('notes', () => {
+    const field = (fixture: { nativeElement: HTMLElement }) =>
+      fixture.nativeElement.querySelector('textarea[aria-label="Notes"]') as HTMLTextAreaElement | null;
+    const type = (input: HTMLTextAreaElement, value: string) => {
+      input.value = value;
+      input.dispatchEvent(new Event('change'));
+    };
+    it('shows the notes of the selected layer', async () => {
+      const fixture = await setup({ ...node('rect'), notes: 'Ask legal' });
+      expect(field(fixture)!.value).toBe('Ask legal');
+    });
+    it('is empty for a layer without notes', async () => {
+      expect(field(await setup(node('rect')))!.value).toBe('');
+    });
+    it('is not offered for a copy inside an instance', async () => {
+      expect(field(await setup({ ...node('rect'), inInstance: true }))).toBeNull();
+    });
+    it('saves multiline text and clears it with an empty value', async () => {
+      const fixture = await setup({ ...node('rect'), notes: 'old' });
+      const saved: [string, NodePatch][] = [];
+      fixture.componentRef.setInput('saveStyleBinding', (id: string, patch: NodePatch) => {
+        saved.push([id, patch]);
+        return true;
+      });
+      const input = field(fixture)!;
+      type(input, 'one\ntwo');
+      type(input, '');
+      expect(saved).toEqual([
+        ['instance', { notes: 'one\ntwo' }],
+        ['instance', { notes: '' }],
+      ]);
+    });
+    it('restores the saved text when the change is refused', async () => {
+      const fixture = await setup({ ...node('rect'), notes: 'kept' });
+      fixture.componentRef.setInput('saveStyleBinding', () => false);
+      const input = field(fixture)!;
+      type(input, 'refused');
+      expect(input.value).toBe('kept');
+    });
+  });
   describe('part name', () => {
     const field = (fixture: { nativeElement: HTMLElement }) =>
       fixture.nativeElement.querySelector('input[aria-label="Part"]') as HTMLInputElement | null;

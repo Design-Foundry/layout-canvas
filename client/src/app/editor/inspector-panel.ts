@@ -304,6 +304,13 @@ export class InspectorPanel {
     this.partError.set('This part was refused. Another layer in the component may already use it.');
   }
 
+  protected setNotes(event: Event): void {
+    const control = event.target as HTMLTextAreaElement;
+    const node = this.node();
+    if (!node) return;
+    if (!this.saveStyleBinding()(node.id, { notes: control.value })) control.value = node.notes ?? '';
+  }
+
   // ----- Field keys -----
 
   protected familyOf(key: FieldKey): BindableFamily {

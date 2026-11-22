@@ -157,6 +157,37 @@ public sealed class McpToolsTests(CanvasFactory factory) : IClassFixture<CanvasF
     }
 
     [Fact]
+    public async Task Notes_are_set_read_cloned_and_bounded()
+    {
+        var document = await Tools.CreateDocument("Notes", Ct);
+        var result = await Tools.ApplyOps(document.Id,
+        [
+            Op("CreateNode", new { node = new { id = "$card", type = "frame", name = "Card", w = 100, h = 50, notes = "Ask legal\nabout the copy" } }),
+            Op("CreateNode", new { node = new { id = "$plain", type = "frame", name = "Plain", w = 100, h = 50 } }),
+        ], Ct);
+        var card = result.GetProperty("ids").GetProperty("$card").GetGuid();
+        var plain = result.GetProperty("ids").GetProperty("$plain").GetGuid();
+
+        var nodes = await Tools.GetNodes(document.Id, [card, plain], null, Ct);
+        Assert.Equal("Ask legal\nabout the copy", nodes[0].GetProperty("notes").GetString());
+        Assert.False(nodes[1].TryGetProperty("notes", out _));
+        var layers = (await Tools.GetDocument(document.Id, null, Ct)).GetProperty("layers").EnumerateArray().ToList();
+        Assert.Equal(card, layers.Single(l => l.TryGetProperty("hasNotes", out var flag) && flag.GetBoolean()).GetProperty("id").GetGuid());
+
+        await Tools.ApplyOps(document.Id, [Op("SetProps", new { id = plain, patch = new { notes = "Second" } })], Ct);
+        Assert.Equal("Second", (await Tools.GetNodes(document.Id, [plain], null, Ct))[0].GetProperty("notes").GetString());
+        await Tools.ApplyOps(document.Id, [Op("SetProps", new { id = plain, patch = new { notes = "" } })], Ct);
+        Assert.False((await Tools.GetNodes(document.Id, [plain], null, Ct))[0].TryGetProperty("notes", out _));
+
+        var cloned = await Tools.ApplyOps(document.Id, [Op("CloneNode", new { source = card, id = "$copy" })], Ct);
+        var copy = cloned.GetProperty("ids").GetProperty("$copy").GetGuid();
+        Assert.Equal("Ask legal\nabout the copy", (await Tools.GetNodes(document.Id, [copy], null, Ct))[0].GetProperty("notes").GetString());
+
+        await Assert.ThrowsAsync<McpException>(() => Tools.ApplyOps(document.Id, [Op("SetProps", new { id = card, patch = new { notes = new string('a', 2049) } })], Ct));
+        Assert.Equal("Ask legal\nabout the copy", (await Tools.GetNodes(document.Id, [card], null, Ct))[0].GetProperty("notes").GetString());
+    }
+
+    [Fact]
     public async Task A_clone_returns_the_ids_of_its_copies_and_later_ops_can_use_them()
     {
         var document = await Tools.CreateDocument("Rows", Ct);
