@@ -48,6 +48,17 @@ VC_API int vc_register_font_face(const char* id, const unsigned char* bytes, siz
  * Returns 1, or 0 when refused, with the reason in `vc_last_error`. */
 VC_API int vc_register_font_family(const char* provider, const char* key, const char* version, const char* files);
 
+/* Registers the SVG of the icon `key`, as `vc_icon_source_key` returns it, when it falls inside the
+ * accepted subset (path, basic shapes, groups, transforms, fills and strokes, up to 64 KiB). Returns 1,
+ * including for the same key and bytes again, or 0 when refused, with the reason in `vc_last_error`
+ * as `{ "path": "icon", "message" }`. */
+VC_API int vc_register_icon(const char* key, const char* svg);
+
+/* The registry key of an icon reference, given as its path form (`"material-symbols/arrow_back"`) or
+ * as `{ set, glyph, axes }` JSON, with every axis explicit. Null when it is not a valid reference, with
+ * the reason in `vc_last_error`. Free with `vc_free`. */
+VC_API char* vc_icon_source_key(const char* icon);
+
 /* What font bytes offer, as `{ "axes": [{ "tag", "min", "max", "default" }], "features" }`, or null
  * when they are not a usable OpenType face. Free with `vc_free`. */
 VC_API char* vc_font_capabilities(const unsigned char* bytes, size_t size);

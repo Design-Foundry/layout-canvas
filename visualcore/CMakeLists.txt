@@ -60,6 +60,7 @@ add_library(vc_core STATIC
     src/fonts.cpp
     src/fractional_index.cpp
     src/geometry.cpp
+    src/icon.cpp
     src/id.cpp
     src/image_export.cpp
     src/layout.cpp
@@ -160,6 +161,7 @@ else()
             tests/test_font_stacks.cpp
             tests/test_font_families.cpp
             tests/test_font_availability.cpp
+            tests/test_icons.cpp
             tests/test_line.cpp
             tests/test_path.cpp
             tests/test_prototype_model.cpp

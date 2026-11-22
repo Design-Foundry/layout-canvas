@@ -71,6 +71,7 @@ struct State {
     std::unordered_map<std::string, std::vector<fonts::ShapedGlyph>> shaped;
     std::vector<std::uint8_t> pixels = std::vector<std::uint8_t>(std::size_t(kTextAtlasSize) * kTextAtlasSize, 0);
     std::unordered_map<std::uint64_t, Rect> cells;
+    std::unordered_map<std::string, Rect> named;
     int x = 0, y = 0, rowHeight = 0;
     std::uint64_t generation = 0;
     std::map<std::string, std::vector<FontFile>, std::less<>> families;
@@ -130,6 +131,7 @@ struct State {
     void clearAtlas() {
         std::fill(pixels.begin(), pixels.end(), std::uint8_t(0));
         cells.clear();
+        named.clear();
         x = y = rowHeight = 0;
         ++generation;
         markDirty(0, 0, kTextAtlasSize, kTextAtlasSize);
@@ -139,6 +141,25 @@ struct State {
 State& state() {
     static State instance;
     return instance;
+}
+
+bool fitsAtlas(int width, int height) {
+    return align(width + 2 * kTextAtlasPadding) <= kTextAtlasSize && align(height + 2 * kTextAtlasPadding) <= kTextAtlasSize;
+}
+
+/// Copies a bitmap into the next free cell, clearing the atlas when it is full. The caller holds the lock.
+Rect placeInAtlas(State& s, int width, int height, const unsigned char* bitmap) {
+    const int cellWidth = align(width + 2 * kTextAtlasPadding), cellHeight = align(height + 2 * kTextAtlasPadding);
+    if (s.x + cellWidth > kTextAtlasSize) { s.x = 0; s.y += s.rowHeight; s.rowHeight = 0; }
+    if (s.y + cellHeight > kTextAtlasSize) s.clearAtlas();
+    const int left = s.x + kTextAtlasPadding, top = s.y + kTextAtlasPadding;
+    for (int row = 0; row < height; ++row)
+        std::copy_n(bitmap + std::ptrdiff_t(row) * width, width, s.pixels.begin() + std::ptrdiff_t(top + row) * kTextAtlasSize + left);
+    s.markDirty(s.x, s.y, s.x + cellWidth, s.y + cellHeight);
+    const Rect uv{double(left) / kTextAtlasSize, double(top) / kTextAtlasSize, double(width) / kTextAtlasSize, double(height) / kTextAtlasSize};
+    s.x += cellWidth;
+    s.rowHeight = std::max(s.rowHeight, cellHeight);
+    return uv;
 }
 
 struct Outline {
@@ -415,23 +436,30 @@ Rect textGlyphUv(GlyphKey key) {
     Outline outline;
     if (width > 0 && height > 0) hb_font_draw_glyph(instance.font, key.glyph, outlineFuncs(), &outline);
     if (outline.vertices.empty()) return s.cells[cell] = Rect{};
-    const int cellWidth = align(width + 2 * kTextAtlasPadding), cellHeight = align(height + 2 * kTextAtlasPadding);
-    if (cellWidth > kTextAtlasSize || cellHeight > kTextAtlasSize) return {};
-    if (s.x + cellWidth > kTextAtlasSize) { s.x = 0; s.y += s.rowHeight; s.rowHeight = 0; }
-    if (s.y + cellHeight > kTextAtlasSize) s.clearAtlas();
+    if (!fitsAtlas(width, height)) return {};
     std::vector<unsigned char> bitmap(std::size_t(width) * height, 0);
     stbtt__bitmap target{width, height, width, bitmap.data()};
     stbtt_Rasterize(&target, 0.35f, outline.vertices.data(), int(outline.vertices.size()), instance.scale, instance.scale, 0, 0,
                     int(ink.x), int(ink.y), 1, nullptr);
-    const int left = s.x + kTextAtlasPadding, top = s.y + kTextAtlasPadding;
-    for (int row = 0; row < height; ++row)
-        std::copy_n(bitmap.begin() + std::ptrdiff_t(row) * width, width, s.pixels.begin() + std::ptrdiff_t(top + row) * kTextAtlasSize + left);
-    s.markDirty(s.x, s.y, s.x + cellWidth, s.y + cellHeight);
-    const Rect uv{double(left) / kTextAtlasSize, double(top) / kTextAtlasSize, double(width) / kTextAtlasSize, double(height) / kTextAtlasSize};
-    s.x += cellWidth;
-    s.rowHeight = std::max(s.rowHeight, cellHeight);
-    return s.cells[cell] = uv;
+    return s.cells[cell] = placeInAtlas(s, width, height, bitmap.data());
 }
+
+namespace fonts {
+std::optional<Rect> atlasFind(const std::string& name) {
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    const auto found = s.named.find(name);
+    if (found == s.named.end()) return std::nullopt;
+    return found->second;
+}
+
+Rect atlasPlace(const std::string& name, int width, int height, std::span<const std::uint8_t> bitmap) {
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    if (width <= 0 || height <= 0 || bitmap.size() < std::size_t(width) * std::size_t(height) || !fitsAtlas(width, height)) return {};
+    return s.named[name] = placeInAtlas(s, width, height, bitmap.data());
+}
+} // namespace fonts
 
 std::span<const std::uint8_t> textAtlas() { return state().pixels; }
 

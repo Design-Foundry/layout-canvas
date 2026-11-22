@@ -115,6 +115,8 @@ public:
     [[nodiscard]] const Font* findFont(const Id& id) const;
     /// All fonts in order. The embedded Inter is always present.
     [[nodiscard]] std::vector<const Font*> fonts() const;
+    /// The icon sets of the document: the built-in Material Symbols. The sets are fixed, like the bundled Inter.
+    [[nodiscard]] const std::vector<IconSet>& iconSets() const { return builtinIconSets(); }
     [[nodiscard]] const FontStack* findFontStack(const Id& id) const;
     [[nodiscard]] std::vector<const FontStack*> fontStacks() const;
     /// The first font of `stack`, which text validates against, or null for an unknown stack.

@@ -26,6 +26,7 @@ bool nonNegative(const Value<double>& value) {
 }
 
 constexpr std::string_view kFrameStyling = "text, lines, paths and images take no stroke, shadows, corner radius or auto layout";
+constexpr std::string_view kIconStyling = "icons take no stroke, shadows, corner radius, auto layout or clipContent";
 
 bool isValidPatch(const NodePatch& patch) {
     if(patch.notes && !validNotes(*patch.notes)) return refuse("notes must be UTF-8 text of at most 4096 bytes and 2048 characters, without control characters other than newline");
@@ -42,6 +43,7 @@ bool isValidPatch(const NodePatch& patch) {
             return refuse("imageCrop must be a normalized rect inside 0 to 1 with positive w and h");
     }
     if (patch.path) if (const char* why = pathProblem(*patch.path)) return refuse(why);
+    if (patch.icon) if (const char* why = iconProblem(*patch.icon)) return refuse(std::string{"icon: "} + why);
     for (const auto* v : {&patch.x,&patch.y,&patch.w,&patch.h}) if (*v && !std::isfinite(**v)) return refuse("x, y, w and h must be finite numbers");
     if (patch.lineWidth && (!std::isfinite(*patch.lineWidth) || *patch.lineWidth < 0 || *patch.lineWidth > 4096)) return refuse("lineWidth must be between 0 and 4096");
     if (patch.text && patch.textStyle) return refuse("a patch sets either text or textStyle, not both");
@@ -263,6 +265,11 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
     if(node.type==NodeType::Image && !validRaster(node.image)) return refused("image pixels do not match its width, height and id");
     if (node.type != NodeType::Path && node.path != Path{}) return refused("only path nodes take a path");
     if (node.type == NodeType::Path) if (const char* why = pathProblem(node.path)) return refused(why);
+    if (node.type != NodeType::Icon && node.icon != IconRef{}) return refused("only icon nodes take an icon");
+    if (node.type == NodeType::Icon) {
+        if (const char* why = iconProblem(node.icon)) return refused(std::string{"icon: "} + why);
+        if (!validTextPaint(fullPatch(node)) || node.clipContent) return refused(kIconStyling);
+    }
     if (node.type != NodeType::Line && node.lineReverse) return refused("only line nodes take lineReverse");
     if (node.type != NodeType::Line && node.type != NodeType::Path && node.lineWidth != 2.0) return refused("only line and path nodes take lineWidth");
     if (node.type == NodeType::Line || node.type == NodeType::Path || node.type == NodeType::Image) {
@@ -355,6 +362,8 @@ std::optional<OpBody> Document::setProps(const SetProps& op) {
     if(nextType!=NodeType::Frame && (current.prototypeStart || !current.prototypeFlowName.empty() || current.prototypeOverflow!=PrototypeOverflow::None || prototypeReferences(op.id))) return refused("a prototype starting or referenced frame cannot change its type");
     if((op.patch.image || op.patch.imageFit || op.patch.imageCrop) && current.type!=NodeType::Image) return refused("only image nodes take image, imageFit or imageCrop");
     if (op.patch.path && current.type != NodeType::Path) return refused("only path nodes take a path");
+    if (op.patch.icon && current.type != NodeType::Icon) return refused("only icon nodes take an icon");
+    if (current.type == NodeType::Icon && (!validTextPaint(op.patch) || (op.patch.clipContent && *op.patch.clipContent))) return refused(kIconStyling);
     if (op.patch.lineReverse && current.type != NodeType::Line) return refused("only line nodes take lineReverse");
     if (op.patch.lineWidth && current.type != NodeType::Line && current.type != NodeType::Path) return refused("only line and path nodes take lineWidth");
     if (current.type == NodeType::Line || current.type == NodeType::Path || current.type == NodeType::Image) {
@@ -559,6 +568,9 @@ std::optional<OpBody> Document::setOverride(const SetOverride& op) {
     const bool lineTarget = targetIs(NodeType::Line);
     const bool pathTarget = targetIs(NodeType::Path);
     const bool imageTarget = targetIs(NodeType::Image);
+    const bool iconTarget = targetIs(NodeType::Icon);
+    if (op.patch.icon && !iconTarget) return refused("only icon layers take an icon");
+    if (iconTarget && (!validTextPaint(op.patch) || (op.patch.clipContent && *op.patch.clipContent))) return refused(kIconStyling);
     if ((op.patch.text || op.patch.textStyle || op.patch.textWrap) && !textTarget) return refused("only text layers take text, textStyle or textWrap");
     if (textTarget && !validTextPaint(op.patch)) return refused(kFrameStyling);
     if((op.patch.image || op.patch.imageFit || op.patch.imageCrop) && !imageTarget) return refused("only image layers take image, imageFit or imageCrop");
@@ -838,6 +850,9 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
         const bool pathTarget = target->type == NodeType::Path;
         const bool imageTarget = target->type == NodeType::Image;
         const bool textTarget = target->type == NodeType::Text;
+        const bool iconTarget = target->type == NodeType::Icon;
+        if (p.icon && !iconTarget) return refuse("only icon layers take an icon");
+        if (iconTarget && (!validTextPaint(p) || p.clipContent)) return refuse(std::string{kIconStyling});
         if((p.image || p.imageFit || p.imageCrop) && !imageTarget) return refuse("only image layers take image, imageFit or imageCrop");
         if (p.path && !pathTarget) return refuse("only path layers take a path");
         if (p.lineReverse && !lineTarget) return refuse("only line layers take lineReverse");
