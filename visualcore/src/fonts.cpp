@@ -453,6 +453,12 @@ std::optional<Rect> atlasFind(const std::string& name) {
     return found->second;
 }
 
+void atlasNote(const std::string& name) {
+    auto& s = state();
+    const std::scoped_lock guard(s.lock);
+    s.named[name] = Rect{};
+}
+
 Rect atlasPlace(const std::string& name, int width, int height, std::span<const std::uint8_t> bitmap) {
     auto& s = state();
     const std::scoped_lock guard(s.lock);

@@ -225,7 +225,7 @@ bool allowedAttribute(std::string_view name) {
     return oneOf(name, {"xmlns", "xmlns:xlink", "version", "width", "height", "viewBox", "preserveAspectRatio", "id", "class",
                         "x", "y", "rx", "ry", "cx", "cy", "r", "x1", "y1", "x2", "y2", "points", "d", "transform", "fill",
                         "fill-rule", "fill-opacity", "clip-rule", "opacity", "stroke", "stroke-width", "stroke-linecap",
-                        "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke-dasharray", "stroke-dashoffset",
+                        "stroke-linejoin", "stroke-miterlimit", "stroke-opacity",
                         "style", "role", "focusable", "aria-hidden"});
 }
 
@@ -234,7 +234,8 @@ bool unsafeValue(std::string_view value) {
     std::string lower(value);
     std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return char(std::tolower(c)); });
     return lower.find("url(") != std::string::npos || lower.find("@import") != std::string::npos ||
-           lower.find("javascript:") != std::string::npos || lower.find("expression(") != std::string::npos;
+           lower.find("javascript:") != std::string::npos || lower.find("expression(") != std::string::npos ||
+           lower.find("stroke-dash") != std::string::npos;
 }
 
 } // namespace
@@ -329,13 +330,34 @@ const char* iconSvgProblem(std::string_view svg) {
     return nullptr;
 }
 
+namespace {
+
+/// Whether the parsed geometry stays within sizes the rasterizer handles in bounded time and memory.
+bool boundedGeometry(const NSVGimage& image) {
+    const float extent = std::max(image.width, image.height);
+    if (!(image.width > 0 && image.height > 0 && extent < 1e5f)) return false;
+    const float limit = extent * 64.0f;
+    long points = 0;
+    for (const NSVGshape* shape = image.shapes; shape; shape = shape->next) {
+        if (!(shape->strokeWidth >= 0 && shape->strokeWidth <= extent * 4)) return false;
+        for (const float bound : shape->bounds) if (!std::isfinite(bound) || std::fabs(bound) > limit) return false;
+        for (const NSVGpath* path = shape->paths; path; path = path->next) {
+            points += path->npts;
+            if (points > 16384) return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 std::optional<IconMask> rasterizeIconSvg(std::string_view svg, int side) {
     if (side < 1 || side > kMaxIconRasterSide || iconSvgProblem(svg)) return std::nullopt;
     std::string buffer(svg);
     NSVGimage* image = nsvgParse(buffer.data(), "px", 96.0f);
     if (!image) return std::nullopt;
     std::optional<IconMask> out;
-    if (image->width > 0 && image->height > 0 && image->width < 1e5f && image->height < 1e5f) {
+    if (boundedGeometry(*image)) {
         NSVGrasterizer* rasterizer = nsvgCreateRasterizer();
         if (rasterizer) {
             const float scale = float(side) / std::max(image->width, image->height);
@@ -418,7 +440,10 @@ Rect iconGlyphUv(std::string_view key, int side) {
         svg = found->second;
     }
     const auto mask = rasterizeIconSvg(svg, side);
-    if (!mask || std::none_of(mask->coverage.begin(), mask->coverage.end(), [](std::uint8_t c) { return c != 0; })) return {};
+    if (!mask || std::none_of(mask->coverage.begin(), mask->coverage.end(), [](std::uint8_t c) { return c != 0; })) {
+        fonts::atlasNote(name);
+        return {};
+    }
     return fonts::atlasPlace(name, side, side, mask->coverage);
 }
 

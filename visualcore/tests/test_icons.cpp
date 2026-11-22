@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <chrono>
 #include <string>
 #include "vc/diagnostics.hpp"
 #include "vc/document.hpp"
@@ -566,4 +567,93 @@ TEST_CASE("the used icons list each reference once, overrides and rules included
         REQUIRE(count(std::string{"\"key\":\""} + key + "\"") == 1);
     }
     REQUIRE(usedIconsToJson(Document{}) == "[]");
+}
+
+TEST_CASE("hostile SVGs are refused or rasterized in bounded time", "[icons][hostile]") {
+    const std::string wrap = R"x(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">)x";
+    std::vector<std::string> refused = {
+        R"x(<!DOCTYPE svg [<!ENTITY a "&b;"><!ENTITY b "&a;">]><svg>&a;</svg>)x",
+        wrap + R"x(<path d="M0 0" fill="&#x75;rl(#a)"/></svg>)x",
+        wrap + R"x(<path d="M0 0L24 24" stroke="#000" stroke-dasharray="0.0001"/></svg>)x",
+        wrap + R"x(<path d="M0 0L24 24" stroke="#000" style="stroke-dasharray:0.0001"/></svg>)x",
+        wrap + R"x(<path d="M0 0" style="fill:URL(#a)"/></svg>)x",
+        wrap + R"x(<a href="javascript:alert(1)"><path d="M0 0"/></a></svg>)x",
+        wrap + R"x(<path d="M0 0" xlink:href="http://example.com/x.svg"/></svg>)x",
+        wrap + R"x(<path d="M0 0"/><script>while(1);</script></svg>)x",
+        wrap + "text</svg>",
+        wrap + R"x(<path d="M0 0")x",
+    };
+    std::string nested = wrap;
+    for (int i = 0; i < 100; ++i) nested += "<g>";
+    refused.push_back(nested);
+    for (const auto& svg : refused) {
+        INFO(svg.substr(0, 80));
+        REQUIRE(iconSvgProblem(svg) != nullptr);
+        REQUIRE_FALSE(rasterizeIconSvg(svg, 64).has_value());
+        REQUIRE(registerIconSvg("test/hostile", svg) != nullptr);
+    }
+
+    std::string manyPoints = wrap + R"x(<path d="M0 0)x";
+    for (int i = 0; i < 9000; ++i) manyPoints += " L" + std::to_string(i % 24) + " " + std::to_string((i * 7) % 24);
+    manyPoints += R"x(" stroke="#000" stroke-width="1" stroke-linejoin="round"/></svg>)x";
+    const std::vector<std::string> bounded = {
+        wrap + R"x(<path d="M0 0L1e30 1e30L-1e30 5Z" fill="#000"/></svg>)x",
+        wrap + R"x(<path d="M0 0C1e19 1e19 -1e19 1e19 24 24" stroke="#000" stroke-width="1e9" stroke-linejoin="round"/></svg>)x",
+        wrap + R"x(<path d="M0 0L24 24" stroke="#000" stroke-width="1e12" stroke-linecap="round"/></svg>)x",
+        R"x(<svg xmlns="http://www.w3.org/2000/svg" width="0.0001" height="1e30" viewBox="0 0 1 1"><circle r="1e9"/></svg>)x",
+        R"x(<svg xmlns="http://www.w3.org/2000/svg" width="1e30" height="1e30"><rect width="1e38" height="1e38"/></svg>)x",
+        wrap + R"x(<circle cx="12" cy="12" r="1e12" stroke="#000" stroke-width="3"/></svg>)x",
+        wrap + R"x(<path d="M0 0 A1e9 1e9 0 1 1 24 24 A1e-9 1e-9 0 1 0 0 0" fill="#000"/></svg>)x",
+        manyPoints,
+    };
+    for (const auto& svg : bounded) {
+        INFO(svg.substr(0, 80));
+        const auto started = std::chrono::steady_clock::now();
+        const auto mask = rasterizeIconSvg(svg, 512);
+        (void)mask;
+        REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::seconds(5));
+    }
+}
+
+TEST_CASE("many large icons degrade to smaller rasters and never fail", "[icons][render][atlas]") {
+    Document doc;
+    REQUIRE(doc.apply(CreateNode{frame(1)}));
+    for (int i = 0; i < 80; ++i) {
+        const std::string glyph = "atlas_probe_" + std::to_string(i);
+        REQUIRE(registerIconSvg(iconSourceKey(ref(glyph.c_str())),
+                                R"x(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r=")x" +
+                                    std::to_string(4 + i % 8) + R"x("/></svg>)x") == nullptr);
+        Node n = icon(10 + i, 1, glyph.c_str(), ("a" + std::to_string(100 + i)).c_str());
+        n.w = n.h = 60;
+        REQUIRE(doc.apply(CreateNode{n}));
+    }
+    std::vector<DrawItem> items;
+    const auto generation = textAtlasGeneration();
+    buildDrawList(doc, {-1000, -1000, 5000, 5000}, kDefaultModeId, items, {}, {}, 20.0);
+    REQUIRE(items.size() == 80);
+    REQUIRE(textAtlasGeneration() == generation);
+    for (const auto& item : items) {
+        REQUIRE(item.kind == DrawKind::Glyph);
+        REQUIRE(item.a.rect.w > 0);
+        REQUIRE(item.a.rect.w <= 512.0 / kTextAtlasSize);
+    }
+    const bool shrunk = std::any_of(items.begin(), items.end(), [](const DrawItem& item) { return item.a.rect.w < 512.0 / kTextAtlasSize; });
+    REQUIRE(shrunk);
+    buildDrawList(doc, {-1000, -1000, 5000, 5000}, kDefaultModeId, items, {}, {}, 20.0);
+    REQUIRE(items.size() == 80);
+}
+
+TEST_CASE("an icon with no ink is rasterized once and draws nothing", "[icons][render][atlas]") {
+    const std::string key = iconSourceKey(ref("atlas_blank"));
+    REQUIRE(registerIconSvg(key, R"x(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"></svg>)x") == nullptr);
+    REQUIRE(iconGlyphUv(key, 32).w == 0);
+    REQUIRE(iconGlyphUv(key, 32).w == 0);
+}
+
+TEST_CASE("the native interface reports the commit the built-in set is pinned to", "[icons][native]") {
+    char* commit = vc_material_symbols_commit();
+    REQUIRE(commit != nullptr);
+    REQUIRE(std::string{commit} == materialSymbolsSet().version);
+    REQUIRE(std::string{commit}.size() == 40);
+    vc_free(commit);
 }

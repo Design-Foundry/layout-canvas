@@ -1,10 +1,12 @@
 #include "vc/draw_list.hpp"
 #include "vc/geometry.hpp"
 #include "vc/icon.hpp"
+#include "vc/text.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <unordered_set>
 #include <map>
 
 namespace vc {
@@ -330,7 +332,7 @@ private:
         auto color=fill?withAlpha(*fill,alpha):kUnresolvedColor; if(!fill) color.a=float(alpha);
         const auto key=iconSourceKey(node.icon);
         if(iconRegistered(key)) {
-            const Rect uv=iconGlyphUv(key,iconRasterSide(side*pixelScale_));
+            const Rect uv=iconGlyphUv(key,budgetedIconSide(key,iconRasterSide(side*pixelScale_)));
             if(uv.w>0 && uv.h>0) {
                 out_.push_back({DrawKind::Glyph,false,quad,{uv,{}},{},color,intersect(clip,box)});
                 ++drawn_;
@@ -340,6 +342,16 @@ private:
         const double width=std::max(1.0,side/12);
         out_.push_back({DrawKind::Stroke,false,quad,{quad,{}},{grow(quad,-width),{}},color,clip,0.0,StrokeStyle::Solid,width});
         ++drawn_;
+    }
+
+    /// Halves the raster side of an icon that would take the rasters of one build past a quarter of the atlas,
+    /// so a crowd of large icons cannot push the text glyphs out.
+    int budgetedIconSide(const std::string& key, int side) {
+        constexpr std::size_t budget=std::size_t(kTextAtlasSize)*kTextAtlasSize/4;
+        const auto cost=[](int s){return std::size_t(s)*std::size_t(s);};
+        while(side>16 && !iconRasters_.contains(key+"@"+std::to_string(side)) && iconPixels_+cost(side)>budget) side/=2;
+        if(iconRasters_.insert(key+"@"+std::to_string(side)).second) iconPixels_+=cost(side);
+        return side;
     }
 
     static double extent(const std::vector<ResolvedShadow>& shadows, const std::optional<ResolvedStroke>& stroke) {
@@ -397,6 +409,8 @@ private:
     Id root_;
     Vec2 scroll_;
     double pixelScale_ = 1.0;
+    std::unordered_set<std::string> iconRasters_;
+    std::size_t iconPixels_ = 0;
     Id isolate_;
     std::unordered_set<Id> path_;
     bool inside_ = false;

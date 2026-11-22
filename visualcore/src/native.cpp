@@ -219,6 +219,10 @@ char* vc_icon_source_key(const char* icon) {
     });
 }
 
+char* vc_material_symbols_commit(void) {
+    return guarded([&]() -> char* { return copyOut(vc::materialSymbolsSet().version); });
+}
+
 char* vc_icon_normalize(const char* icon) {
     vc::clearDiagnostic();
     return guarded([&]() -> char* {
