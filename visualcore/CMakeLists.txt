@@ -99,6 +99,7 @@ if(EMSCRIPTEN)
         -sEXPORT_NAME=createVisualCore
         -sENVIRONMENT=web
         -sALLOW_MEMORY_GROWTH=1
+        -sSTACK_SIZE=4194304
         --emit-tsd=visualcore.d.ts
         $<$<CONFIG:Debug>:-g -sASSERTIONS=2>
         $<$<CONFIG:Release>:-O3>

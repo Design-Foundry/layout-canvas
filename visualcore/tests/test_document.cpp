@@ -2,6 +2,8 @@
 #include <optional>
 #include <vector>
 #include "vc/document.hpp"
+#include "vc/draw_list.hpp"
+#include "vc/layout.hpp"
 #include "vc/fractional_index.hpp"
 #include "vc/session.hpp"
 
@@ -312,4 +314,54 @@ TEST_CASE("undone edits travel and confirm like any other edit") {
     REQUIRE(p.b.document().find(idOf(2))->x == 0);
     p.a.receive(log);
     REQUIRE(p.a.isSettled());
+}
+
+namespace {
+
+constexpr std::uint64_t kChainBase = 100;
+
+Id buildChain(Document& doc, int levels) {
+    Id parent = idOf(0);
+    for (int level = 0; level < levels; ++level) {
+        const Id id = idOf(kChainBase + level);
+        Node frame = node(kChainBase + level, NodeType::Frame, parent.lo, "a");
+        REQUIRE(doc.apply(CreateNode{frame}));
+        parent = id;
+    }
+    return parent;
+}
+
+} // namespace
+
+TEST_CASE("nesting is bounded and the deepest document still lays out and draws") {
+    Document doc;
+    REQUIRE(doc.apply(CreateNode{node(1, NodeType::Component, 0, "a")}));
+    REQUIRE(doc.apply(CreateNode{node(2, NodeType::Frame, 1, "a")}));
+    REQUIRE(doc.apply(CreateNode{node(3, NodeType::Rect, 2, "a")}));
+
+    const Id deepest = buildChain(doc, Document::kMaxNestingDepth - 1);
+    Node instance = node(4, NodeType::Instance, deepest.lo, "a");
+    instance.component = idOf(1);
+    REQUIRE(doc.apply(CreateNode{instance}));
+    REQUIRE(doc.depthOf(idOf(4)) == Document::kMaxNestingDepth);
+
+    SECTION("one more level is refused") {
+        REQUIRE(doc.apply(CreateNode{node(5, NodeType::Frame, deepest.lo, "b")}));
+        REQUIRE_FALSE(doc.apply(CreateNode{node(8, NodeType::Rect, 5, "a")}));
+    }
+
+    SECTION("moving a subtree under a deep parent counts its height") {
+        REQUIRE(doc.apply(CreateNode{node(6, NodeType::Frame, 0, "b")}));
+        REQUIRE(doc.apply(CreateNode{node(7, NodeType::Rect, 6, "a")}));
+        REQUIRE_FALSE(doc.apply(MoveNode{idOf(6), deepest, "z"}));
+        REQUIRE(doc.apply(MoveNode{idOf(7), deepest, "z"}));
+    }
+
+    SECTION("layout and draw list walk every level") {
+        const auto layout = vc::computeLayout(doc, vc::kDefaultModeId);
+        REQUIRE(layout.size() >= static_cast<std::size_t>(Document::kMaxNestingDepth));
+        std::vector<vc::DrawItem> items;
+        vc::buildDrawList(doc, vc::Rect{-1e6, -1e6, 2e6, 2e6}, vc::kDefaultModeId, items);
+        REQUIRE_FALSE(items.empty());
+    }
 }
