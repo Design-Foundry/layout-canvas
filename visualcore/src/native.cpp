@@ -236,6 +236,14 @@ char* vc_document_modes(const vc_document* document) {
     return guarded([&]() -> char* { return document ? copyOut(vc::modesToJson(document->document)) : nullptr; });
 }
 
+char* vc_derived_id(const char* scope, const char* node) {
+    return guarded([&]() -> char* {
+        const auto scopeId = vc::Id::parse(viewOf(scope));
+        const auto nodeId = vc::Id::parse(viewOf(node));
+        return scopeId && nodeId ? copyOut(vc::derivedId(*scopeId, *nodeId).toString()) : nullptr;
+    });
+}
+
 void vc_free(char* text) {
     std::free(text);
 }

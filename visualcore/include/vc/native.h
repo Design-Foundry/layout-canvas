@@ -63,6 +63,10 @@ VC_API char* vc_document_node(const vc_document* document, const char* id, const
 VC_API char* vc_document_tokens(const vc_document* document, const char* mode);
 VC_API char* vc_document_modes(const vc_document* document);
 
+/* The id of the copy of the node `node` made by a CloneNode whose new root id is `scope`, as a UUID
+ * string, or null if either is not a UUID. */
+VC_API char* vc_derived_id(const char* scope, const char* node);
+
 VC_API void vc_free(char* text);
 
 #ifdef __cplusplus
