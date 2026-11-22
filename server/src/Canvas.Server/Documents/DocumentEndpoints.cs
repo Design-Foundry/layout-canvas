@@ -21,6 +21,8 @@ public static class DocumentEndpoints
         documents.MapGet("/{id:guid}/ops", GetOps).WithName(nameof(GetOps)).ProducesProblem(StatusCodes.Status410Gone);
         documents.MapPut("/{id:guid}/selection", PutSelection).WithName(nameof(PutSelection)).ProducesValidationProblem();
         documents.MapDelete("/{id:guid}/selection", DeleteSelection).WithName(nameof(DeleteSelection));
+        documents.MapGet("/{id:guid}/render-requests", GetRenderRequest).WithName(nameof(GetRenderRequest));
+        documents.MapPut("/{id:guid}/render-requests/{requestId:guid}/result", PutRenderResult).WithName(nameof(PutRenderResult)).ProducesValidationProblem();
 
         return documents;
     }
@@ -87,10 +89,41 @@ public static class DocumentEndpoints
     }
 
     /// <summary>Drops the selection an editor reported, when it closes. Does nothing if another editor reported since.</summary>
-    private static NoContent DeleteSelection(Guid id, Guid editorId, EditorSelections selections)
+    private static NoContent DeleteSelection(Guid id, Guid editorId, EditorSelections selections, RenderRequests renders)
     {
         selections.Clear(id, editorId);
+        renders.EditorGone(id, editorId);
         return TypedResults.NoContent();
+    }
+
+    /// <summary>Long-polls for a node the live editor should render. No content when none came within <paramref name="wait"/> seconds.</summary>
+    private static async Task<Results<Ok<RenderRequest>, NoContent>> GetRenderRequest(
+        Guid id, Guid editorId, RenderRequests renders, CancellationToken ct, int wait = 20) =>
+        await renders.ClaimAsync(id, editorId, TimeSpan.FromSeconds(Math.Clamp(wait, 0, 25)), ct) is { } request
+            ? TypedResults.Ok(request)
+            : TypedResults.NoContent();
+
+    /// <summary>Delivers a rendered PNG, or the reason it failed, for a request this editor claimed.</summary>
+    private static Results<NoContent, NotFound, ValidationProblem> PutRenderResult(
+        Guid id, Guid requestId, RenderResult result, RenderRequests renders)
+    {
+        RenderedImage? image = null;
+        if (result.Error is null)
+        {
+            try
+            {
+                image = new RenderedImage(Convert.FromBase64String(result.Png ?? ""), result.Width, result.Height, result.Scale);
+            }
+            catch (FormatException)
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["png"] = ["Not valid base64."] });
+            }
+            if (image.Png.Length == 0 || image.Width is < 1 or > RenderRequests.MaxSize || image.Height is < 1 or > RenderRequests.MaxSize)
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["png"] = ["The image is empty or larger than the limit."] });
+            }
+        }
+        return renders.Complete(id, requestId, result.EditorId, image, result.Error) ? TypedResults.NoContent() : TypedResults.NotFound();
     }
 
     /// <summary>Logs the ops the document accepts. Refused ops come back without a sequence number.</summary>

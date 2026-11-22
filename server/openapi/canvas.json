@@ -429,6 +429,114 @@
         }
       }
     },
+    "/api/documents/{id}/render-requests": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "operationId": "GetRenderRequest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "editorId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderRequest"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/render-requests/{requestId}/result": {
+      "put": {
+        "tags": [
+          "Documents"
+        ],
+        "operationId": "PutRenderResult",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/fonts/google/families": {
       "get": {
         "tags": [
@@ -1208,6 +1316,77 @@
             "type": "string"
           }
         }
+      },
+      "RenderRequest": {
+        "required": [
+          "id",
+          "nodeId",
+          "scale",
+          "maxSize"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nodeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scale": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxSize": {
+            "type": "integer",
+            "description": "Longest side, in pixels, the image may have. The editor lowers the scale to fit.",
+            "format": "int32"
+          }
+        },
+        "description": "A node an agent wants to see, handed to the editor that has the document open."
+      },
+      "RenderResult": {
+        "required": [
+          "editorId",
+          "png",
+          "width",
+          "height",
+          "scale",
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "editorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "png": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "scale": {
+            "type": "number",
+            "format": "double"
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "description": "What an editor sends back: a PNG (base64), its size and the scale it used, or the reason it could not render."
       },
       "SelectionReport": {
         "required": [

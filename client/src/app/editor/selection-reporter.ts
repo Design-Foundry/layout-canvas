@@ -10,7 +10,7 @@ const RENEW_MS = 10_000;
  * the server forgets a selection that is not renewed.
  */
 export class SelectionReporter {
-  private readonly editorId = crypto.randomUUID();
+  readonly editorId = crypto.randomUUID();
   private ids: readonly string[] = [];
   private reported = false;
   private closed = false;
