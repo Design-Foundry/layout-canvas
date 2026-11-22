@@ -209,6 +209,41 @@ public sealed class McpToolsTests(CanvasFactory factory) : IClassFixture<CanvasF
     }
 
     [Fact]
+    public async Task Copy_references_that_name_nothing_valid_refuse_the_whole_batch_at_the_op_and_field()
+    {
+        var document = await Tools.CreateDocument("Rows", Ct);
+        var setup = await Tools.ApplyOps(document.Id,
+        [
+            Op("CreateNode", new { node = new { id = "$list", type = "frame", name = "List", w = 200, h = 100 } }),
+            Op("CreateNode", new { node = new { id = "$row", type = "frame", name = "Row", parent = "$list", w = 200, h = 20 } }),
+            Op("CreateNode", new { node = new { id = "$other", type = "frame", name = "Other", w = 50, h = 50 } }),
+        ], Ct);
+        var ids = setup.GetProperty("ids");
+        var (list, row, other) = (ids.GetProperty("$list").GetGuid(), ids.GetProperty("$row").GetGuid(), ids.GetProperty("$other").GetGuid());
+        var before = (await Tools.GetDocument(document.Id, null, Ct)).GetProperty("layers").GetArrayLength();
+
+        async Task Refused(string expected, params AgentOp[] ops)
+        {
+            var error = await Assert.ThrowsAsync<McpException>(() => Tools.ApplyOps(document.Id, ops, Ct));
+            Assert.Equal($"Nothing was applied: {expected}", error.Message);
+            Assert.Equal(before, (await Tools.GetDocument(document.Id, null, Ct)).GetProperty("layers").GetArrayLength());
+        }
+
+        var fresh = Op("CreateNode", new { node = new { id = "$fresh", type = "frame", name = "Fresh", w = 10, h = 10 } });
+        await Refused("ops[2].id: $nope is not defined earlier in the batch",
+            fresh, Op("CloneNode", new { source = row, id = "$copy", parent = list }), Op("SetProps", new { id = "$copy/$nope", patch = new { name = "x" } }));
+        await Refused("ops[1].id: $fresh is not the id of a CloneNode earlier in the batch",
+            fresh, Op("SetProps", new { id = "$fresh/" + row, patch = new { name = "x" } }));
+        await Refused("ops[0].id: $copy is not defined earlier in the batch",
+            Op("SetProps", new { id = "$copy/" + row, patch = new { name = "x" } }), Op("CloneNode", new { source = row, id = "$copy", parent = list }));
+        await Refused($"ops[1].id: {other} is not a node of the source subtree of the clone $copy",
+            Op("CloneNode", new { source = row, id = "$copy", parent = list }), Op("SetProps", new { id = "$copy/" + other, patch = new { name = "x" } }));
+        await Refused($"ops[1].patches.$copy/{list}: {list} is not a node of the source subtree of the clone $copy",
+            Op("CloneNode", new { source = row, id = "$copy", parent = list }),
+            Op("CloneNode", new { source = row, id = "$again", parent = list, patches = new Dictionary<string, object> { ["$copy/" + list] = new { name = "x" } } }));
+    }
+
+    [Fact]
     public async Task Import_errors_name_where_and_why()
     {
         var snapshot = JsonSerializer.SerializeToElement(new

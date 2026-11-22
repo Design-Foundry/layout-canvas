@@ -115,15 +115,17 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         {
             throw new McpException($"Send between 1 and {AppendOpsRequest.MaxOps} ops.");
         }
-        var (found, existing) = await host.ReadAsync(documentId, core => (LastOrders: LastOrders(core), ComponentNames: ComponentNames(core)), ct);
+        var (found, existing) = await host.ReadAsync(documentId, core => (LastOrders: LastOrders(core), ComponentNames: ComponentNames(core), Parents: Parents(core)), ct);
         if (!found)
         {
             throw NotFound(documentId);
         }
-        var (prepared, ids) = OpBatch.Prepare(ops, existing.LastOrders, existing.ComponentNames);
+        List<OpInput> prepared;
+        Dictionary<string, Guid> ids;
         AppendOpsResponse? response;
         try
         {
+            (prepared, ids) = OpBatch.Prepare(ops, existing.LastOrders, existing.ComponentNames, existing.Parents);
             response = await host.AppendAsync(documentId, prepared, ct);
         }
         catch (MalformedOpsException malformed)
@@ -184,6 +186,21 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
             }
         }
         return last;
+    }
+
+    private static Dictionary<Guid, Guid> Parents(VisualCoreDocument core)
+    {
+        var parents = new Dictionary<Guid, Guid>();
+        foreach (var row in core.Layers().EnumerateArray())
+        {
+            var id = row.GetProperty("id").GetGuid();
+            if (row.TryGetProperty("inInstance", out _) || core.Node(id) is not { } node)
+            {
+                continue;
+            }
+            parents[id] = node.TryGetProperty("parent", out var p) ? p.GetGuid() : Guid.Empty;
+        }
+        return parents;
     }
 
     private static Dictionary<Guid, string> ComponentNames(VisualCoreDocument core) =>
