@@ -41,11 +41,17 @@ struct TilePixels {
 };
 [[nodiscard]] TilePixels exportTilePixels(const ExportPlan& plan, std::uint32_t column, std::uint32_t row);
 
-/// Fills `out` with the paint of node `id` and its descendants that falls inside `view`, clipped to the
-/// node's bounds, in paint order. Canvas overlays are never part of it. Returns the node's bounds,
-/// or nothing if the node does not exist or is hidden.
-std::optional<Rect> buildExportDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode,
-                                        std::vector<DrawItem>& out);
+/// The rectangle an export of node `id` covers: its box grown to everything it paints, such as drop
+/// shadows, outside or center strokes and children that overflow it. Content clipped by a descendant
+/// frame counts only where it shows. Grown edges are rounded outward to whole units. Nothing if the node
+/// does not exist or is hidden.
+[[nodiscard]] std::optional<Rect> exportBounds(const Document& document, const Id& id, const Id& mode);
+
+/// Fills `out` with the paint of node `id` and its descendants that falls inside `view`, in paint order,
+/// without the clipping, opacity or paint of its ancestors. Canvas overlays are never part of it. False
+/// if the node does not exist or is hidden.
+bool buildExportDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode,
+                         std::vector<DrawItem>& out);
 
 /// Converts premultiplied RGBA (or BGRA when `bgra`) to straight RGBA in place.
 void unpremultiplyPixels(std::uint8_t* pixels, std::size_t pixelCount, bool bgra);

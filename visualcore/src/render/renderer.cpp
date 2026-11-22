@@ -216,7 +216,7 @@ void Renderer::exportNode(const Id& id, double scale, ExportPlanCallback onPlan,
     if (!s.device) return onDone("renderer is not ready");
     if (s.exporting) return onDone("another export is running");
     if (s.editor.presenting()) return onDone("exports are unavailable while presenting");
-    const auto bounds = worldBounds(s.document, id, s.editor.activeMode());
+    const auto bounds = exportBounds(s.document, id, s.editor.activeMode());
     if (!bounds) return onDone("node not found");
     wgpu::Limits limits{};
     s.device.GetLimits(&limits);
@@ -243,11 +243,13 @@ void Renderer::State::exportStep(const std::shared_ptr<ExportJob>& job) {
     const std::uint32_t column = job->next % plan.columns, row = job->next / plan.columns;
     ++job->next;
     const Rect world = exportTileWorld(plan, job->bounds, column, row);
+    const double margin = 2.0 / plan.scale;
+    const Rect view{world.x - margin, world.y - margin, world.w + 2 * margin, world.h + 2 * margin};
     const TilePixels tile = exportTilePixels(plan, column, row);
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         const auto atlasGeneration = textAtlasGeneration();
-        if (!buildExportDrawList(document, job->node, world, job->mode, drawItems)) {
+        if (!buildExportDrawList(document, job->node, view, job->mode, drawItems)) {
             exporting = false;
             return job->onDone("node is no longer available");
         }

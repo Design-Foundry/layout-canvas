@@ -1,5 +1,6 @@
 const UNSAFE = /[\u0000-\u001f<>:"/\\|?*]+/g;
 const MAX_NAME = 100;
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 export const EXPORT_SCALES = [1, 2, 3] as const;
 export type ExportScale = (typeof EXPORT_SCALES)[number];
@@ -10,25 +11,25 @@ export function formatScale(scale: number): string {
 
 /** `<node name>@<scale>x.png` with characters that file systems reject replaced. */
 export function exportFileName(name: string, scale: number): string {
-  const base =
+  const cleaned =
     name
       .replace(/\s+/g, ' ')
       .replace(UNSAFE, '-')
       .trim()
-      .replace(/^\.+|[. ]+$/g, '')
       .slice(0, MAX_NAME)
-      .trim() || 'Export';
+      .replace(/^\.+|[. ]+$/g, '') || 'Export';
+  const base = RESERVED.test(cleaned) ? `${cleaned}-` : cleaned;
   return `${base}@${formatScale(scale)}x.png`;
 }
 
-/** Names for several exports at once: repeats get a numeric suffix before the scale. */
+/** Names for several exports at once: repeats get a numeric suffix before the scale, ignoring case. */
 export function createFileNamer(): (name: string, scale: number) => string {
-  const used = new Map<string, number>();
+  const used = new Set<string>();
   return (name, scale) => {
-    const file = exportFileName(name, scale);
-    const count = (used.get(file) ?? 0) + 1;
-    used.set(file, count);
-    return count === 1 ? file : exportFileName(`${name} ${count}`, scale);
+    let file = exportFileName(name, scale);
+    for (let count = 2; used.has(file.toLowerCase()); count++) file = exportFileName(`${name} ${count}`, scale);
+    used.add(file.toLowerCase());
+    return file;
   };
 }
 

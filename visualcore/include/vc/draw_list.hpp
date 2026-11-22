@@ -54,6 +54,12 @@ struct DrawItem {
 std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,
                           const Id& root = {}, Vec2 scroll = {});
 
+/// Like buildDrawList, but for node `id` (any depth, expanded instance ids included) and what it contains
+/// only: nothing of its ancestors, siblings or their clips and opacity is applied. False if the node is
+/// missing or hidden.
+bool buildIsolatedDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode,
+                           std::vector<DrawItem>& out);
+
 /// Translate native presentation geometry, keeping glyph/image UV coordinates unchanged.
 void transformDrawItem(DrawItem& item, Vec2 offset, double opacity,
                        std::optional<Rect> viewport = std::nullopt, double scale = 1);

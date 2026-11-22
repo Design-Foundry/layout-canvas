@@ -34,6 +34,22 @@ describe('export file names', () => {
   });
 });
 
+describe('file name collisions', () => {
+  it('skips names taken by an earlier suffix and ignores case', () => {
+    const name = createFileNamer();
+    expect([name('Card', 1), name('Card 2', 1), name('Card', 1), name('card', 1)]).toEqual([
+      'Card@1x.png',
+      'Card 2@1x.png',
+      'Card 3@1x.png',
+      'card 4@1x.png',
+    ]);
+  });
+
+  it('avoids reserved Windows device names', () => {
+    expect(exportFileName('CON', 1)).toBe('CON-@1x.png');
+  });
+});
+
 describe('PNG encoding', () => {
   it('writes a valid PNG that keeps straight alpha', async () => {
     const rgba = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 0, 10, 20, 30, 128, 1, 2, 3, 4]);

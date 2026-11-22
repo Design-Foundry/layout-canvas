@@ -13,16 +13,6 @@ Rect intersect(const Rect& a, const Rect& b) {
     return {x0, y0, std::max(0.0, x1 - x0), std::max(0.0, y1 - y0)};
 }
 
-bool within(const Document& document, const Id& ancestor, Id id) {
-    for (int depth = 0; depth < 4096 && !id.isNil(); ++depth) {
-        if (id == ancestor) return true;
-        const Node* node = document.view(id);
-        if (!node) return false;
-        id = node->parent;
-    }
-    return false;
-}
-
 } // namespace
 
 std::optional<ExportPlan> planExport(const Rect& bounds, double scale, std::uint32_t maxTexture) {
@@ -55,20 +45,31 @@ Rect exportTileWorld(const ExportPlan& plan, const Rect& bounds, std::uint32_t c
     return {bounds.x + tile.x / plan.scale, bounds.y + tile.y / plan.scale, tile.w / plan.scale, tile.h / plan.scale};
 }
 
-std::optional<Rect> buildExportDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode,
-                                        std::vector<DrawItem>& out) {
+std::optional<Rect> exportBounds(const Document& document, const Id& id, const Id& mode) {
     const Node* node = document.view(id);
-    const auto bounds = worldBounds(document, id, mode);
-    if (!node || !node->visible || !bounds) return std::nullopt;
-    std::vector<DrawItem> all;
-    buildDrawList(document, intersect(view, *bounds), mode, all);
-    out.clear();
-    for (DrawItem& item : all) {
-        if (!within(document, id, item.node)) continue;
-        item.clip = intersect(item.clip, *bounds);
-        out.push_back(std::move(item));
+    const auto box = worldBounds(document, id, mode);
+    if (!node || !node->visible || !box) return std::nullopt;
+    std::vector<DrawItem> items;
+    buildIsolatedDrawList(document, id, {-1e9, -1e9, 2e9, 2e9}, mode, items);
+    double x0 = box->x, y0 = box->y, x1 = box->x + box->w, y1 = box->y + box->h;
+    for (const DrawItem& item : items) {
+        const Rect r = intersect(item.quad, item.clip);
+        if (!(r.w > 0.0) || !(r.h > 0.0)) continue;
+        x0 = std::min(x0, r.x);
+        y0 = std::min(y0, r.y);
+        x1 = std::max(x1, r.x + r.w);
+        y1 = std::max(y1, r.y + r.h);
     }
-    return bounds;
+    if (x0 < box->x) x0 = std::floor(x0);
+    if (y0 < box->y) y0 = std::floor(y0);
+    if (x1 > box->x + box->w) x1 = std::ceil(x1);
+    if (y1 > box->y + box->h) y1 = std::ceil(y1);
+    return Rect{x0, y0, x1 - x0, y1 - y0};
+}
+
+bool buildExportDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode,
+                         std::vector<DrawItem>& out) {
+    return buildIsolatedDrawList(document, id, view, mode, out);
 }
 
 void unpremultiplyPixels(std::uint8_t* pixels, std::size_t pixelCount, bool bgra) {

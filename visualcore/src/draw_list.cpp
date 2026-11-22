@@ -146,6 +146,15 @@ public:
     Builder(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root,Vec2 scroll)
         : document_(document), view_(view), mode_(mode), out_(out),root_(root),scroll_(scroll) {}
 
+    /// Builds only `target` and what it contains, ignoring the clip, opacity and paint of its ancestors.
+    /// Afterwards `isolated()` is the item range that belongs to the target.
+    Builder& isolate(const Id& target) {
+        isolate_=target;
+        for(const Node* node=document_.view(target);node;node=document_.view(node->parent)) if(node->id!=target) path_.insert(node->id);
+        return *this;
+    }
+    [[nodiscard]] std::pair<std::size_t,std::size_t> isolated() const { return {isolatedBegin_,isolatedEnd_}; }
+
     std::size_t run() {
         out_.clear();
         Rect clip{-kUnbounded,-kUnbounded,2*kUnbounded,2*kUnbounded};
@@ -165,16 +174,40 @@ private:
         return next;
     }
 
-    void collect(const Id& parent, Vec2 origin, const Rect& clip, double opacity) {
-        const Rect visibleArea = intersect(view_, clip);
+    struct Isolation {
+        Builder& builder;
+        bool active;
+        ~Isolation() {
+            if(!active) return;
+            builder.isolatedEnd_=builder.out_.size();
+            builder.inside_=false;
+        }
+    };
+
+    void collect(const Id& parent, Vec2 origin, const Rect& parentClip, double parentOpacity) {
         for (const Id& id : document_.viewChildren(parent)) {
             if(parent.isNil() && !root_.isNil() && id!=root_) continue;
+            const bool onPath=path_.count(id)>0;
+            if(!isolate_.isNil() && !inside_ && !onPath && id!=isolate_) continue;
             const Node& node = *document_.view(id);
             if (!node.visible) {
                 continue;
             }
             const Rect local = document_.box(id, mode_);
             const Rect box{origin.x + local.x, origin.y + local.y, local.w, local.h};
+            if(onPath) {
+                collect(id, {box.x, box.y}, {-kUnbounded,-kUnbounded,2*kUnbounded,2*kUnbounded}, 1.0);
+                continue;
+            }
+            const bool target=!isolate_.isNil() && id==isolate_;
+            const Rect clip=target?Rect{-kUnbounded,-kUnbounded,2*kUnbounded,2*kUnbounded}:parentClip;
+            const double opacity=target?1.0:parentOpacity;
+            const Rect visibleArea = intersect(view_, clip);
+            Isolation isolation{*this,target};
+            if(target) {
+                isolatedBegin_=out_.size();
+                inside_=true;
+            }
             const double alpha = opacity * document_.resolveOpacity(node.opacity, mode_);
             const auto ownStart=out_.size();
             if(node.type==NodeType::Image) {
@@ -338,12 +371,28 @@ private:
     std::size_t drawn_ = 0;
     Id root_;
     Vec2 scroll_;
+    Id isolate_;
+    std::unordered_set<Id> path_;
+    bool inside_ = false;
+    std::size_t isolatedBegin_ = 0;
+    std::size_t isolatedEnd_ = 0;
 };
 
 } // namespace
 
 std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root,Vec2 scroll) {
     return Builder{document, view, mode, out,root,scroll}.run();
+}
+
+bool buildIsolatedDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode, std::vector<DrawItem>& out) {
+    const Node* node=document.view(id);
+    if(!node || !node->visible) return false;
+    Builder builder{document, view, mode, out, {}, {}};
+    builder.isolate(id).run();
+    const auto [begin,end]=builder.isolated();
+    out.resize(end);
+    out.erase(out.begin(),out.begin()+std::ptrdiff_t(begin));
+    return true;
 }
 
 } // namespace vc
