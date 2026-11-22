@@ -14,6 +14,7 @@ export class SelectionReporter {
   private ids: readonly string[] = [];
   private reported = false;
   private closed = false;
+  private inFlight: Promise<void> = Promise.resolve();
   private debounce?: ReturnType<typeof setTimeout>;
   private readonly renew: ReturnType<typeof setInterval>;
 
@@ -43,19 +44,25 @@ export class SelectionReporter {
     this.closed = true;
     clearTimeout(this.debounce);
     clearInterval(this.renew);
-    this.api
-      .invoke(deleteSelection, { id: this.documentId, editorId: this.editorId })
-      .catch(() => undefined);
+    this.inFlight = this.inFlight.then(() =>
+      this.api
+        .invoke(deleteSelection, { id: this.documentId, editorId: this.editorId })
+        .then(
+          () => undefined,
+          () => undefined,
+        ),
+    );
   }
 
-  private async send(): Promise<void> {
-    try {
-      await this.api.invoke(putSelection, {
-        id: this.documentId,
-        body: { editorId: this.editorId, ids: [...this.ids] },
-      });
-    } catch {
-      // The next change or renewal tries again.
-    }
+  private send(): Promise<void> {
+    if (this.closed) return this.inFlight;
+    const body = { editorId: this.editorId, ids: [...this.ids] };
+    this.inFlight = this.inFlight.then(() =>
+      this.api.invoke(putSelection, { id: this.documentId, body }).then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return this.inFlight;
   }
 }

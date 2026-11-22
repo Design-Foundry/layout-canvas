@@ -11,8 +11,9 @@ public sealed record SelectionReport(Guid EditorId, [Required, MaxLength(EditorS
 public sealed record EditorSelection(Guid EditorId, IReadOnlyList<Guid> Ids, DateTimeOffset ReportedAt);
 
 /// <summary>
-/// The selection of the editor that reported last for each document, in memory. A report that is not
-/// renewed within <see cref="Lifetime"/> counts as a disconnected editor.
+/// The selection of each editor that reported for a document, in memory. The live selection is the one
+/// that changed last; repeating an unchanged selection only keeps its editor connected. A report that is
+/// not renewed within <see cref="Lifetime"/> counts as a disconnected editor.
 /// </summary>
 public sealed class EditorSelections(TimeProvider clock)
 {
@@ -20,34 +21,74 @@ public sealed class EditorSelections(TimeProvider clock)
 
     public static readonly TimeSpan Lifetime = TimeSpan.FromSeconds(30);
 
-    private readonly ConcurrentDictionary<Guid, EditorSelection> selections = new();
+    private sealed record Entry(IReadOnlyList<Guid> Ids, long Change, DateTimeOffset ChangedAt, DateTimeOffset RenewedAt);
 
-    public void Report(Guid documentId, Guid editorId, IReadOnlyList<Guid> ids) =>
-        selections[documentId] = new EditorSelection(editorId, ids, clock.GetUtcNow());
+    private long changes;
 
-    /// <summary>Forgets the selection if <paramref name="editorId"/> still holds it.</summary>
-    public void Clear(Guid documentId, Guid editorId)
+    private readonly Dictionary<Guid, Dictionary<Guid, Entry>> documents = new();
+
+    public void Report(Guid documentId, Guid editorId, IReadOnlyList<Guid> ids)
     {
-        if (selections.TryGetValue(documentId, out var current) && current.EditorId == editorId)
+        var now = clock.GetUtcNow();
+        lock (documents)
         {
-            selections.TryRemove(new KeyValuePair<Guid, EditorSelection>(documentId, current));
+            if (!documents.TryGetValue(documentId, out var editors))
+            {
+                documents[documentId] = editors = new();
+            }
+            Prune(editors, now);
+            editors[editorId] = editors.TryGetValue(editorId, out var previous) && previous.Ids.SequenceEqual(ids)
+                ? previous with { RenewedAt = now }
+                : new Entry(ids, ++changes, now, now);
         }
     }
 
-    public void Forget(Guid documentId) => selections.TryRemove(documentId, out _);
+    /// <summary>Forgets the selection <paramref name="editorId"/> reported. Other editors keep theirs.</summary>
+    public void Clear(Guid documentId, Guid editorId)
+    {
+        lock (documents)
+        {
+            if (documents.TryGetValue(documentId, out var editors) && editors.Remove(editorId) && editors.Count == 0)
+            {
+                documents.Remove(documentId);
+            }
+        }
+    }
+
+    public void Forget(Guid documentId)
+    {
+        lock (documents)
+        {
+            documents.Remove(documentId);
+        }
+    }
 
     /// <summary>The live selection, or null when no editor is connected.</summary>
     public EditorSelection? Current(Guid documentId)
     {
-        if (!selections.TryGetValue(documentId, out var current))
+        var now = clock.GetUtcNow();
+        lock (documents)
         {
-            return null;
+            if (!documents.TryGetValue(documentId, out var editors))
+            {
+                return null;
+            }
+            Prune(editors, now);
+            if (editors.Count == 0)
+            {
+                documents.Remove(documentId);
+                return null;
+            }
+            var (editorId, entry) = editors.MaxBy(e => e.Value.Change);
+            return new EditorSelection(editorId, entry.Ids, entry.ChangedAt);
         }
-        if (clock.GetUtcNow() - current.ReportedAt > Lifetime)
+    }
+
+    private static void Prune(Dictionary<Guid, Entry> editors, DateTimeOffset now)
+    {
+        foreach (var editorId in editors.Where(e => now - e.Value.RenewedAt > Lifetime).Select(e => e.Key).ToList())
         {
-            selections.TryRemove(new KeyValuePair<Guid, EditorSelection>(documentId, current));
-            return null;
+            editors.Remove(editorId);
         }
-        return current;
     }
 }

@@ -347,6 +347,22 @@ public sealed class SelectionTests(CanvasFactory factory) : IClassFixture<Canvas
         Assert.Null(selections.Current(document));
     }
 
+    [Fact]
+    public void Repeating_an_unchanged_selection_does_not_take_over_and_a_closed_editor_falls_back()
+    {
+        var selections = new EditorSelections(new ManualClock());
+        var (document, first, second) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        Guid[] older = [Guid.NewGuid()], newer = [Guid.NewGuid()];
+
+        selections.Report(document, first, older);
+        selections.Report(document, second, newer);
+        selections.Report(document, first, older);
+        Assert.Equal(newer, selections.Current(document)!.Ids);
+
+        selections.Clear(document, second);
+        Assert.Equal(older, selections.Current(document)!.Ids);
+    }
+
     private sealed class ManualClock : TimeProvider
     {
         private DateTimeOffset now = DateTimeOffset.UnixEpoch;

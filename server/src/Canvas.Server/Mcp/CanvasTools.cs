@@ -185,12 +185,13 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSe
         {
             throw NotFound(documentId);
         }
-        var head = await store.GetHeadAsync(documentId, ct) ?? throw NotFound(documentId);
-        if (sinceSeq > head.HeadSeq)
-        {
-            throw new McpException($"sinceSeq {sinceSeq} is ahead of headSeq {head.HeadSeq}.");
-        }
         var page = result.Page;
+        var head = page is null ? await store.GetHeadAsync(documentId, ct) ?? throw NotFound(documentId) : null;
+        var headSeq = page?.HeadSeq ?? head!.HeadSeq;
+        if (sinceSeq > headSeq)
+        {
+            throw new McpException($"sinceSeq {sinceSeq} is ahead of headSeq {headSeq}.");
+        }
         var gap = result.Status == OpsQueryStatus.Compacted
             || page is { Ops.Count: 0 } && sinceSeq < page.HeadSeq
             || page is { Ops.Count: > 0 } && page.Ops[0].Seq != sinceSeq + 1;
@@ -198,9 +199,9 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSe
         {
             return JsonSerializer.SerializeToElement(new
             {
-                HeadSeq = head.HeadSeq,
+                HeadSeq = headSeq,
                 Compacted = true,
-                SnapshotSeq = head.SnapshotSeq,
+                SnapshotSeq = result.SnapshotSeq,
                 Changes = Array.Empty<Change>(),
                 Message = $"Changes after seq {sinceSeq} are no longer kept: they are folded into the document. Read the document again with get_document and continue from its headSeq.",
             }, JsonOptions);
