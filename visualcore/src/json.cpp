@@ -1777,6 +1777,10 @@ std::string inspectNodeJson(const Document& document, const Node& source, const 
     }
     const Rect box = document.box(node.id, mode);
     out["box"] = {{"x", box.x}, {"y", box.y}, {"w", box.w}, {"h", box.h}};
+    if (node.type == NodeType::Text) {
+        const auto laid = document.layoutText(node.text, box.w, node.textWrap);
+        out["textSize"] = {{"w", laid.width}, {"h", laid.height}};
+    }
     const Node* parent = document.view(node.parent);
     if (!parent) parent = document.find(node.parent);
     out["inFlow"] = parent && parent->layout.type != LayoutType::None && !node.absolute;

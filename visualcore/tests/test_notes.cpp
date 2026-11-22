@@ -176,3 +176,15 @@ TEST_CASE("overrides and rules cannot set notes", "[notes]") {
     REQUIRE(doc.apply(SetProps{idOf(3), withNotes("instance note")}));
     REQUIRE(doc.view(idOf(3))->notes == "instance note");
 }
+
+TEST_CASE("inspecting a text node reports the size of its text at the box width", "[json]") {
+    Document doc;
+    Node text = frame(1);
+    text.type = NodeType::Text;
+    text.text.content = "Hello";
+    text.w = 4;
+    text.h = 4;
+    REQUIRE(doc.apply(CreateNode{text}));
+    const std::string inspected = inspectNodeJson(doc, *doc.find(idOf(1)), kDefaultModeId);
+    REQUIRE(inspected.find("\"textSize\":{\"h\":") != std::string::npos);
+}

@@ -168,7 +168,13 @@ The editor and the MCP write to one log. Every op has a `seq` and an `actor`, se
 
 ## Checking the result
 
-Call `get_layout` on the frame you built: confirm sizes and positions, and look for `overflows`, which marks layers spilling outside their parent (clipped text, children wider than a fixed parent).
+Call `get_layout` on the frame you built: confirm sizes and positions, and look for `overflows`, which marks layers spilling outside their parent and text that does not fit its box. A row with `overflows: true` also has `overflow`, an array that says why:
+
+- `clipped`: the layer extends outside a parent that clips on purpose, either `clipContent: true` or a top-level frame with `prototypeOverflow` other than `none` (it scrolls). Usually intended.
+- `escapes`: the layer extends outside a parent that does not clip, so it paints over its surroundings. Usually a real error: resize the parent or the layer.
+- `text`: a text layer whose text is larger than its own box at the box width (an unwrapped line wider than `w`, or wrapped lines taller than `h`), so it is cut off. Use `hug` sizing, a larger box or `textWrap`.
+
+Only the direct parent decides between `clipped` and `escapes`. A text layer can have `text` together with `clipped` or `escapes`. Rows without an overflow have neither field.
 
 ### Named prototype flows
 

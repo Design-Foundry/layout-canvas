@@ -188,6 +188,40 @@ public sealed class McpToolsTests(CanvasFactory factory) : IClassFixture<CanvasF
     }
 
     [Fact]
+    public async Task Layout_overflows_say_whether_the_parent_clips_or_the_text_does_not_fit()
+    {
+        var document = await Tools.CreateDocument("Overflow", Ct);
+        var result = await Tools.ApplyOps(document.Id,
+        [
+            Op("CreateNode", new { node = new { id = "$clip", type = "frame", name = "Clip", w = 100, h = 100, clipContent = true } }),
+            Op("CreateNode", new { node = new { id = "$cut", type = "rect", parent = "$clip", name = "Cut", x = 80, y = 0, w = 60, h = 20 } }),
+            Op("CreateNode", new { node = new { id = "$open", type = "frame", name = "Open", x = 300, w = 100, h = 100 } }),
+            Op("CreateNode", new { node = new { id = "$spill", type = "rect", parent = "$open", name = "Spill", x = 80, y = 0, w = 60, h = 20 } }),
+            Op("CreateNode", new { node = new { id = "$scroll", type = "frame", name = "Scroll", x = 600, w = 100, h = 100, prototypeOverflow = "vertical" } }),
+            Op("CreateNode", new { node = new { id = "$long", type = "rect", parent = "$scroll", name = "Long", x = 0, y = 50, w = 100, h = 200 } }),
+            Op("CreateNode", new { node = new { id = "$tight", type = "frame", name = "Tight", x = 900, w = 200, h = 100 } }),
+            Op("CreateNode", new { node = new { id = "$label", type = "text", parent = "$tight", name = "Label", w = 20, h = 10, text = Text("A much longer label than this box") } }),
+            Op("CreateNode", new { node = new { id = "$fits", type = "text", parent = "$tight", name = "Fits", y = 30, widthSizing = "hug", heightSizing = "hug", text = Text("Fits") } }),
+        ], Ct);
+        Assert.Equal(9, result.GetProperty("applied").GetInt32());
+
+        var layout = await Tools.GetLayout(document.Id, null, null, Ct);
+        string Kinds(string name)
+        {
+            var row = layout.EnumerateArray().Single(r => r.GetProperty("name").GetString() == name);
+            Assert.Equal(row.TryGetProperty("overflow", out _), row.TryGetProperty("overflows", out _));
+            return row.TryGetProperty("overflow", out var kinds) ? string.Join(",", kinds.EnumerateArray().Select(k => k.GetString())) : "";
+        }
+        Assert.Equal("clipped", Kinds("Cut"));
+        Assert.Equal("escapes", Kinds("Spill"));
+        Assert.Equal("clipped", Kinds("Long"));
+        Assert.Equal("text", Kinds("Label"));
+        Assert.Equal("", Kinds("Fits"));
+        Assert.Equal("", Kinds("Clip"));
+        Assert.Equal("", Kinds("Tight"));
+    }
+
+    [Fact]
     public async Task A_clone_returns_the_ids_of_its_copies_and_later_ops_can_use_them()
     {
         var document = await Tools.CreateDocument("Rows", Ct);
