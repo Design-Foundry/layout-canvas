@@ -12,6 +12,7 @@
 #include "vc/demo.hpp"
 #include "vc/editor.hpp"
 #include "vc/geometry.hpp"
+#include "vc/image_export.hpp"
 #include "vc/json.hpp"
 #include "vc/session.hpp"
 #include "vc/text.hpp"
@@ -131,6 +132,43 @@ vc::Vec2 prototypeViewport() {
     double width=0,height=0;
     if(rt) emscripten_get_element_css_size(attachedSelector.c_str(),&width,&height);
     return {width,height};
+}
+
+bool exportNode(const std::string& id, double scale, const emscripten::val& callback) {
+    const auto parsed = vc::Id::parse(id);
+    if (!rt || !parsed) return false;
+    auto send = std::make_shared<emscripten::val>(callback);
+    rt->renderer.exportNode(
+        *parsed, scale,
+        [send](const vc::ExportPlan& plan) {
+            auto event = emscripten::val::object();
+            event.set("kind", std::string("plan"));
+            event.set("width", plan.width);
+            event.set("height", plan.height);
+            event.set("scale", plan.scale);
+            event.set("requestedScale", plan.requestedScale);
+            event.set("clamped", plan.clamped);
+            event.set("tiled", plan.tiled());
+            event.set("tileSize", plan.tileSize);
+            (*send)(event);
+        },
+        [send](const vc::TilePixels& tile, std::vector<std::uint8_t>&& pixels) {
+            auto event = emscripten::val::object();
+            event.set("kind", std::string("tile"));
+            event.set("x", tile.x);
+            event.set("y", tile.y);
+            event.set("width", tile.w);
+            event.set("height", tile.h);
+            event.set("pixels", emscripten::val::global("Uint8Array").new_(emscripten::val(emscripten::typed_memory_view(pixels.size(), pixels.data()))));
+            (*send)(event);
+        },
+        [send](const std::string& error) {
+            auto event = emscripten::val::object();
+            event.set("kind", std::string("done"));
+            event.set("error", error);
+            (*send)(event);
+        });
+    return true;
 }
 
 bool startPrototype(const std::string& id) {
@@ -527,6 +565,7 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("layers", &layers);
     function("selection", &selection);
     function("frameLabels", &frameLabels);
+    function("exportNode", &exportNode);
     function("startPrototype", &startPrototype);
     function("stopPrototype", &stopPrototype);
     function("prototypeBack", &prototypeBack);

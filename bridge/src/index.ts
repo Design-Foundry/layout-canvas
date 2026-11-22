@@ -9,6 +9,11 @@ import type {
 
 export type { FrameStats, Rect, Vec2 };
 
+type ExportEvent =
+  | ({ kind: 'plan' } & { width: number; height: number; scale: number; requestedScale: number; clamped: boolean; tiled: boolean })
+  | { kind: 'tile'; x: number; y: number; width: number; height: number; pixels: Uint8Array }
+  | { kind: 'done'; error: string };
+
 export type Tool =
   | 'select'
   | 'frame'
@@ -98,6 +103,21 @@ export interface Layer {
   readonly locked: boolean;
   /** True for a node copied into an instance. */
   readonly inInstance?: boolean;
+}
+
+/** How an export was laid out: the scale is lower than requested when the image would be too large. */
+export interface ExportInfo {
+  readonly width: number;
+  readonly height: number;
+  readonly scale: number;
+  readonly requestedScale: number;
+  readonly clamped: boolean;
+  readonly tiled: boolean;
+}
+
+/** A node rendered offscreen: straight-alpha RGBA, rows top to bottom. */
+export interface ExportedImage extends ExportInfo {
+  readonly pixels: Uint8Array;
 }
 
 /** A top-level frame's name on the canvas: its top-left corner and width in screen CSS pixels. */
@@ -626,6 +646,36 @@ export class VisualCore {
 
   set tool(tool: Tool) {
     this.module.setTool(tool);
+  }
+
+  /**
+   * Renders node `id` and its descendants at `scale` with the same renderer as the canvas, in the active
+   * mode and with the current font availability, without selection, handles, labels, grid or
+   * connections. Pixels outside any paint are transparent. Rejects with the reason on failure.
+   */
+  exportNode(id: string, scale: number): Promise<ExportedImage> {
+    return new Promise((resolve, reject) => {
+      let info: ExportInfo | null = null;
+      let pixels: Uint8Array | null = null;
+      const started = this.module.exportNode(id, scale, (event: ExportEvent) => {
+        if (event.kind === 'plan') {
+          info = event;
+          pixels = new Uint8Array(event.width * event.height * 4);
+        } else if (event.kind === 'tile' && info && pixels) {
+          for (let row = 0; row < event.height; row++) {
+            const source = row * event.width * 4;
+            pixels.set(
+              event.pixels.subarray(source, source + event.width * 4),
+              ((event.y + row) * info.width + event.x) * 4,
+            );
+          }
+        } else if (event.kind === 'done') {
+          if (event.error || !info || !pixels) reject(new Error(event.error || 'export failed'));
+          else resolve({ ...info, pixels });
+        }
+      });
+      if (!started) reject(new Error('node not found'));
+    });
   }
 
   startPrototype(id: string): boolean {

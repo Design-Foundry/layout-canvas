@@ -61,6 +61,7 @@ add_library(vc_core STATIC
     src/fractional_index.cpp
     src/geometry.cpp
     src/id.cpp
+    src/image_export.cpp
     src/layout.cpp
     src/json.cpp
     src/node.cpp
@@ -162,6 +163,7 @@ else()
             tests/test_prototype_editor.cpp
             tests/test_image.cpp
             tests/test_image_editor.cpp
+            tests/test_image_export.cpp
             tests/test_path_editor.cpp
             tests/test_viewport_controller.cpp
         )
