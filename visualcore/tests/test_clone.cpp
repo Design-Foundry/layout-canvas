@@ -312,6 +312,42 @@ TEST_CASE("sessions undo and redo a clone as one step") {
     REQUIRE(snapshotToJson(session.document()) == before);
 }
 
+TEST_CASE("undoing a clone whose root links to itself deletes the whole subtree") {
+    Session session{IdGenerator{5}};
+    Scene scene;
+    NodePatch link;
+    link.interaction = navigate(kFrame);
+    REQUIRE(scene.doc.apply(SetProps{idOf(kFrame), link}));
+    load(session, scene.doc);
+    const std::string before = snapshotToJson(session.document());
+
+    REQUIRE(session.edit(scene.clone()));
+    const std::string after = snapshotToJson(session.document());
+    REQUIRE(session.document().find(idOf(100))->interaction.target == idOf(100));
+
+    REQUIRE(session.undo());
+    REQUIRE(snapshotToJson(session.document()) == before);
+    REQUIRE(session.redo());
+    REQUIRE(snapshotToJson(session.document()) == after);
+}
+
+TEST_CASE("a batch may delete a frame together with the nodes that link to it, and only then") {
+    Scene scene;
+    const std::string before = snapshotToJson(scene.doc);
+    Batch alone;
+    alone.ops.emplace_back(DeleteNode{idOf(kRect)});
+    alone.ops.emplace_back(DeleteNode{idOf(kOther)});
+    REQUIRE(failure(scene.doc, alone).find("prototype interactions refer to this frame") != std::string::npos);
+    REQUIRE(snapshotToJson(scene.doc) == before);
+
+    Batch together;
+    together.ops.emplace_back(DeleteNode{idOf(kOther)});
+    together.ops.emplace_back(DeleteNode{idOf(kText)});
+    REQUIRE(scene.doc.apply(together));
+    REQUIRE_FALSE(scene.doc.find(idOf(kOther)));
+    REQUIRE_FALSE(scene.doc.find(idOf(kText)));
+}
+
 TEST_CASE("replaying a clone gives every replica the same document") {
     Scene a;
     Scene b;

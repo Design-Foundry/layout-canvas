@@ -211,6 +211,8 @@ private:
     }
 
     std::unordered_map<Id, Node> nodes_;
+    std::set<Id> batchDeletes_;
+    bool restoringCopies_ = false;
     std::unordered_map<Id, std::vector<Id>> children_;
     std::unordered_map<Id, Token> tokens_;
     std::unordered_map<Id, Mode> modes_;

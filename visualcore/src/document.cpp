@@ -2,6 +2,7 @@
 #include "vc/diagnostics.hpp"
 #include "vc/layout.hpp"
 
+#include <utility>
 #include <unordered_set>
 
 #include <algorithm>
@@ -211,6 +212,7 @@ bool Document::validInteraction(const Interaction& interaction) const {
 bool Document::prototypeReferences(const Id& target) const {
     const auto refers=[&](const Interaction& i){return (i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay) && i.target==target;};
     for(const auto& [id,node]:nodes_) {
+        if(batchDeletes_.contains(id)) continue;
         if(refers(node.interaction)) return true;
         for(const auto& entry:node.interactions) if(refers(entry.interaction)) return true;
         for(const auto& o:node.overrides) {
@@ -223,10 +225,14 @@ bool Document::prototypeReferences(const Id& target) const {
 
 std::optional<OpBody> Document::create(const CreateNode& op) {
     const Node& node = op.node;
-    if(!validInteraction(node.interaction)) return std::nullopt;
+    const auto validOwn=[&](const Interaction& i){
+        const bool self=restoringCopies_ && node.type==NodeType::Frame && node.parent.isNil() && i.target==node.id && !node.id.isNil() && (i.action==PrototypeAction::Navigate || i.action==PrototypeAction::OpenOverlay);
+        return (self && validInteractionSettings(i)) || validInteraction(i);
+    };
+    if(!validOwn(node.interaction)) return std::nullopt;
     if(!validTriggeredInteractions(node.interactions)) return refused("invalid interactions list");
     if(node.interaction.action!=PrototypeAction::None && !node.interactions.empty()) return refused("interaction and interactions cannot both be active");
-    for(const auto& entry:node.interactions) if(!validInteraction(entry.interaction)) return std::nullopt;
+    for(const auto& entry:node.interactions) if(!validOwn(entry.interaction)) return std::nullopt;
     if(node.type==NodeType::Instance && !node.interactions.empty()) return refused("instance interactions use component-root overrides");
     if(node.prototypeOverflow<PrototypeOverflow::None || node.prototypeOverflow>PrototypeOverflow::Both) return refused("invalid prototypeOverflow");
     if(node.prototypeOverflow!=PrototypeOverflow::None && (node.type!=NodeType::Frame || !node.parent.isNil())) return refused("prototypeOverflow applies only to root frames");
@@ -560,6 +566,11 @@ std::optional<OpBody> Document::setOverride(const SetOverride& op) {
 }
 
 std::optional<OpBody> Document::clone(const CloneNode& op) {
+    const struct Scope {
+        bool& flag;
+        bool saved;
+        ~Scope() { flag = saved; }
+    } copying{restoringCopies_, std::exchange(restoringCopies_, true)};
     const auto source = nodes_.find(op.source);
     if (source == nodes_.end()) {
         const DiagnosticScope field{"source"};
@@ -649,6 +660,19 @@ std::optional<OpBody> Document::clone(const CloneNode& op) {
 }
 
 std::optional<OpBody> Document::batch(const Batch& op) {
+    struct Restore {
+        std::set<Id>& slot;
+        std::set<Id> saved;
+        ~Restore() { slot = std::move(saved); }
+    } restore{batchDeletes_, batchDeletes_};
+    const struct Scope {
+        bool& flag;
+        bool saved;
+        ~Scope() { flag = saved; }
+    } copying{restoringCopies_, std::exchange(restoringCopies_, true)};
+    for (const BatchOp& step : op.ops) {
+        if (const auto* remove = std::get_if<DeleteNode>(&step)) batchDeletes_.insert(remove->id);
+    }
     std::vector<OpBody> undo;
     for (const BatchOp& step : op.ops) {
         auto inverse = apply(std::visit([](const auto& body) -> OpBody { return body; }, step));
