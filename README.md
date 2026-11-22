@@ -18,7 +18,16 @@ vectors, drawing tools and local raster images. See [editor capabilities and lim
 
 In VS Code, **Run Task → dev: all** (or `Ctrl+Shift+B`) builds the WASM, watches the bridge,
 and serves the client on http://localhost:4200 with `/api` proxied to the server on :5180.
-**F5 → Full stack** does the same under the debugger.
+**F5 → Full stack** does the same under the debugger. `pnpm dev` runs the server and the client
+together from a terminal.
+
+## Local app
+
+    pnpm build:app     # release native and WASM, client, self-contained server in dist/app and dist/Canvas-win-x64.zip
+    pnpm app           # runs dist/app on http://localhost:5180 with data in .local/data
+
+The packaged server serves the client itself. Started directly, it keeps its database and Google
+font files under `%LOCALAPPDATA%\Canvas` and opens the browser (set `CANVAS_NO_BROWSER` to skip).
 
 ## Tests
 

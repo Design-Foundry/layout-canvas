@@ -23,6 +23,18 @@
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
     },
     {
+      "name": "native-release",
+      "displayName": "Native Release (clang-cl)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl"
+      },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
       "name": "wasm-base",
       "hidden": true,
       "inherits": "base",
@@ -43,6 +55,7 @@
   ],
   "buildPresets": [
     { "name": "native-debug", "configurePreset": "native-debug" },
+    { "name": "native-release", "configurePreset": "native-release" },
     { "name": "wasm-debug",   "configurePreset": "wasm-debug" },
     { "name": "wasm-release", "configurePreset": "wasm-release" }
   ],
