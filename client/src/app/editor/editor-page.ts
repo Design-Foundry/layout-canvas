@@ -37,6 +37,7 @@ import { LucentButton, LucentTab, LucentTabList } from '@designfoundry/lucent-an
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';
+import { SelectionReporter } from './selection-reporter';
 import { watchPrototypeMotion } from './prototype-motion';
 import { followTheme } from './canvas-background';
 import { findPrototypeStateAxes } from './prototype-state-axes';
@@ -509,6 +510,7 @@ export class EditorPage {
         core.detach();
         return;
       }
+      const selectionReporter = new SelectionReporter(this.api, this.id());
       this.core.set(core);
       this.fontService.attach(core);
       const stopMotionPreference = watchPrototypeMotion(
@@ -557,6 +559,7 @@ export class EditorPage {
           this.prototypeScreens.set(core.prototypeScreens());
           const selection = core.selection();
           this.selectedIds.set(new Set(selection));
+          selectionReporter.update(selection);
           const selectedNode = selection.length === 1 ? core.node(selection[0]) : null;
           this.selectedNode.set(selectedNode);
           const targets = selection.flatMap((id) => {
@@ -591,6 +594,7 @@ export class EditorPage {
         stopMotionPreference();
         cancelAnimationFrame(frame);
         clearInterval(timer);
+        selectionReporter.close();
         void sync.close();
         core.detach();
       });

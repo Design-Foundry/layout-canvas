@@ -151,10 +151,10 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
     }
 
     /// <summary>
-    /// Appends <paramref name="ops"/> after <paramref name="expectedHead"/>, numbering them from there.
+    /// Appends <paramref name="ops"/>, all by <paramref name="actor"/>, after <paramref name="expectedHead"/>, numbering them from there.
     /// Nothing is written if another writer moved the head first or already logged one of the op ids.
     /// </summary>
-    public async Task<AppendStatus> AppendAsync(Guid documentId, long expectedHead, IReadOnlyList<OpInput> ops, CancellationToken ct)
+    public async Task<AppendStatus> AppendAsync(Guid documentId, long expectedHead, IReadOnlyList<OpInput> ops, string actor, CancellationToken ct)
     {
         await using var connection = await database.OpenAsync(ct);
         await using var transaction = connection.BeginTransaction(deferred: false);
@@ -181,11 +181,11 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
             {
                 head++;
                 await ExecuteAsync(connection, """
-                    INSERT INTO ops (document_id, seq, op_id, kind, data, created_at)
-                    VALUES ($document, $seq, $op, $kind, $data, $now)
+                    INSERT INTO ops (document_id, seq, op_id, kind, data, created_at, actor)
+                    VALUES ($document, $seq, $op, $kind, $data, $now, $actor)
                     """,
                     ("$document", Key(documentId)), ("$seq", head), ("$op", Key(op.Id)),
-                    ("$kind", op.Kind), ("$data", op.Data.GetRawText()), ("$now", now));
+                    ("$kind", op.Kind), ("$data", op.Data.GetRawText()), ("$now", now), ("$actor", actor));
             }
         }
         catch (SqliteException e) when (e.SqliteErrorCode == SqliteConstraint)
@@ -220,7 +220,7 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
 
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT seq, op_id, kind, data, created_at
+            SELECT seq, op_id, kind, data, created_at, actor
             FROM ops
             WHERE document_id = $document AND seq > $after
             ORDER BY seq
@@ -245,7 +245,8 @@ public sealed class DocumentStore(Database database, TimeProvider clock)
                     Guid.Parse(reader.GetString(1)),
                     reader.GetString(2),
                     ParseJson(reader.GetString(3)),
-                    ParseTimestamp(reader.GetString(4))));
+                    ParseTimestamp(reader.GetString(4)),
+                    reader.IsDBNull(5) ? OpActors.Unknown : reader.GetString(5)));
             }
         }
 

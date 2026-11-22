@@ -46,14 +46,14 @@ public sealed class DocumentHost : IDisposable
 
     /// <summary>
     /// Checks <paramref name="ops"/> against the document in order and logs the valid ones. Ops already in
-    /// the log keep their sequence number. Returns null if the document doesn't exist.
+    /// the log keep their sequence number. <paramref name="actor"/> is one of <see cref="OpActors"/>, chosen by the caller's entry point. Returns null if the document doesn't exist.
     /// </summary>
     /// <exception cref="ArgumentException">An op is malformed. Nothing was logged.</exception>
-    public async Task<AppendOpsResponse?> AppendAsync(Guid id, IReadOnlyList<OpInput> ops, CancellationToken ct)
+    public async Task<AppendOpsResponse?> AppendAsync(Guid id, IReadOnlyList<OpInput> ops, string actor, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
-            var (found, response) = await WithDocumentAsync(id, live => AppendOnceAsync(live, ops, ct), ct);
+            var (found, response) = await WithDocumentAsync(id, live => AppendOnceAsync(live, ops, actor, ct), ct);
             if (!found)
             {
                 return null;
@@ -119,7 +119,7 @@ public sealed class DocumentHost : IDisposable
     }
 
     /// <summary>Null asks the caller to try again on a freshly loaded document.</summary>
-    private async Task<AppendOpsResponse?> AppendOnceAsync(LiveDocument live, IReadOnlyList<OpInput> ops, CancellationToken ct)
+    private async Task<AppendOpsResponse?> AppendOnceAsync(LiveDocument live, IReadOnlyList<OpInput> ops, string actor, CancellationToken ct)
     {
         if (!await CatchUpAsync(live, ct))
         {
@@ -137,7 +137,7 @@ public sealed class DocumentHost : IDisposable
             .Where(r => r.Error is not null)
             .ToDictionary(r => r.Id, r => r.Error!);
 
-        if (await store.AppendAsync(live.Id, live.Seq, accepted, ct) != AppendStatus.Appended)
+        if (await store.AppendAsync(live.Id, live.Seq, accepted, actor, ct) != AppendStatus.Appended)
         {
             Discard(live);
             return null;

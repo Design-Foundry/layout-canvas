@@ -19,6 +19,8 @@ public static class DocumentEndpoints
         documents.MapDelete("/{id:guid}", DeleteDocument).WithName(nameof(DeleteDocument));
         documents.MapPost("/{id:guid}/ops", AppendOps).WithName(nameof(AppendOps));
         documents.MapGet("/{id:guid}/ops", GetOps).WithName(nameof(GetOps)).ProducesProblem(StatusCodes.Status410Gone);
+        documents.MapPut("/{id:guid}/selection", PutSelection).WithName(nameof(PutSelection)).ProducesValidationProblem();
+        documents.MapDelete("/{id:guid}/selection", DeleteSelection).WithName(nameof(DeleteSelection));
 
         return documents;
     }
@@ -61,13 +63,33 @@ public static class DocumentEndpoints
         await store.RenameAsync(id, request.Name, ct) is { } document ? TypedResults.Ok(document) : TypedResults.NotFound();
 
     private static async Task<Results<NoContent, NotFound>> DeleteDocument(
-        Guid id, DocumentStore store, DocumentHost host, CancellationToken ct)
+        Guid id, DocumentStore store, DocumentHost host, EditorSelections selections, CancellationToken ct)
     {
         if (!await store.DeleteAsync(id, ct))
         {
             return TypedResults.NotFound();
         }
+        selections.Forget(id);
         await host.CloseAsync(id);
+        return TypedResults.NoContent();
+    }
+
+    /// <summary>Records what an editor has selected. It lapses unless renewed within 30 seconds.</summary>
+    private static async Task<Results<NoContent, NotFound>> PutSelection(
+        Guid id, SelectionReport report, DocumentStore store, EditorSelections selections, CancellationToken ct)
+    {
+        if (await store.GetHeadAsync(id, ct) is null)
+        {
+            return TypedResults.NotFound();
+        }
+        selections.Report(id, report.EditorId, report.Ids);
+        return TypedResults.NoContent();
+    }
+
+    /// <summary>Drops the selection an editor reported, when it closes. Does nothing if another editor reported since.</summary>
+    private static NoContent DeleteSelection(Guid id, Guid editorId, EditorSelections selections)
+    {
+        selections.Clear(id, editorId);
         return TypedResults.NoContent();
     }
 
@@ -82,7 +104,7 @@ public static class DocumentEndpoints
 
         try
         {
-            return await host.AppendAsync(id, request.Ops, ct) is { } response
+            return await host.AppendAsync(id, request.Ops, OpActors.Human, ct) is { } response
                 ? TypedResults.Ok(response)
                 : TypedResults.NotFound();
         }

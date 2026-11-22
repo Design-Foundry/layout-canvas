@@ -351,6 +351,84 @@
         }
       }
     },
+    "/api/documents/{id}/selection": {
+      "put": {
+        "tags": [
+          "Documents"
+        ],
+        "operationId": "PutSelection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectionReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Documents"
+        ],
+        "operationId": "DeleteSelection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "editorId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
     "/api/fonts/google/families": {
       "get": {
         "tags": [
@@ -979,6 +1057,11 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "actor": {
+            "type": "string",
+            "description": "`human`, `agent`, or `unknown` for ops logged before actors were recorded.",
+            "default": "unknown"
           }
         },
         "description": "An op as stored in the log."
@@ -1125,6 +1208,29 @@
             "type": "string"
           }
         }
+      },
+      "SelectionReport": {
+        "required": [
+          "editorId",
+          "ids"
+        ],
+        "type": "object",
+        "properties": {
+          "editorId": {
+            "type": "string",
+            "description": "Chosen by the editor instance, so a later report or its close replaces only its own.",
+            "format": "uuid"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Ids of the selected nodes, in selection order. Empty when nothing is selected."
+          }
+        },
+        "description": "What an editor reports about its selection."
       }
     }
   },
