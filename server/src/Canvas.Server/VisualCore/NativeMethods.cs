@@ -44,6 +44,9 @@ internal static partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "vc_font_capabilities")]
     internal static partial nint FontCapabilities(ReadOnlySpan<byte> bytes, nuint size);
 
+    [LibraryImport(Library, EntryPoint = "vc_derived_id", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint DerivedId(string scope, string node);
+
     [LibraryImport(Library, EntryPoint = "vc_free")]
     private static partial void Free(nint text);
 

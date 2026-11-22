@@ -898,6 +898,11 @@ export class VisualCore {
     return this.module.deleteSelection();
   }
 
+  /** Copies the selected layers with their subtrees just above themselves and selects the copies. */
+  duplicateSelection(): boolean {
+    return this.module.duplicateSelection();
+  }
+
   undo(): boolean {
     return this.module.undo();
   }

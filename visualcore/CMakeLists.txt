@@ -139,6 +139,7 @@ else()
 
         add_executable(vc_tests
             tests/test_camera.cpp
+            tests/test_clone.cpp
             tests/test_components.cpp
             tests/test_diagnostics.cpp
             tests/test_diagnostics_json.cpp

@@ -145,6 +145,9 @@ public:
     [[nodiscard]] Id frameLabelAt(Vec2 screen) const;
     void clearSelection();
     bool deleteSelection();
+    /// Copies each selected layer with its subtree to just above it, offset 16 units, as one undo step, and
+    /// selects the copies. Main components are left out.
+    bool duplicateSelection();
     bool undo();
     bool redo();
 

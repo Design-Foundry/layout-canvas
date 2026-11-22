@@ -1365,6 +1365,35 @@ bool Editor::deleteSelection() {
     return true;
 }
 
+bool Editor::duplicateSelection() {
+    if (presenting_ || gesture_ != Gesture::None) return false;
+    settlePropsPreview();
+    const Document& document = session_.document();
+    std::vector<Id> sources;
+    for (const Id& id : selection_) {
+        if (!isCopy(id) && document.find(id)) sources.push_back(id);
+    }
+    std::vector<Id> copies;
+    session_.begin();
+    for (const Id& id : sources) {
+        const Node node = *document.find(id);
+        const auto& siblings = document.children(node.parent);
+        const auto next = std::next(std::find(siblings.begin(), siblings.end(), id));
+        std::optional<std::string_view> after;
+        if (next != siblings.end()) after = document.find(*next)->order;
+        CloneNode op{id, session_.newId(), node.parent, keyBetween(node.order, after), {}};
+        NodePatch offset;
+        offset.x = node.x + 16.0;
+        offset.y = node.y + 16.0;
+        op.patches.push_back({id, offset});
+        if (session_.edit(op)) copies.push_back(op.id);
+    }
+    session_.commit();
+    if (copies.empty()) return false;
+    setSelection(std::move(copies));
+    return true;
+}
+
 bool Editor::undo() {
     if(presenting_) return false;
     if (gesture_ != Gesture::None) {
