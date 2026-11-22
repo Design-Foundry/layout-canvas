@@ -37,6 +37,7 @@ import { LucentButton, LucentTab, LucentTabList } from '@designfoundry/lucent-an
 import { Api } from '../api/api';
 import { getDocument, renameDocument } from '../api/functions';
 import { DocumentSync } from './document-sync';
+import { RenderRequestPoller } from './render-requests';
 import { SelectionReporter } from './selection-reporter';
 import { watchPrototypeMotion } from './prototype-motion';
 import { followTheme } from './canvas-background';
@@ -511,6 +512,13 @@ export class EditorPage {
         return;
       }
       const selectionReporter = new SelectionReporter(this.api, this.id());
+      const renderPoller = new RenderRequestPoller(
+        this.api,
+        this.id(),
+        selectionReporter.editorId,
+        (id, scale) => core.exportNode(id, scale),
+      );
+      renderPoller.start();
       this.core.set(core);
       this.fontService.attach(core);
       const stopMotionPreference = watchPrototypeMotion(
@@ -595,6 +603,7 @@ export class EditorPage {
         cancelAnimationFrame(frame);
         clearInterval(timer);
         selectionReporter.close();
+        renderPoller.close();
         void sync.close();
         core.detach();
       });

@@ -168,6 +168,8 @@ The editor and the MCP write to one log. Every op has a `seq` and an `actor`, se
 
 ## Checking the result
 
+`render` returns a PNG of a node, drawn by the person's editor, with a text line giving its size and scale. It needs the document open in an editor (otherwise it fails at once and says so) and takes `documentId`, `nodeId` and an optional `scale` from 0 up to 3 (default 1). The longest side stays within 2048 px, so a large node comes back at a lower scale than asked. A render takes a second or two and does not change the person's selection or view. Look at it after building a frame; `get_layout` stays the way to measure.
+
 Call `get_layout` on the frame you built: confirm sizes and positions, and look for `overflows`, which marks layers spilling outside their parent and text that does not fit its box. A row with `overflows: true` also has `overflow`, an array that says why:
 
 - `clipped`: the layer extends outside a parent that clips on purpose, either `clipContent: true` or a top-level frame with `prototypeOverflow` other than `none` (it scrolls). Usually intended.

@@ -1,15 +1,17 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json;
 using Canvas.Server.Documents;
 using Canvas.Server.VisualCore;
 using ModelContextProtocol;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace Canvas.Server.Mcp;
 
 /// <summary>Tools that read and edit Canvas documents through the same op log the editor syncs with.</summary>
 [McpServerToolType]
-public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSelections selections)
+public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSelections selections, RenderRequests renders)
 {
     private static readonly Lazy<string> FormatGuide = new(() =>
     {
@@ -239,6 +241,48 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSe
             Items = items,
             Missing = (rows ?? []).Where(r => r.Node is null).Select(r => r.Id).ToList() is { Count: > 0 } missing ? missing : null,
         }, JsonOptions);
+    }
+
+    [McpServerTool(Name = "render", ReadOnly = true)]
+    [Description("A PNG of one node as the editor draws it, with shadows and effects, so you can see what you built. Needs the document open in an editor (the person's browser renders it; nothing changes there). The text block gives the node name, pixel size and the scale used. The longest side is capped at 2048 px; the scale is lowered to fit and the text says so.")]
+    public async Task<CallToolResult> Render(
+        [Description("Document id.")] Guid documentId,
+        [Description("Id of the node to render, a top-level frame or any layer.")] Guid nodeId,
+        [Description("Pixels per document unit, above 0 up to 3. Default 1.")] double scale = 1,
+        CancellationToken ct = default)
+    {
+        if (!(scale > 0 && scale <= 3))
+        {
+            throw new McpException("scale must be above 0 and at most 3.");
+        }
+        if (await store.GetHeadAsync(documentId, ct) is null)
+        {
+            throw NotFound(documentId);
+        }
+        var (_, name) = await host.ReadAsync(documentId, core => core.Node(nodeId) is { } node && node.TryGetProperty("name", out var n) ? n.GetString() ?? "" : null, ct);
+        if (name is null)
+        {
+            throw new McpException($"Node {nodeId} does not exist in document {documentId}.");
+        }
+        RenderedImage image;
+        try
+        {
+            image = await renders.RequestAsync(documentId, nodeId, scale, ct);
+        }
+        catch (RenderException e)
+        {
+            throw new McpException(e.Message);
+        }
+        var used = Math.Round(image.Scale, 2);
+        var note = used < scale - 0.005 ? $", reduced from {scale.ToString("0.##", CultureInfo.InvariantCulture)}x to keep the longest side within {RenderRequests.MaxSize} px" : "";
+        return new CallToolResult
+        {
+            Content =
+            [
+                ImageContentBlock.FromBytes(image.Png, "image/png"),
+                new TextContentBlock { Text = $"{name}: {image.Width}x{image.Height} px at {used.ToString("0.##", CultureInfo.InvariantCulture)}x{note}." },
+            ],
+        };
     }
 
     private static (Guid Id, SelectedNode? Node) Describe(VisualCoreDocument core, Guid id)
