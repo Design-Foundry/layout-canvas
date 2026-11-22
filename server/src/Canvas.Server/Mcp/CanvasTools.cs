@@ -104,7 +104,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
 
     [McpServerTool(Name = "apply_ops")]
     [Description("""
-        Applies ops in order through the document's log, the same one the editor syncs with; open editors show them within a second. Any id may be a placeholder such as "$card" (in values or object keys): each placeholder becomes one new UUID across the batch, returned in ids. A CreateNode without order goes after its existing siblings. If any op is malformed (unknown kind, wrong shape, or a value out of range such as letterSpacing below 0), nothing is applied and the error names that op. Otherwise ops the document refuses (a missing parent, a property the node type does not take, a broken component rule) change nothing while the rest still apply; results give each one's error with path and message. Up to 1000 ops per call. See get_format_guide for every op kind.
+        Applies ops in order through the document's log, the same one the editor syncs with; open editors show them within a second. Any id may be a placeholder such as "$card" (in values or object keys): each placeholder becomes one new UUID across the batch, returned in ids. A CreateNode or CloneNode without order goes after its existing siblings. A CloneNode result lists cloned, the id of the copy of every node of the source subtree by source id; "$root/$source" in a later op is the copy of $source under the clone rooted at $root. If any op is malformed (unknown kind, wrong shape, or a value out of range such as letterSpacing below 0), nothing is applied and the error names that op. Otherwise ops the document refuses (a missing parent, a property the node type does not take, a broken component rule) change nothing while the rest still apply; results give each one's error with path and message. Up to 1000 ops per call. See get_format_guide for every op kind.
         """)]
     public async Task<JsonElement> ApplyOps(
         [Description("Document id.")] Guid documentId,
@@ -134,7 +134,20 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         {
             throw NotFound(documentId);
         }
-        var results = response.Acks.Select((ack, i) => new { Index = i, prepared[i].Kind, Applied = ack.Seq is not null, ack.Error }).ToList();
+        var cloned = new Dictionary<int, Dictionary<Guid, Guid>>();
+        if (prepared.Where((op, i) => op.Kind == "CloneNode" && response.Acks[i].Seq is not null).Any())
+        {
+            var (_, present) = await host.ReadAsync(documentId, core => core.Layers().EnumerateArray()
+                .Where(row => !row.TryGetProperty("inInstance", out _)).Select(row => row.GetProperty("id").GetGuid()).ToList(), ct);
+            for (var i = 0; i < prepared.Count; i++)
+            {
+                if (prepared[i].Kind == "CloneNode" && response.Acks[i].Seq is not null)
+                {
+                    cloned[i] = CloneIds.Copies(prepared[i].Data.GetProperty("source").GetGuid(), prepared[i].Data.GetProperty("id").GetGuid(), present ?? []);
+                }
+            }
+        }
+        var results = response.Acks.Select((ack, i) => new { Index = i, prepared[i].Kind, Applied = ack.Seq is not null, ack.Error, Cloned = cloned.GetValueOrDefault(i) }).ToList();
         return JsonSerializer.SerializeToElement(new
         {
             Applied = results.Count(r => r.Applied),

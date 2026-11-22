@@ -438,7 +438,7 @@ export class EditorPage {
         return;
       else {
         const editing = command
-          ? ['z', 'y'].includes(key) || (event.altKey && ['k', 'b'].includes(key))
+          ? ['z', 'y', 'd'].includes(key) || (event.altKey && ['k', 'b'].includes(key))
           : ['delete', 'backspace', 'enter', 'f2'].includes(key) ||
             !!NUDGE_DIRECTIONS[key] ||
             (!event.altKey && !!TOOL_SHORTCUTS[key]);
@@ -473,6 +473,8 @@ export class EditorPage {
       else core.undo();
     } else if (command && key === 'y') {
       core.redo();
+    } else if (command && !event.altKey && key === 'd') {
+      core.duplicateSelection();
     } else if (command && event.altKey && key === 'k') {
       core.createComponent();
     } else if (command && event.altKey && key === 'b') {

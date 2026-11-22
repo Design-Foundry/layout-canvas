@@ -151,6 +151,8 @@ private:
     std::optional<OpBody> deleteMode(const DeleteMode& op);
     std::optional<OpBody> replaceMode(const ReplaceMode& op);
     std::optional<OpBody> setOverride(const SetOverride& op);
+    std::optional<OpBody> clone(const CloneNode& op);
+    std::optional<OpBody> batch(const Batch& op);
     std::optional<OpBody> setComponentDefinition(const SetComponentDefinition& op);
     std::optional<OpBody> createFont(const CreateFont& op);
     std::optional<OpBody> deleteFont(const DeleteFont& op);

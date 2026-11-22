@@ -432,6 +432,10 @@ bool deleteSelection() {
     return rt && rt->editor.deleteSelection();
 }
 
+bool duplicateSelection() {
+    return rt && rt->editor.duplicateSelection();
+}
+
 bool nudge(double dx, double dy) {
     return rt && rt->editor.nudge({dx, dy});
 }
@@ -614,6 +618,7 @@ EMSCRIPTEN_BINDINGS(visualcore) {
     function("setComponentDefinition", &setComponentDefinition);
     function("reveal", &reveal);
     function("deleteSelection", &deleteSelection);
+    function("duplicateSelection", &duplicateSelection);
     function("nudge", &nudge);
     function("undo", &undo);
     function("redo", &redo);

@@ -61,6 +61,35 @@ public sealed class OpBatchTests
         Assert.Equal(["Button", "Button", "Save", "Row"], names);
     }
 
+    [Fact]
+    public void Clones_without_order_go_after_their_siblings_and_copies_resolve_to_derived_ids()
+    {
+        var parent = Guid.NewGuid();
+        var source = Guid.NewGuid();
+        var (ops, ids) = OpBatch.Prepare(
+        [
+            Op("CloneNode", new { source, id = "$copy", parent }),
+            Op("SetProps", new { id = "$copy/" + source, patch = new { name = "Copy" } }),
+            Op("CloneNode", new { source = "$copy", id = "$again", parent, patches = new Dictionary<string, object> { ["$copy/" + source] = new { name = "x" } } }),
+        ], new Dictionary<Guid, string> { [parent] = "a4" }, new Dictionary<Guid, string>());
+
+        Assert.Equal("a5", ops[0].Data.GetProperty("order").GetString());
+        Assert.Equal("a6", ops[2].Data.GetProperty("order").GetString());
+        var derived = CloneIds.Derive(ids["$copy"], source).ToString();
+        Assert.Equal(derived, ops[1].Data.GetProperty("id").GetString());
+        Assert.True(ops[2].Data.GetProperty("patches").TryGetProperty(derived, out _));
+        Assert.Equal(ids["$copy"].ToString(), ops[2].Data.GetProperty("source").GetString());
+    }
+
+    [Fact]
+    public void Derived_ids_depend_only_on_the_two_ids_and_look_like_version_4_uuids()
+    {
+        var (scope, node) = (Guid.Parse("00000000-0000-0003-0000-000000000064"), Guid.Parse("00000000-0000-0003-0000-000000000002"));
+        Assert.Equal(CloneIds.Derive(scope, node), CloneIds.Derive(scope, node));
+        Assert.NotEqual(CloneIds.Derive(scope, node), CloneIds.Derive(node, scope));
+        Assert.Equal('4', CloneIds.Derive(scope, node).ToString()[14]);
+    }
+
     [Theory]
     [InlineData(null, "a0")]
     [InlineData("a0", "a1")]
@@ -125,6 +154,58 @@ public sealed class McpToolsTests(CanvasFactory factory) : IClassFixture<CanvasF
         var read = await Tools.GetDocument(document.Id, null, Ct);
         Assert.Equal(layout.EnumerateArray().Select(r => r.GetProperty("id").GetGuid()),
             read.GetProperty("layers").EnumerateArray().Select(r => r.GetProperty("id").GetGuid()));
+    }
+
+    [Fact]
+    public async Task A_clone_returns_the_ids_of_its_copies_and_later_ops_can_use_them()
+    {
+        var document = await Tools.CreateDocument("Rows", Ct);
+        var setup = await Tools.ApplyOps(document.Id,
+        [
+            Op("CreateNode", new { node = new { id = "$list", type = "frame", name = "List", w = 200, h = 100, layout = new { type = "column" } } }),
+            Op("CreateNode", new { node = new { id = "$row", type = "frame", name = "Row", parent = "$list", w = 200, h = 20, layout = new { type = "row", gap = 4 } } }),
+            Op("CreateNode", new { node = new { id = "$key", type = "text", parent = "$row", text = Text("Name") } }),
+            Op("CreateNode", new { node = new { id = "$value", type = "text", parent = "$row", text = Text("Ana") } }),
+        ], Ct);
+        Assert.Equal(4, setup.GetProperty("applied").GetInt32());
+        var (list, row, key, value) = (setup.GetProperty("ids").GetProperty("$list").GetGuid(), setup.GetProperty("ids").GetProperty("$row").GetGuid(),
+            setup.GetProperty("ids").GetProperty("$key").GetGuid(), setup.GetProperty("ids").GetProperty("$value").GetGuid());
+
+        var result = await Tools.ApplyOps(document.Id,
+        [
+            Op("CloneNode", new { source = row, id = "$row2", parent = list, patches = new Dictionary<string, object> { [key.ToString()] = new { text = Text("City") }, [value.ToString()] = new { text = Text("Lima") } } }),
+            Op("SetProps", new { id = "$row2/" + value, patch = new { name = "City value" } }),
+            Op("CloneNode", new { source = row, id = "$row3", parent = list, patches = new Dictionary<string, object> { [value.ToString()] = new { text = Text("Quito"), lineWidth = 3 } } }),
+        ], Ct);
+
+        Assert.Equal(2, result.GetProperty("applied").GetInt32());
+        var row2 = result.GetProperty("ids").GetProperty("$row2").GetGuid();
+        var cloned = result.GetProperty("results")[0].GetProperty("cloned");
+        Assert.Equal(row2, cloned.GetProperty(row.ToString()).GetGuid());
+        var (key2, value2) = (cloned.GetProperty(key.ToString()).GetGuid(), cloned.GetProperty(value.ToString()).GetGuid());
+        Assert.Equal(CloneIds.Derive(row2, value), value2);
+        Assert.Equal(2, cloned.EnumerateObject().Count(p => p.Name != row.ToString()));
+        Assert.False(result.GetProperty("results")[1].TryGetProperty("cloned", out _));
+
+        var refused = result.GetProperty("results")[2];
+        Assert.False(refused.GetProperty("applied").GetBoolean());
+        Assert.Equal($"ops[2].patches.{value}", refused.GetProperty("error").GetProperty("path").GetString());
+        Assert.Equal("only line and path nodes take lineWidth", refused.GetProperty("error").GetProperty("message").GetString());
+
+        var nodes = await Tools.GetNodes(document.Id, [key2, value2, row2], null, Ct);
+        Assert.Equal("City", nodes[0].GetProperty("text").GetProperty("content").GetString());
+        Assert.Equal("Lima", nodes[1].GetProperty("text").GetProperty("content").GetString());
+        Assert.Equal("City value", nodes[1].GetProperty("name").GetString());
+        Assert.Equal("Row", nodes[2].GetProperty("name").GetString());
+        Assert.Equal(row, (await Tools.GetNodes(document.Id, [row], null, Ct))[0].GetProperty("id").GetGuid());
+
+        var layers = (await Tools.GetDocument(document.Id, null, Ct)).GetProperty("layers").EnumerateArray().Select(r => r.GetProperty("id").GetGuid()).ToList();
+        Assert.All(new[] { list, row, key, value, row2, key2, value2 }, id => Assert.Contains(id, layers));
+        Assert.Equal(7, layers.Count);
+
+        var malformed = await Assert.ThrowsAsync<McpException>(() => Tools.ApplyOps(document.Id,
+            [Op("CloneNode", new { source = row, id = "$bad", patches = new Dictionary<string, object> { [value.ToString()] = new { w = "wide" } } })], Ct));
+        Assert.Equal($"Nothing was applied: ops[0].patches.{value}.w: must be a number", malformed.Message);
     }
 
     [Fact]

@@ -22,6 +22,10 @@ struct Id {
     friend auto operator<=>(const Id&, const Id&) = default;
 };
 
+/// The id of the copy of `node` made under the clone root `scope`: a version 4 shaped id that depends only
+/// on the two, so every replica of a document derives the same one.
+[[nodiscard]] Id derivedId(const Id& scope, const Id& node);
+
 /// Produces random (version 4) ids.
 class IdGenerator {
 public:

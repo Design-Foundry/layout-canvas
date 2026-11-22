@@ -52,6 +52,21 @@ std::optional<Id> Id::parse(std::string_view text) {
     return id;
 }
 
+Id derivedId(const Id& scope, const Id& node) {
+    const auto mix = [](std::uint64_t x) {
+        x ^= x >> 30;
+        x *= 0xBF58476D1CE4E5B9ull;
+        x ^= x >> 27;
+        x *= 0x94D049BB133111EBull;
+        x ^= x >> 31;
+        return x;
+    };
+    Id id{mix(scope.hi ^ mix(node.hi + 0xA0761D6478BD642Full)), mix(scope.lo ^ mix(node.lo + 0xE7037ED1A0B428DBull))};
+    id.hi = (id.hi & ~0xF000ull) | 0x4000ull;
+    id.lo = (id.lo & ~(0xC000ull << 48)) | (0x8000ull << 48);
+    return id;
+}
+
 IdGenerator::IdGenerator() {
     std::random_device device;
     rng_.seed((std::uint64_t{device()} << 32) | device());

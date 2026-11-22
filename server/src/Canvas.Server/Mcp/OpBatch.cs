@@ -10,7 +10,9 @@ public sealed record AgentOp(string Kind, JsonElement Data);
 
 /// <summary>
 /// Turns agent ops into log ops: every <c>$name</c> becomes the same new UUID throughout the batch, and a
-/// <c>CreateNode</c> without <c>order</c> goes after its siblings, and an unnamed instance takes its component's name.
+/// <c>CreateNode</c> or <c>CloneNode</c> without <c>order</c> goes after its siblings, and an unnamed instance takes its
+/// component's name. <c>$root/$source</c> is the id of the copy of <c>$source</c> made by the <c>CloneNode</c> whose new id
+/// is <c>$root</c>; either side may also be a UUID.
 /// </summary>
 public static partial class OpBatch
 {
@@ -18,6 +20,9 @@ public static partial class OpBatch
 
     [GeneratedRegex(@"^\$[A-Za-z][A-Za-z0-9_-]*$")]
     private static partial Regex Placeholder();
+
+    [GeneratedRegex(@"^(?<scope>\$[A-Za-z][A-Za-z0-9_-]*|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/(?<node>\$[A-Za-z][A-Za-z0-9_-]*|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$")]
+    private static partial Regex CopyReference();
 
     /// <param name="lastOrders">The greatest order among the existing children of each parent, the root under <see cref="Guid.Empty"/>.</param>
     /// <param name="componentNames">The names of the document's main components.</param>
@@ -31,15 +36,16 @@ public static partial class OpBatch
         foreach (var op in ops)
         {
             var data = Resolve(JsonNode.Parse(op.Data.GetRawText()), ids);
-            if (op.Kind == "CreateNode" && data?["node"] is JsonObject node)
+            var node = op.Kind switch { "CreateNode" => data?["node"], "CloneNode" => data, _ => null } as JsonObject;
+            if (node is not null)
             {
                 var parent = Guid.TryParse(Text(node["parent"]), out var p) ? p : Guid.Empty;
                 var type = Text(node["type"]);
-                if (type == "component" && Guid.TryParse(Text(node["id"]), out var componentId))
+                if (op.Kind == "CreateNode" && type == "component" && Guid.TryParse(Text(node["id"]), out var componentId))
                 {
                     names[componentId] = Text(node["name"]) ?? "";
                 }
-                if (type == "instance" && string.IsNullOrEmpty(Text(node["name"])) &&
+                if (op.Kind == "CreateNode" && type == "instance" && string.IsNullOrEmpty(Text(node["name"])) &&
                     Guid.TryParse(Text(node["component"]), out var main) && names.TryGetValue(main, out var mainName))
                 {
                     node["name"] = mainName;
@@ -84,7 +90,7 @@ public static partial class OpBatch
                 foreach (var (key, value) in obj.ToList())
                 {
                     var resolved = Resolve(value, ids);
-                    var name = Placeholder().IsMatch(key) ? IdFor(key, ids).ToString() : key;
+                    var name = Reference(key, ids) ?? key;
                     obj.Remove(key);
                     obj[name] = resolved;
                 }
@@ -97,12 +103,24 @@ public static partial class OpBatch
                     array[i] = Resolve(item, ids);
                 }
                 return array;
-            case JsonValue value when value.TryGetValue<string>(out var text) && Placeholder().IsMatch(text):
-                return JsonValue.Create(IdFor(text, ids).ToString());
+            case JsonValue value when value.TryGetValue<string>(out var text) && Reference(text, ids) is { } reference:
+                return JsonValue.Create(reference);
             default:
                 return node;
         }
     }
+
+    private static string? Reference(string text, Dictionary<string, Guid> ids)
+    {
+        if (Placeholder().IsMatch(text))
+        {
+            return IdFor(text, ids).ToString();
+        }
+        var copy = CopyReference().Match(text);
+        return copy.Success ? CloneIds.Derive(Part(copy.Groups["scope"].Value, ids), Part(copy.Groups["node"].Value, ids)).ToString() : null;
+    }
+
+    private static Guid Part(string text, Dictionary<string, Guid> ids) => text[0] == '$' ? IdFor(text, ids) : Guid.Parse(text);
 
     private static Guid IdFor(string placeholder, Dictionary<string, Guid> ids)
     {

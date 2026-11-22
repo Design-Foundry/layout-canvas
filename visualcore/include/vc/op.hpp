@@ -113,9 +113,31 @@ struct SetComponentDefinition {
     friend bool operator==(const SetComponentDefinition&, const SetComponentDefinition&) = default;
 };
 
+/// Copies the subtree under `source` to a new root `id` under `parent` at sibling order `order`. Every
+/// descendant gets `derivedId(id, its source id)`. References between copied nodes follow the copies; parts
+/// and prototype start and flow names are not copied. `patches`, keyed by source node id (the source
+/// itself included), then change the copies. All or nothing. Undone by a `Batch` of deletions.
+struct CloneNode {
+    Id source;
+    Id id;
+    Id parent;
+    std::string order;
+    std::vector<Override> patches;
+    friend bool operator==(const CloneNode&, const CloneNode&) = default;
+};
+
+using BatchOp = std::variant<CreateNode, DeleteNode>;
+
+/// Creates and deletes nodes in order, all or nothing. Undoing and redoing a clone applies one.
+struct Batch {
+    std::vector<BatchOp> ops;
+    friend bool operator==(const Batch&, const Batch&) = default;
+};
+
 using OpBody = std::variant<CreateNode, DeleteNode, SetProps, MoveNode, CreateToken, DeleteToken, ReplaceToken,
                             CreateMode, DeleteMode, ReplaceMode, SetOverride, SetComponentDefinition, CreateFont,
-                            DeleteFont, ReplaceFont, CreateFontStack, DeleteFontStack, ReplaceFontStack>;
+                            DeleteFont, ReplaceFont, CreateFontStack, DeleteFontStack, ReplaceFontStack, CloneNode,
+                            Batch>;
 
 /// An edit as it travels to the server: a client-generated id plus the change.
 struct Op {

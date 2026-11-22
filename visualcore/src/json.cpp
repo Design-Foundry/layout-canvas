@@ -106,9 +106,10 @@ constexpr std::array<std::pair<Align, std::string_view>, 4> kAligns{{
     {Align::Start, "start"}, {Align::Center, "center"}, {Align::End, "end"}, {Align::Stretch, "stretch"}}};
 constexpr std::array<std::pair<Sizing, std::string_view>, 3> kSizings{{
     {Sizing::Fixed, "fixed"}, {Sizing::Hug, "hug"}, {Sizing::Fill, "fill"}}};
-constexpr std::array<std::string_view, 18> kOpKinds{"CreateNode", "DeleteNode", "SetProps", "MoveNode", "CreateToken", "DeleteToken",
+constexpr std::array<std::string_view, 20> kOpKinds{"CreateNode", "DeleteNode", "SetProps", "MoveNode", "CreateToken", "DeleteToken",
                                                       "ReplaceToken", "CreateMode", "DeleteMode", "ReplaceMode", "SetOverride", "SetComponentDefinition",
-                                                      "CreateFont", "DeleteFont", "ReplaceFont", "CreateFontStack", "DeleteFontStack", "ReplaceFontStack"};
+                                                      "CreateFont", "DeleteFont", "ReplaceFont", "CreateFontStack", "DeleteFontStack", "ReplaceFontStack",
+                                                      "CloneNode", "Batch"};
 
 json token(const TokenRef& ref) {
     return {{"token", ref.token.toString()}};
@@ -1529,9 +1530,56 @@ std::optional<OpBody> readOp(std::string_view kind, const json& j) {
         if (!node) return std::nullopt;
         return CreateNode{std::move(*node)};
     }
+    if (kind == "Batch") {
+        DiagnosticScope field{"ops"};
+        const auto it = j.find("ops");
+        if (it == j.end() || !it->is_array()) return refused("ops is required: an array of CreateNode and DeleteNode ops");
+        Batch batch;
+        for (std::size_t i = 0; i < it->size(); ++i) {
+            const json& item = (*it)[i];
+            DiagnosticScope entry{slot(i)};
+            if (!item.is_object() || !item.contains("kind") || !item["kind"].is_string() || !item.contains("data")) return refused("must be an object with a kind string and data");
+            auto op = readOp(item["kind"].get_ref<const std::string&>(), item["data"]);
+            if (!op) return std::nullopt;
+            if (const auto* create = std::get_if<CreateNode>(&*op)) batch.ops.emplace_back(*create);
+            else if (const auto* remove = std::get_if<DeleteNode>(&*op)) batch.ops.emplace_back(*remove);
+            else return refused("a batch holds only CreateNode and DeleteNode ops");
+        }
+        return batch;
+    }
     const auto id = requireId(j, "id");
     if (!id) return std::nullopt;
 
+    if (kind == "CloneNode") {
+        CloneNode clone;
+        clone.id = *id;
+        const auto source = requireId(j, "source");
+        if (!source) return std::nullopt;
+        clone.source = *source;
+        const auto order = requireOrder(j);
+        if (!order) return std::nullopt;
+        clone.order = *order;
+        if (j.contains("parent")) {
+            const auto parent = requireId(j, "parent");
+            if (!parent) return std::nullopt;
+            clone.parent = *parent;
+        }
+        if (const auto it = j.find("patches"); it != j.end()) {
+            DiagnosticScope field{"patches"};
+            if (!it->is_object()) return refused("patches must be an object of patches keyed by the id of a node of the source subtree");
+            for (const auto& [key, value] : it->items()) {
+                DiagnosticScope entry{key};
+                const auto node = Id::parse(key);
+                if (!node) return refused("the key must be the UUID of a node of the source subtree");
+                if (!value.is_object()) return refused("must be a patch object");
+                auto patch = readPatch(value);
+                if (!patch) return std::nullopt;
+                clone.patches.push_back({*node, std::move(*patch)});
+            }
+            std::sort(clone.patches.begin(), clone.patches.end(), [](const Override& a, const Override& b) { return a.node < b.node; });
+        }
+        return clone;
+    }
     if (kind == "DeleteNode") {
         return DeleteNode{*id};
     }
@@ -1610,6 +1658,26 @@ json writeOp(const OpBody& op) {
                 return {{"font", writeFont(body.font)}};
             } else if constexpr (std::is_same_v<T, CreateFontStack> || std::is_same_v<T, ReplaceFontStack>) {
                 return {{"stack", writeFontStack(body.stack)}};
+            } else if constexpr (std::is_same_v<T, CloneNode>) {
+                json clone{{"source", body.source.toString()}, {"id", body.id.toString()}, {"order", body.order}};
+                if (!body.parent.isNil()) clone["parent"] = body.parent.toString();
+                if (!body.patches.empty()) {
+                    json patches = json::object();
+                    for (const Override& o : body.patches) {
+                        json patch = json::object();
+                        writePatch(patch, o.patch);
+                        patches[o.node.toString()] = std::move(patch);
+                    }
+                    clone["patches"] = std::move(patches);
+                }
+                return clone;
+            } else if constexpr (std::is_same_v<T, Batch>) {
+                json ops = json::array();
+                for (const BatchOp& step : body.ops) {
+                    const OpBody inner = std::visit([](const auto& b) -> OpBody { return b; }, step);
+                    ops.push_back({{"kind", kOpKinds[inner.index()]}, {"data", writeOp(inner)}});
+                }
+                return {{"ops", std::move(ops)}};
             } else {
                 return {{"id", body.id.toString()}};
             }

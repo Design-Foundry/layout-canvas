@@ -92,3 +92,38 @@ describe('editor Escape routing', () => {
     expect(key(null, false, { key: 'Delete' }).defaultPrevented).toBe(true);
   });
 });
+
+describe('editor duplicate shortcut', () => {
+  it('duplicates the selection with Ctrl+D and keeps the browser from bookmarking', () => {
+    const { core, key } = setup();
+    const duplicateSelection = vi.fn();
+    Object.assign(core, { duplicateSelection });
+    expect(key(null, false, { key: 'd', ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(key(null, false, { key: 'D', metaKey: true }).defaultPrevented).toBe(true);
+    expect(duplicateSelection).toHaveBeenCalledTimes(2);
+  });
+  it('leaves a plain D to the tool shortcuts and Ctrl+Alt+D alone', () => {
+    const { core, key } = setup();
+    const duplicateSelection = vi.fn();
+    Object.assign(core, { duplicateSelection });
+    key(null, false, { key: 'd', ctrlKey: true, altKey: true });
+    key(null, false, { key: 'd' });
+    expect(duplicateSelection).not.toHaveBeenCalled();
+  });
+  it('leaves Ctrl+D to typing controls', () => {
+    const { core, key } = setup();
+    const duplicateSelection = vi.fn();
+    Object.assign(core, { duplicateSelection });
+    expect(
+      key(document.createElement('input'), false, { key: 'd', ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(duplicateSelection).not.toHaveBeenCalled();
+  });
+  it('blocks the browser shortcut while presenting without duplicating', () => {
+    const { core, key } = setup(false, true);
+    const duplicateSelection = vi.fn();
+    Object.assign(core, { duplicateSelection });
+    expect(key(null, false, { key: 'd', ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(duplicateSelection).not.toHaveBeenCalled();
+  });
+});

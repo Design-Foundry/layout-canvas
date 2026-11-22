@@ -143,8 +143,12 @@ std::optional<OpBody> Document::apply(const OpBody& op) {
                 return createFontStack(body);
             } else if constexpr (std::is_same_v<T, DeleteFontStack>) {
                 return deleteFontStack(body);
-            } else {
+            } else if constexpr (std::is_same_v<T, ReplaceFontStack>) {
                 return replaceFontStack(body);
+            } else if constexpr (std::is_same_v<T, CloneNode>) {
+                return clone(body);
+            } else {
+                return batch(body);
             }
         },
         op);
@@ -551,6 +555,113 @@ std::optional<OpBody> Document::setOverride(const SetOverride& op) {
         const auto at = std::lower_bound(overrides.begin(), overrides.end(), op.node,
                                          [](const Override& o, const Id& id) { return o.node < id; });
         overrides.insert(at, Override{op.node, op.patch});
+    }
+    return inverse;
+}
+
+std::optional<OpBody> Document::clone(const CloneNode& op) {
+    const auto source = nodes_.find(op.source);
+    if (source == nodes_.end()) {
+        const DiagnosticScope field{"source"};
+        return refused("no node has this id");
+    }
+    {
+        const DiagnosticScope field{"id"};
+        if (op.id.isNil()) return refused("a node needs an id");
+        if (nodes_.contains(op.id)) return refused("a node with this id already exists");
+    }
+    if (!isValidParent(op.parent)) {
+        const DiagnosticScope field{"parent"};
+        return refused("the parent does not exist or cannot have children");
+    }
+
+    std::vector<Id> subtree;
+    const auto collect = [&](const Id& id, auto&& self) -> void {
+        subtree.push_back(id);
+        for (const Id& child : children(id)) self(child, self);
+    };
+    collect(op.source, collect);
+
+    std::unordered_map<Id, Id> copies;
+    for (const Id& id : subtree) {
+        if (nodes_.at(id).type == NodeType::Component) {
+            const DiagnosticScope field{"source"};
+            return refused("a main component cannot be cloned, create a new component and instances of this one instead");
+        }
+        const Id copy = id == op.source ? op.id : derivedId(op.id, id);
+        if (id != op.source && nodes_.contains(copy)) {
+            const DiagnosticScope field{"id"};
+            return refused("the id of the copy of " + id.toString() + " already exists");
+        }
+        copies.emplace(id, copy);
+    }
+
+    for (const Override& patch : op.patches) {
+        if (copies.contains(patch.node)) continue;
+        const DiagnosticScope field{"patches"};
+        const DiagnosticScope entry{patch.node.toString()};
+        return refused("not the source or one of its descendants");
+    }
+
+    const auto remap = [&](Interaction& interaction) {
+        if (const auto it = copies.find(interaction.target); it != copies.end()) interaction.target = it->second;
+    };
+    std::vector<OpBody> undo;
+    const auto unwind = [&] {
+        for (auto it = undo.rbegin(); it != undo.rend(); ++it) apply(*it);
+        return std::nullopt;
+    };
+    Batch inverse;
+    for (const Id& id : subtree) {
+        Node node = nodes_.at(id);
+        node.id = copies.at(id);
+        node.part.clear();
+        node.prototypeStart = false;
+        node.prototypeFlowName.clear();
+        if (id == op.source) {
+            node.parent = op.parent;
+            node.order = op.order;
+            if (!op.parent.isNil()) node.prototypeOverflow = PrototypeOverflow::None;
+        } else {
+            node.parent = copies.at(node.parent);
+        }
+        remap(node.interaction);
+        for (TriggeredInteraction& entry : node.interactions) remap(entry.interaction);
+        for (Override& o : node.overrides) {
+            if (o.patch.interaction) remap(*o.patch.interaction);
+            if (o.patch.interactions) for (TriggeredInteraction& entry : *o.patch.interactions) remap(entry.interaction);
+        }
+        const DiagnosticScope field{"source"};
+        const DiagnosticScope entry{id.toString()};
+        auto undoCreate = apply(CreateNode{std::move(node)});
+        if (!undoCreate) return unwind();
+        undo.push_back(*undoCreate);
+        inverse.ops.insert(inverse.ops.begin(), DeleteNode{copies.at(id)});
+    }
+    for (const Override& patch : op.patches) {
+        const DiagnosticScope field{"patches"};
+        const DiagnosticScope entry{patch.node.toString()};
+        auto undoPatch = apply(SetProps{copies.at(patch.node), patch.patch});
+        if (!undoPatch) return unwind();
+        undo.push_back(*undoPatch);
+    }
+    return inverse;
+}
+
+std::optional<OpBody> Document::batch(const Batch& op) {
+    std::vector<OpBody> undo;
+    for (const BatchOp& step : op.ops) {
+        auto inverse = apply(std::visit([](const auto& body) -> OpBody { return body; }, step));
+        if (!inverse) {
+            for (auto it = undo.rbegin(); it != undo.rend(); ++it) apply(*it);
+            return std::nullopt;
+        }
+        undo.push_back(std::move(*inverse));
+    }
+    Batch inverse;
+    for (auto it = undo.rbegin(); it != undo.rend(); ++it) {
+        if (const auto* create = std::get_if<CreateNode>(&*it)) inverse.ops.emplace_back(*create);
+        else inverse.ops.emplace_back(std::get<DeleteNode>(*it));
     }
     return inverse;
 }

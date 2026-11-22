@@ -26,7 +26,8 @@ bool changesStructure(const OpBody& op) {
         return set->patch.name || set->patch.visible || set->patch.locked || set->patch.type || set->patch.component || set->patch.componentValues;
     }
     return std::holds_alternative<CreateNode>(op) || std::holds_alternative<DeleteNode>(op) ||
-           std::holds_alternative<MoveNode>(op) || std::holds_alternative<SetOverride>(op) || std::holds_alternative<SetComponentDefinition>(op);
+           std::holds_alternative<MoveNode>(op) || std::holds_alternative<SetOverride>(op) || std::holds_alternative<SetComponentDefinition>(op) ||
+           std::holds_alternative<CloneNode>(op) || std::holds_alternative<Batch>(op);
 }
 
 bool changesTokens(const OpBody& op) {
@@ -35,7 +36,8 @@ bool changesTokens(const OpBody& op) {
            std::holds_alternative<DeleteMode>(op) || std::holds_alternative<ReplaceMode>(op) ||
            std::holds_alternative<CreateFont>(op) || std::holds_alternative<DeleteFont>(op) ||
            std::holds_alternative<ReplaceFont>(op) || std::holds_alternative<CreateFontStack>(op) ||
-           std::holds_alternative<DeleteFontStack>(op) || std::holds_alternative<ReplaceFontStack>(op);
+           std::holds_alternative<DeleteFontStack>(op) || std::holds_alternative<ReplaceFontStack>(op) ||
+           std::holds_alternative<CloneNode>(op) || std::holds_alternative<Batch>(op);
 }
 
 // Token rows also expose whether a resource is referenced by scene data. Refresh
