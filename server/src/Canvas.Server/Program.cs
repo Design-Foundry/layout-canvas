@@ -4,7 +4,32 @@ using Canvas.Server.Fonts;
 using Canvas.Server.Mcp;
 using Canvas.Server.Storage;
 
-var builder = WebApplication.CreateBuilder(args);
+var packaged = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"));
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = packaged ? AppContext.BaseDirectory : null,
+});
+
+if (packaged)
+{
+    if (Environment.GetEnvironmentVariable("ASPNETCORE_URLS") is null)
+    {
+        builder.WebHost.UseUrls("http://localhost:5180");
+    }
+
+    if (Environment.GetEnvironmentVariable("Storage__Database") is null)
+    {
+        builder.Configuration["Storage:Database"] = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Canvas", "canvas.db");
+    }
+
+    if (Environment.GetEnvironmentVariable("Storage__Fonts") is null)
+    {
+        builder.Configuration["Storage:Fonts"] = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Canvas", "fonts");
+    }
+}
 
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
@@ -33,6 +58,14 @@ var app = builder.Build();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
+var serveClient = app.Environment.WebRootPath is { } webRoot && Directory.Exists(webRoot);
+if (serveClient)
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+    app.UseRouting();
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -46,6 +79,23 @@ api.MapGet("/health", () => TypedResults.Ok(new HealthResponse("ok", typeof(Prog
 api.MapDocuments();
 api.MapFonts();
 app.MapCanvasMcp();
+
+if (serveClient)
+{
+    app.MapFallbackToFile("{**path:regex(^(?!api(/|$)|mcp(/|$))[^.]*$)}", "index.html");
+}
+
+if (packaged && Environment.GetEnvironmentVariable("CANVAS_NO_BROWSER") is null)
+{
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        var address = app.Urls.FirstOrDefault();
+        if (address is not null)
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(address) { UseShellExecute = true });
+        }
+    });
+}
 
 app.Run();
 
