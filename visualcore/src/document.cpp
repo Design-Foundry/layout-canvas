@@ -204,6 +204,24 @@ bool Document::isAncestorOrSelf(const Id& ancestor, const Id& id) const {
     return false;
 }
 
+int Document::depthOf(const Id& id) const {
+    int depth = 0;
+    for (const Node* node = find(id); node; node = find(node->parent)) ++depth;
+    return depth;
+}
+
+int Document::subtreeHeight(const Id& id) const {
+    int height = 0;
+    std::vector<std::pair<Id, int>> pending{{id, 1}};
+    while (!pending.empty()) {
+        const auto [current, level] = pending.back();
+        pending.pop_back();
+        height = std::max(height, level);
+        for (const Id& child : children(current)) pending.emplace_back(child, level + 1);
+    }
+    return height;
+}
+
 bool Document::validInteraction(const Interaction& interaction) const {
     if(!validInteractionSettings(interaction)) return refuse("interaction has an invalid action, target, transition, duration or outside-dismiss setting");
     if(interaction.action==PrototypeAction::None || interaction.action==PrototypeAction::Back || interaction.action==PrototypeAction::CloseOverlay || interaction.action==PrototypeAction::ChangeState) return true;
@@ -264,6 +282,7 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
     if (node.id.isNil()) return refused("a node needs an id");
     if (nodes_.contains(node.id)) return refused("a node with this id already exists");
     if (!isValidParent(node.parent)) return refused("the parent does not exist or cannot have children");
+    if (depthOf(node.parent) >= kMaxNestingDepth) return refused("nodes can be nested at most 256 levels");
     if (!node.part.empty()) {
         const Id owner = node.type == NodeType::Component ? node.id : enclosingComponent(node.parent);
         if (owner.isNil()) return refused("a part names a layer inside a main component");
@@ -422,6 +441,7 @@ std::optional<OpBody> Document::move(const MoveNode& op) {
     if (!op.parent.isNil() && isAncestorOrSelf(op.id, op.parent)) {
         return refused("a node cannot move into itself or its descendants");
     }
+    if (depthOf(op.parent) + subtreeHeight(op.id) > kMaxNestingDepth) return refused("nodes can be nested at most 256 levels");
     if (!partsToClear({op.id}, op.parent).empty()) return refused("a layer with a part cannot move out of its component or into one that already uses the part; clear the part first");
     bool cycle = false;
     if (op.parent != it->second.parent) {
@@ -1067,6 +1087,17 @@ void Document::buildTree() const {
 
 void Document::expand(const Id& source, const Id& key, const Id& parent, const Id& owner,
                       const std::vector<OverrideLayer>& layers, int depth) const {
+    const Expansion step = expandNode(source, key, parent, owner, layers, depth);
+    if (step.childrenOf.isNil()) {
+        return;
+    }
+    for (const Id& child : children(step.childrenOf)) {
+        expand(child, step.owner.isNil() ? child : copyKey(key, child), key, step.owner, step.layers, depth + 1);
+    }
+}
+
+Document::Expansion Document::expandNode(const Id& source, const Id& key, const Id& parent, const Id& owner,
+                                         const std::vector<OverrideLayer>& layers, int depth) const {
     const Node& original = nodes_.at(source);
     const Id expansionOwner = owner.isNil() && original.type == NodeType::Instance ? key : owner;
     const auto keyIn = [&](const OverrideLayer& layer) {
@@ -1170,12 +1201,7 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
                   expansionOwner.isNil() || addressing == layers.rend() ? Id{} : keyIn(*addressing)};
     treeChildren_[parent].push_back(key);
 
-    if (childrenOf.isNil()) {
-        return;
-    }
-    for (const Id& child : children(childrenOf)) {
-        expand(child, expansionOwner.isNil() ? child : copyKey(key, child), key, expansionOwner, inner, depth + 1);
-    }
+    return {childrenOf, expansionOwner, std::move(inner)};
 }
 
 } // namespace vc

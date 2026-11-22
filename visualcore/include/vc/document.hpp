@@ -99,6 +99,13 @@ public:
     /// True if `ancestor` is `id` itself or one of its ancestors.
     [[nodiscard]] bool isAncestorOrSelf(const Id& ancestor, const Id& id) const;
 
+    /// Most levels a node may be nested below the document root.
+    static constexpr int kMaxNestingDepth = 256;
+    /// Number of levels from the root down to `id` (a root node is at depth 1, the root itself at 0).
+    [[nodiscard]] int depthOf(const Id& id) const;
+    /// Levels in the subtree under `id`, counting `id` itself.
+    [[nodiscard]] int subtreeHeight(const Id& id) const;
+
     [[nodiscard]] const Token* findToken(const Id& id) const;
     /// All tokens, grouped by family and in each family's order.
     [[nodiscard]] std::vector<const Token*> tokens() const;
@@ -187,6 +194,13 @@ private:
         const ComponentDefinition* definition = nullptr;
         const ComponentValues* values = nullptr;
     };
+    struct Expansion {
+        Id childrenOf;
+        Id owner;
+        std::vector<OverrideLayer> layers;
+    };
+    Expansion expandNode(const Id& source, const Id& key, const Id& parent, const Id& owner,
+                         const std::vector<OverrideLayer>& layers, int depth) const;
     void expand(const Id& source, const Id& key, const Id& parent, const Id& owner,
                 const std::vector<OverrideLayer>& layers, int depth) const;
 
