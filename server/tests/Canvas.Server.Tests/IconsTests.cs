@@ -312,6 +312,68 @@ public sealed class IconsTests
         Assert.Equal(HttpStatusCode.OK, appended.StatusCode);
         Assert.Null((await appended.Content.ReadFromJsonAsync<AppendOpsResponse>(Ct))!.Acks.Single().Error);
     }
+
+    [Fact]
+    public async Task A_commit_other_than_the_one_the_built_in_set_is_pinned_to_stops_the_server_from_starting()
+    {
+        await using var factory = new CanvasFactory();
+        await using var other = factory.WithWebHostBuilder(builder =>
+            builder.UseSetting("MaterialSymbols:Commit", new string('a', 40)));
+
+        var failure = Assert.ThrowsAny<Exception>(() => other.CreateClient());
+        Assert.Contains("MaterialSymbols:Commit", failure.ToString());
+    }
+
+    [Fact]
+    public async Task One_unreachable_source_stops_the_rest_of_a_batch_from_waiting_on_it_again()
+    {
+        await using var factory = new CanvasFactory();
+        foreach (var glyph in new[] { "home", "search", "settings" })
+        {
+            factory.GitHub.Respond($"symbols/web/{glyph}/materialsymbolsoutlined/{glyph}_24px.svg", HttpStatusCode.InternalServerError);
+        }
+        var client = factory.CreateClient();
+        var document = await NewDocument(client);
+
+        var appended = await client.PostAsJsonAsync($"/api/documents/{document.Id}/ops",
+            new AppendOpsRequest([CreateIcon("a0", "material-symbols/home"), CreateIcon("a1", "material-symbols/search"), CreateIcon("a2", "material-symbols/settings")]), Ct);
+
+        Assert.All((await appended.Content.ReadFromJsonAsync<AppendOpsResponse>(Ct))!.Acks, ack => Assert.Null(ack.Error));
+        Assert.Equal(1, factory.GitHub.RequestsFor("raw.githubusercontent.com"));
+    }
+
+    [Fact]
+    public async Task An_svg_outside_the_safe_subset_is_never_registered_and_the_icon_draws_as_missing()
+    {
+        await using var factory = new CanvasFactory();
+        var hostile = new[]
+        {
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>",
+            "<!DOCTYPE svg [<!ENTITY a \"b\">]><svg>&a;</svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><use href=\"http://example.com/x.svg#a\"/></svg>",
+            "<svg><path d=\"M0 0\" stroke=\"#000\" stroke-dasharray=\"0.0001\"/></svg>",
+        };
+        var glyphs = new[] { "home", "search", "settings", "arrow_back" };
+        for (var i = 0; i < glyphs.Length; i++)
+        {
+            factory.GitHub.ServeRaw($"symbols/web/{glyphs[i]}/materialsymbolsoutlined/{glyphs[i]}_24px.svg", System.Text.Encoding.UTF8.GetBytes(hostile[i]));
+        }
+        var client = factory.CreateClient();
+        var document = await NewDocument(client);
+
+        var appended = await client.PostAsJsonAsync($"/api/documents/{document.Id}/ops",
+            new AppendOpsRequest(glyphs.Select((g, i) => CreateIcon($"a{i}", $"material-symbols/{g}")).ToList()), Ct);
+
+        Assert.All((await appended.Content.ReadFromJsonAsync<AppendOpsResponse>(Ct))!.Acks, ack => Assert.Null(ack.Error));
+        foreach (var glyph in glyphs)
+        {
+            var key = NativeIcons.SourceKey(JsonSerializer.Serialize($"material-symbols/{glyph}"))!;
+            Assert.NotNull(NativeIcons.Register(key, "<svg><script/></svg>"));
+        }
+        var svg = await client.GetAsync($"{Glyphs}/home", Ct);
+        Assert.Equal("nosniff", svg.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Contains("sandbox", svg.Headers.GetValues("Content-Security-Policy").Single());
+    }
 }
 
 public sealed class IconToolsTests(CanvasFactory factory) : IClassFixture<CanvasFactory>

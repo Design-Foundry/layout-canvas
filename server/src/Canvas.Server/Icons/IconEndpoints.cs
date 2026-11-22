@@ -87,6 +87,8 @@ public static class IconEndpoints
             {
                 return TypedResults.NotFound();
             }
+            context.Response.Headers.ContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+            context.Response.Headers.XContentTypeOptions = "nosniff";
             context.Response.Headers.CacheControl = version is null ? "public, max-age=3600" : "public, max-age=31536000, immutable";
             return TypedResults.File(System.Text.Encoding.UTF8.GetBytes(svg), "image/svg+xml");
         }

@@ -5,6 +5,7 @@ using Canvas.Server.Fonts;
 using Canvas.Server.Icons;
 using Canvas.Server.Mcp;
 using Canvas.Server.Storage;
+using Canvas.Server.VisualCore;
 
 var packaged = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"));
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -56,7 +57,11 @@ builder.Services.AddSingleton<GoogleFontsProvider>();
 builder.Services.AddSingleton<GoogleFontsRegistrar>();
 builder.Services.AddHttpClient(MaterialSymbolsProvider.HttpClientName)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-builder.Services.Configure<MaterialSymbolsOptions>(builder.Configuration.GetSection(MaterialSymbolsOptions.Section));
+builder.Services.AddOptions<MaterialSymbolsOptions>()
+    .Bind(builder.Configuration.GetSection(MaterialSymbolsOptions.Section))
+    .Validate(o => o.Commit == NativeIcons.MaterialSymbolsCommit,
+        $"MaterialSymbols:Commit has to be {NativeIcons.MaterialSymbolsCommit}, the commit the built-in icon set is pinned to.")
+    .ValidateOnStart();
 builder.Services.AddSingleton<IconFileStore>();
 builder.Services.AddSingleton<MaterialSymbolsProvider>();
 builder.Services.AddSingleton<IconRegistrar>();

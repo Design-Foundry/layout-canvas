@@ -50,6 +50,9 @@ internal static partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "vc_icon_normalize", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint IconNormalize(string icon);
 
+    [LibraryImport(Library, EntryPoint = "vc_material_symbols_commit")]
+    internal static partial nint MaterialSymbolsCommit();
+
     [LibraryImport(Library, EntryPoint = "vc_font_capabilities")]
     internal static partial nint FontCapabilities(ReadOnlySpan<byte> bytes, nuint size);
 

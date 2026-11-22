@@ -8,6 +8,9 @@ public static class NativeIcons
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>The google/material-design-icons commit the built-in Material Symbols set is pinned to.</summary>
+    public static string MaterialSymbolsCommit => NativeMethods.Take(NativeMethods.MaterialSymbolsCommit())!;
+
     /// <summary>The registry key of an icon reference given as a path string or <c>{ set, glyph, axes }</c> JSON, or null when it is not one.</summary>
     public static string? SourceKey(string iconJson) => NativeMethods.Take(NativeMethods.IconSourceKey(iconJson));
 

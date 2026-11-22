@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Canvas.Server.VisualCore;
 using Microsoft.Extensions.Options;
 
 namespace Canvas.Server.Icons;
@@ -10,8 +11,11 @@ public sealed class MaterialSymbolsOptions
 {
     public const string Section = "MaterialSymbols";
 
-    /// <summary>The google/material-design-icons commit icons are pinned to.</summary>
-    public string Commit { get; set; } = "10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7";
+    /// <summary>
+    /// The google/material-design-icons commit icons are read from. It has to be the commit the built-in set of visualcore is
+    /// pinned to, so the server refuses to start with another one.
+    /// </summary>
+    public string Commit { get; set; } = NativeIcons.MaterialSymbolsCommit;
 }
 
 /// <summary>google/material-design-icons could not be reached or returned something unusable.</summary>

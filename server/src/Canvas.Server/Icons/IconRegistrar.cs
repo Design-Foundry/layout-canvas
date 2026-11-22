@@ -82,10 +82,16 @@ public sealed partial class IconRegistrar(MaterialSymbolsProvider provider, Time
 
     private async Task EnsureAsync(IReadOnlyList<string> keys, CancellationToken ct)
     {
+        var unavailable = false;
         foreach (var key in keys.Distinct())
         {
             if (IsSettled(key))
             {
+                continue;
+            }
+            if (unavailable)
+            {
+                outcomes[key] = clock.GetTimestamp();
                 continue;
             }
             await gate.WaitAsync(ct);
@@ -104,6 +110,7 @@ public sealed partial class IconRegistrar(MaterialSymbolsProvider provider, Time
             {
                 logger.LogWarning(e, "Icon {Key} could not be registered", key);
                 outcomes[key] = clock.GetTimestamp();
+                unavailable = e is IconsUnavailableException;
             }
             finally
             {
