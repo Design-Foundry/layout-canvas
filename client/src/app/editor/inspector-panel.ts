@@ -38,6 +38,7 @@ import { TextPanel } from './text-panel';
 import { LinePanel } from './line-panel';
 import { PathPanel } from './path-panel';
 import { ImagePanel } from './image-panel';
+import { IconPanel } from './icon-panel';
 import { PrototypePanel } from './prototype-panel';
 import { ExportPanel, ExportTarget } from './export-panel';
 
@@ -121,6 +122,7 @@ function replaceAt<T>(items: Four<T>, index: number, value: T): Four<T> {
     LinePanel,
     PathPanel,
     ImagePanel,
+    IconPanel,
     PrototypePanel,
     CdkConnectedOverlay,
     LucentButton,

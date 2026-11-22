@@ -2318,3 +2318,22 @@ std::optional<std::string> normalizeIconJson(std::string_view data) {
 }
 
 } // namespace vc
+
+namespace vc {
+
+std::string usedIconsToJson(const Document& document) {
+    json out = json::array();
+    std::unordered_set<std::string> seen;
+    const auto note = [&](const IconRef& icon) {
+        std::string key = iconSourceKey(icon);
+        if (seen.insert(key).second) out.push_back({{"key", std::move(key)}, {"icon", writeIcon(icon)}});
+    };
+    document.forEachInPaintOrder([&](const Node& node) {
+        if (node.type == NodeType::Icon) note(node.icon);
+        for (const auto& o : node.overrides) if (o.patch.icon) note(*o.patch.icon);
+        for (const auto& r : node.definition.rules) if (r.patch.icon) note(*r.patch.icon);
+    });
+    return out.dump();
+}
+
+} // namespace vc

@@ -64,6 +64,9 @@ namespace vc {
 [[nodiscard]] std::optional<FontStack> fontStackFromJson(std::string_view data);
 /// A family's files as `[{ face, fixed: { tag: value } }]`.
 [[nodiscard]] std::optional<std::vector<FontFile>> fontFilesFromJson(std::string_view data);
+/// Every icon the document draws, in order and without repeats, as `[{ key, icon }]`: the registry key of its SVG
+/// and its reference. Overrides and variant rules count.
+[[nodiscard]] std::string usedIconsToJson(const Document& document);
 /// The registry key of an icon reference given as a JSON string (path form) or object, or nothing.
 [[nodiscard]] std::optional<std::string> iconSourceKeyFromJson(std::string_view data);
 /// An icon reference given as a path string or object, written in the structured shape documents store.

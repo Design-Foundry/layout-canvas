@@ -537,3 +537,33 @@ TEST_CASE("an icon fill can be a color token", "[icons]") {
     REQUIRE(items[0].color.a == 1.0f);
     REQUIRE(items[0].color.g != kUnresolvedColor.g);
 }
+
+TEST_CASE("the used icons list each reference once, overrides and rules included", "[icons][json]") {
+    ComponentScene s;
+    REQUIRE(s.doc.apply(CreateNode{icon(30, 1, "home")}));
+    REQUIRE(s.doc.apply(CreateNode{icon(31, 1, "home", "a3")}));
+    NodePatch swap;
+    swap.icon = ref("close", {{"wght", 200.0}});
+    REQUIRE(s.doc.apply(SetOverride{s.instance, s.glyph, swap}));
+    ComponentDefinition definition;
+    definition.axes.push_back({"state", {"idle", "done"}, "idle"});
+    VariantRule rule;
+    rule.when = {{"state", "done"}};
+    rule.target = s.glyph;
+    rule.patch.icon = ref("check");
+    definition.rules.push_back(rule);
+    REQUIRE(s.doc.apply(SetComponentDefinition{s.component, definition}));
+
+    const std::string used = usedIconsToJson(s.doc);
+    const auto count = [&](const std::string& needle) {
+        std::size_t n = 0;
+        for (auto at = used.find(needle); at != std::string::npos; at = used.find(needle, at + 1)) ++n;
+        return n;
+    };
+    REQUIRE(count("\"key\"") == 4);
+    for (const char* key : {"material-symbols/home?style=outlined&FILL=0&wght=400&opsz=24", "material-symbols/arrow_back?style=outlined&FILL=0&wght=400&opsz=24", "material-symbols/close?style=outlined&FILL=0&wght=200&opsz=24", "material-symbols/check?style=outlined&FILL=0&wght=400&opsz=24"}) {
+        INFO(key);
+        REQUIRE(count(std::string{"\"key\":\""} + key + "\"") == 1);
+    }
+    REQUIRE(usedIconsToJson(Document{}) == "[]");
+}

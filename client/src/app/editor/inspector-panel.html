@@ -141,6 +141,9 @@
           [saveStyleBinding]="saveStyleBinding()"
         />
       }
+      @if (n.type === 'icon') {
+        <app-icon-panel [node]="n" [save]="saveStyleBinding()" />
+      }
       @if (n.type === 'image') {
         <app-image-panel [node]="n" [save]="saveStyleBinding()" />
       } @else if (n.type === 'path') {
@@ -296,7 +299,8 @@
             n.type !== 'text' &&
             n.type !== 'line' &&
             n.type !== 'path' &&
-            n.type !== 'image'
+            n.type !== 'image' &&
+            n.type !== 'icon'
           ) {
             <lucent-icon-button
               icon="crop_free"
@@ -325,7 +329,8 @@
           n.type !== 'text' &&
           n.type !== 'line' &&
           n.type !== 'path' &&
-          n.type !== 'image'
+          n.type !== 'image' &&
+          n.type !== 'icon'
         ) {
           <app-value-field
             label="Corner radius"
@@ -388,7 +393,7 @@
         </section>
       }
 
-      @if (n.type !== 'text' && n.type !== 'line' && n.type !== 'path' && n.type !== 'image') {
+      @if (n.type !== 'text' && n.type !== 'line' && n.type !== 'path' && n.type !== 'image' && n.type !== 'icon') {
         <section class="section">
           <header class="section-header">
             <h3 class="heading typography-caption">Stroke</h3>

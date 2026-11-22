@@ -511,6 +511,23 @@ test('node notes round-trip in snapshot 26 portable components and refuse older 
   assert.throws(() => readComponent(JSON.stringify(bundle)), /version 26/);
 });
 
+test('icon layers round-trip in snapshot 27 portable components and refuse older files', () => {
+  const source = fixture();
+  source.version = 27;
+  source.nodes[1].type = 'icon';
+  source.nodes[1].icon = { set: '00000000-0000-0000-0000-000000000200', glyph: 'close', axes: { wght: 300 } };
+  const bundle = exportComponent(source, id(10));
+  assert.equal(bundle.snapshot.version, 27);
+  assert.deepEqual(bundle.snapshot.nodes.find((node) => node.id === id(11)).icon, source.nodes[1].icon);
+  const read = readComponent(JSON.stringify(bundle));
+  assert.deepEqual(read.snapshot.nodes, bundle.snapshot.nodes);
+  delete bundle.snapshot.nodes.find((node) => node.id === id(11)).icon;
+  assert.throws(() => readComponent(JSON.stringify(bundle)), /every icon layer needs one/);
+  bundle.snapshot.nodes.find((node) => node.id === id(11)).icon = source.nodes[1].icon;
+  bundle.snapshot.version = 26;
+  assert.throws(() => readComponent(JSON.stringify(bundle)), /version 27/);
+});
+
 test('base and visibility rules round-trip in snapshot 24 portable components and refuse older files', () => {
   for (const rule of [
     { when: {}, target: id(11), patch: { opacity: 0.5 } },

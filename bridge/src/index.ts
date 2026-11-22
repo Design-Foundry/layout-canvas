@@ -28,7 +28,27 @@ export type Tool =
   | 'star';
 
 export type NodeType =
-  'frame' | 'rect' | 'ellipse' | 'component' | 'instance' | 'text' | 'line' | 'path' | 'image';
+  'frame' | 'rect' | 'ellipse' | 'component' | 'instance' | 'text' | 'line' | 'path' | 'image' | 'icon';
+
+/** The Material Symbols set every document has. */
+export const MATERIAL_SYMBOLS_SET_ID = '00000000-0000-0000-0000-000000000200';
+
+/** The style axis of Material Symbols. */
+export type IconStyle = 'outlined' | 'rounded' | 'sharp';
+
+/** An icon an `icon` node draws: a glyph of an icon set at axis values. Axes at their default are left out. */
+export interface IconRef {
+  readonly set: string;
+  readonly glyph: string;
+  /** `style`, `FILL` (0 or 1), `wght` (100 to 700 in steps of 100) and `opsz` (20, 24, 40 or 48). */
+  readonly axes?: Readonly<Record<string, string | number>>;
+}
+
+/** An icon the document draws and the key its SVG is registered under. */
+export interface UsedIcon {
+  readonly key: string;
+  readonly icon: IconRef;
+}
 
 /** The stack every document has: the bundled Inter variable font. */
 export const INTER_STACK_ID = '00000000-0000-0000-0000-000000000101';
@@ -326,6 +346,8 @@ export interface NodeFields {
   readonly image?: RasterImage;
   readonly imageFit?: ImageFit;
   readonly imageCrop?: ImageCrop;
+  /** Only on `icon` nodes: what the node draws. */
+  readonly icon?: IconRef;
   readonly path?: {
     readonly points: readonly { readonly x: number; readonly y: number }[];
     readonly closed: boolean;
@@ -590,6 +612,24 @@ export class VisualCore {
    */
   registerFontFace(id: string, bytes: Uint8Array, sha256: string): string | null {
     return this.module.registerFontFace(id, bytes, sha256) || null;
+  }
+
+  /**
+   * Registers the SVG of the icon `key`, as `iconSourceKey` writes it. Returns null, or why it refused.
+   * An icon with no registered SVG draws as a missing-glyph box.
+   */
+  registerIcon(key: string, svg: string): string | null {
+    return this.module.registerIcon(key, svg) || null;
+  }
+
+  /** The key an icon reference registers its SVG under, with every axis explicit. Null when it is not a valid reference. */
+  iconSourceKey(icon: IconRef | string): string | null {
+    return this.module.iconSourceKey(JSON.stringify(icon)) || null;
+  }
+
+  /** Every icon the document draws, in order and without repeats, overrides and variant rules included. */
+  usedIcons(): UsedIcon[] {
+    return JSON.parse(this.module.usedIcons());
   }
 
   /** The whole document, to store as a server snapshot. */

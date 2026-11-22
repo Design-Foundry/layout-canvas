@@ -81,9 +81,24 @@ test('whole-document round trip preserves node notes in snapshot 26', () => {
   assert.deepEqual(bundle.snapshot, snapshot);
 });
 
+test('whole-document round trip preserves icon layers and icon sets in snapshot 27', () => {
+  const snapshot = fixture();
+  snapshot.version = 27;
+  snapshot.iconSets = [{ id: '00000000-0000-0000-0000-000000000200', identifier: 'material-symbols' }];
+  snapshot.nodes.push({
+    id: '0192a4b1-7c3d-4e5f-8a6b-0000000000a1',
+    type: 'icon',
+    order: 'a5',
+    icon: { set: '00000000-0000-0000-0000-000000000200', glyph: 'arrow_back', axes: { style: 'rounded', FILL: 1 } },
+  });
+  const bundle = readDocument(JSON.stringify(exportDocument(snapshot, 'Demo')));
+  assert.equal(bundle.snapshot.version, 27);
+  assert.deepEqual(bundle.snapshot, snapshot);
+});
+
 test('native snapshot envelope refuses unsupported versions and missing structural lists', () => {
   for (const snapshot of [
-    { ...fixture(), version: 27 },
+    { ...fixture(), version: 28 },
     { ...fixture(), version: 0 },
     { ...fixture(), version: 21.5 },
     { ...fixture(), nodes: [null] },

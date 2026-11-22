@@ -48,6 +48,7 @@ import { InspectorPanel } from './inspector-panel';
 import { LayersPanel } from './layers-panel';
 import { TokenInspector } from './token-inspector';
 import { FontService } from './font-service';
+import { IconService } from './icon-service';
 import { ModeRename, TokensPanel } from './tokens-panel';
 import { ComponentsPanel } from './components-panel';
 import { componentOptions } from './component-options';
@@ -87,6 +88,7 @@ const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
   line: 'line',
   path: 'path',
   image: 'image',
+  icon: 'icon',
   frame: 'frame',
   rect: 'rectangle',
   ellipse: 'ellipse',
@@ -124,6 +126,7 @@ export class EditorPage {
   private readonly api = inject(Api);
   private readonly title = inject(Title);
   private readonly fontService = inject(FontService);
+  private readonly iconService = inject(IconService);
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly document = resource({
@@ -301,6 +304,7 @@ export class EditorPage {
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
       this.fontService.attach(undefined);
+      this.iconService.attach(undefined);
       this.stopFollowingTheme();
     });
     effect(() => {
@@ -521,6 +525,7 @@ export class EditorPage {
       renderPoller.start();
       this.core.set(core);
       this.fontService.attach(core);
+      this.iconService.attach(core);
       const stopMotionPreference = watchPrototypeMotion(
         core,
         typeof window.matchMedia === 'function'
@@ -564,6 +569,7 @@ export class EditorPage {
         if (next !== revision) {
           revision = next;
           this.fontService.refresh();
+          this.iconService.refresh();
           this.prototypeScreens.set(core.prototypeScreens());
           const selection = core.selection();
           this.selectedIds.set(new Set(selection));

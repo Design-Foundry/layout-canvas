@@ -6,6 +6,7 @@ export interface DocumentSnapshot {
   tokens?: Record<string, unknown>[];
   fonts?: Record<string, unknown>[];
   fontStacks?: Record<string, unknown>[];
+  iconSets?: Record<string, unknown>[];
 }
 
 export interface DocumentPackage {
@@ -26,8 +27,8 @@ function validateSnapshot(value: unknown): asserts value is DocumentSnapshot {
     !object(value) ||
     !Number.isInteger(value['version']) ||
     (value['version'] as number) < 1 ||
-    (value['version'] as number) > 26 ||
-    Object.keys(value).some((key) => !['version', 'nodes', 'modes', 'tokens', 'fonts', 'fontStacks'].includes(key)) ||
+    (value['version'] as number) > 27 ||
+    Object.keys(value).some((key) => !['version', 'nodes', 'modes', 'tokens', 'fonts', 'fontStacks', 'iconSets'].includes(key)) ||
     !Array.isArray(value['nodes']) ||
     value['nodes'].length > 10000 ||
     !value['nodes'].every(object) ||
