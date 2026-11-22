@@ -24,6 +24,7 @@ builder.Services.AddSingleton<GoogleFontsRegistrar>();
 builder.Services.AddSingleton<DocumentStore>();
 builder.Services.Configure<DocumentHostOptions>(builder.Configuration.GetSection(DocumentHostOptions.Section));
 builder.Services.AddSingleton<DocumentHost>();
+builder.Services.AddSingleton<EditorSelections>();
 builder.Services.AddCanvasMcp();
 
 var app = builder.Build();

@@ -50,11 +50,19 @@ public sealed class Database
                 kind        TEXT    NOT NULL,
                 data        TEXT    NULL,
                 created_at  TEXT    NOT NULL,
+                actor       TEXT    NULL,
                 PRIMARY KEY (document_id, seq),
                 UNIQUE (document_id, op_id)
             );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('ops') WHERE name = 'actor'";
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) == 0)
+        {
+            command.CommandText = "ALTER TABLE ops ADD COLUMN actor TEXT NULL";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 }
 

@@ -159,8 +159,8 @@ public sealed class DocumentEndpointsTests(CanvasFactory factory) : IClassFixtur
         await AppendAsync(document.Id, CreateNode(Guid.NewGuid()));
         var store = factory.Services.GetRequiredService<DocumentStore>();
 
-        var elsewhere = await store.AppendAsync(document.Id, expectedHead: 1, [CreateNode(node)], Ct);
-        var stale = await store.AppendAsync(document.Id, expectedHead: 1, [Rename(node)], Ct);
+        var elsewhere = await store.AppendAsync(document.Id, expectedHead: 1, [CreateNode(node)], OpActors.Human, Ct);
+        var stale = await store.AppendAsync(document.Id, expectedHead: 1, [Rename(node)], OpActors.Human, Ct);
         var response = await AppendAsync(document.Id, Rename(node));
 
         Assert.Equal(AppendStatus.Appended, elsewhere);

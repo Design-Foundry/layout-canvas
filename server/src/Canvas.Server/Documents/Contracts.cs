@@ -49,8 +49,22 @@ public sealed record OpRefusal(string Path, string Message);
 
 public sealed record AppendOpsResponse(IReadOnlyList<OpAck> Acks, long HeadSeq);
 
+/// <summary>Who an op came from, decided by the server from the way the op arrived.</summary>
+public static class OpActors
+{
+    /// <summary>The editor, through the document API.</summary>
+    public const string Human = "human";
+
+    /// <summary>An agent, through the MCP.</summary>
+    public const string Agent = "agent";
+
+    /// <summary>Logged before actors were recorded.</summary>
+    public const string Unknown = "unknown";
+}
+
 /// <summary>An op as stored in the log.</summary>
-public sealed record OpRecord(long Seq, Guid Id, string Kind, JsonElement Data, DateTimeOffset CreatedAt);
+/// <param name="Actor"><c>human</c>, <c>agent</c>, or <c>unknown</c> for ops logged before actors were recorded.</param>
+public sealed record OpRecord(long Seq, Guid Id, string Kind, JsonElement Data, DateTimeOffset CreatedAt, string Actor = OpActors.Unknown);
 
 /// <summary>A page of the op log. Keep reading from the last <c>seq</c> until it reaches <paramref name="HeadSeq"/>.</summary>
 public sealed record OpsPage(IReadOnlyList<OpRecord> Ops, long HeadSeq);

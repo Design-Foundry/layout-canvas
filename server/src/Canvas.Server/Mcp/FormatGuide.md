@@ -1,6 +1,6 @@
 # Canvas document format
 
-A document is a tree of nodes plus tokens and modes. Edit it with `apply_ops`; read it with `get_document`, `get_nodes` and `get_layout`.
+A document is a tree of nodes plus tokens and modes. Edit it with `apply_ops`; read it with `get_document`, `get_nodes` and `get_layout`; see `get_changes` and `get_selection` for what the person is doing in the editor.
 
 ## Ids and order
 
@@ -155,6 +155,15 @@ prototype metadata. See the usage guide for the supported scope.
 - `CreateMode` / `ReplaceMode` `{ "mode": {...} }`, `DeleteMode` `{ "id" }`
 
 A refused op reports `path` and `message`. Later ops that depend on it (children of a refused frame, for example) are refused too; fix the first error and resend those.
+
+## Working next to the person
+
+The editor and the MCP write to one log. Every op has a `seq` and an `actor`, set by the server from the way it arrived: `human` for the editor, `agent` for `apply_ops`, `unknown` for ops logged before actors were recorded.
+
+- `get_document` and `apply_ops` return `headSeq`, the last seq of the log. Keep it.
+- Before editing nodes you read earlier, call `get_changes` with `sinceSeq` = the `headSeq` you kept. It lists, oldest first, `seq`, `actor`, `kind`, `nodeIds` and `fields` (the properties set; `values` too when small; `entity` instead of `nodeIds` for tokens, fonts and modes). Re-read nodes with `actor: "human"` changes before writing to them. A page holds up to 500 changes; when `hasMore` is true, call again with `sinceSeq` = `nextSince`. Continue from the response's `headSeq`.
+- `compacted: true` means `sinceSeq` is older than the history kept (the server folds old ops into the document, and an imported document has none): no changes are listed. Read the document again and continue from its `headSeq`.
+- `get_selection` returns what the person has selected: `id`, `name`, `type` and, for nested nodes, `frameId` and `frameName` of the top-level layer. `missing` lists selected ids that no longer exist. `connected: false` means no editor has the document open (or it stopped reporting for 30 seconds). Use it for requests like "this" or "the selected frame".
 
 ## Checking the result
 

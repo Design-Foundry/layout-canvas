@@ -9,7 +9,7 @@ namespace Canvas.Server.Mcp;
 
 /// <summary>Tools that read and edit Canvas documents through the same op log the editor syncs with.</summary>
 [McpServerToolType]
-public sealed class CanvasTools(DocumentStore store, DocumentHost host)
+public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSelections selections)
 {
     private static readonly Lazy<string> FormatGuide = new(() =>
     {
@@ -43,13 +43,14 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
     }
 
     [McpServerTool(Name = "get_document", ReadOnly = true, Idempotent = true)]
-    [Description("A document's modes, its tokens with values resolved in a mode, and its layer tree in document order (each layer followed by its children, with depth; siblings back to front, as auto layout places them).")]
+    [Description("A document's headSeq (pass it to get_changes as sinceSeq), its modes, its tokens with values resolved in a mode, and its layer tree in document order (each layer followed by its children, with depth; siblings back to front, as auto layout places them).")]
     public async Task<JsonElement> GetDocument(
         [Description("Document id.")] Guid documentId,
         [Description("Mode to resolve token values in; the default mode when omitted.")] Guid? mode = null,
         CancellationToken ct = default)
     {
         var summary = (await store.ListAsync(ct)).FirstOrDefault(d => d.Id == documentId) ?? throw NotFound(documentId);
+        var head = await store.GetHeadAsync(documentId, ct) ?? throw NotFound(documentId);
         var (found, value) = await host.ReadAsync(documentId, core => (Modes: core.Modes(), Tokens: core.Tokens(mode), Layers: core.Layers()), ct);
         if (!found)
         {
@@ -60,6 +61,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         {
             summary.Id,
             summary.Name,
+            head.HeadSeq,
             value.Modes,
             Tokens = tokens.EnumerateArray().Select(token => new
             {
@@ -104,7 +106,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
 
     [McpServerTool(Name = "apply_ops")]
     [Description("""
-        Applies ops in order through the document's log, the same one the editor syncs with; open editors show them within a second. Any id may be a placeholder such as "$card" (in values or object keys): each placeholder becomes one new UUID across the batch, returned in ids. A CreateNode or CloneNode without order goes after its existing siblings. A CloneNode result lists cloned, the id of the copy of every node of the source subtree by source id; "$root/$source" in a later op is the copy of $source under the clone rooted at $root. If any op is malformed (unknown kind, wrong shape, or a value out of range such as letterSpacing below 0), nothing is applied and the error names that op. Otherwise ops the document refuses (a missing parent, a property the node type does not take, a broken component rule) change nothing while the rest still apply; results give each one's error with path and message. Up to 1000 ops per call. See get_format_guide for every op kind.
+        Applies ops in order through the document's log, the same one the editor syncs with; open editors show them within a second. Any id may be a placeholder such as "$card" (in values or object keys): each placeholder becomes one new UUID across the batch, returned in ids. A CreateNode or CloneNode without order goes after its existing siblings. A CloneNode result lists cloned, the id of the copy of every node of the source subtree by source id; "$root/$source" in a later op is the copy of $source under the clone rooted at $root. If any op is malformed (unknown kind, wrong shape, or a value out of range such as letterSpacing below 0), nothing is applied and the error names that op. Otherwise ops the document refuses (a missing parent, a property the node type does not take, a broken component rule) change nothing while the rest still apply; results give each one's error with path and message. Up to 1000 ops per call. Returns headSeq, the log position after the batch. See get_format_guide for every op kind.
         """)]
     public async Task<JsonElement> ApplyOps(
         [Description("Document id.")] Guid documentId,
@@ -126,7 +128,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         try
         {
             (prepared, ids) = OpBatch.Prepare(ops, existing.LastOrders, existing.ComponentNames, existing.Parents);
-            response = await host.AppendAsync(documentId, prepared, ct);
+            response = await host.AppendAsync(documentId, prepared, OpActors.Agent, ct);
         }
         catch (MalformedOpsException malformed)
         {
@@ -154,9 +156,106 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host)
         {
             Applied = results.Count(r => r.Applied),
             Refused = results.Count(r => !r.Applied),
+            response.HeadSeq,
             Ids = ids,
             Results = results,
         }, JsonOptions);
+    }
+
+    private const int DefaultChangesLimit = 100;
+    private const int MaxChangesLimit = 500;
+
+    [McpServerTool(Name = "get_changes", ReadOnly = true, Idempotent = true)]
+    [Description("""
+        Ops logged after sinceSeq, oldest first: seq, actor (human for the editor, agent for the MCP, unknown for ops logged before actors were recorded), kind, nodeIds, and fields with values when small. Use it before editing to see what the person changed since you last read: pass the headSeq from get_document or apply_ops. When hasMore is true, call again with sinceSeq = nextSince. compacted: true means sinceSeq is older than the history kept, so no changes are listed; read the document again and continue from its headSeq.
+        """)]
+    public async Task<JsonElement> GetChanges(
+        [Description("Document id.")] Guid documentId,
+        [Description("Return ops with a seq greater than this.")] long sinceSeq,
+        [Description("Page size, 1 to 500; 100 when omitted.")] int? limit = null,
+        CancellationToken ct = default)
+    {
+        if (sinceSeq < 0)
+        {
+            throw new McpException("sinceSeq cannot be negative.");
+        }
+        var size = Math.Clamp(limit ?? DefaultChangesLimit, 1, MaxChangesLimit);
+        var result = await store.GetOpsAsync(documentId, sinceSeq, size, ct);
+        if (result.Status == OpsQueryStatus.NotFound)
+        {
+            throw NotFound(documentId);
+        }
+        var head = await store.GetHeadAsync(documentId, ct) ?? throw NotFound(documentId);
+        if (sinceSeq > head.HeadSeq)
+        {
+            throw new McpException($"sinceSeq {sinceSeq} is ahead of headSeq {head.HeadSeq}.");
+        }
+        var page = result.Page;
+        var gap = result.Status == OpsQueryStatus.Compacted
+            || page is { Ops.Count: 0 } && sinceSeq < page.HeadSeq
+            || page is { Ops.Count: > 0 } && page.Ops[0].Seq != sinceSeq + 1;
+        if (gap || page is null)
+        {
+            return JsonSerializer.SerializeToElement(new
+            {
+                HeadSeq = head.HeadSeq,
+                Compacted = true,
+                SnapshotSeq = head.SnapshotSeq,
+                Changes = Array.Empty<Change>(),
+                Message = $"Changes after seq {sinceSeq} are no longer kept: they are folded into the document. Read the document again with get_document and continue from its headSeq.",
+            }, JsonOptions);
+        }
+        var last = page.Ops.Count > 0 ? page.Ops[^1].Seq : sinceSeq;
+        return JsonSerializer.SerializeToElement(new
+        {
+            page.HeadSeq,
+            Compacted = false,
+            HasMore = last < page.HeadSeq,
+            NextSince = last,
+            Changes = page.Ops.Select(OpChanges.Describe).ToList(),
+        }, JsonOptions);
+    }
+
+    private sealed record SelectedNode(Guid Id, string Name, string Type, Guid? FrameId, string? FrameName);
+
+    [McpServerTool(Name = "get_selection", ReadOnly = true, Idempotent = true)]
+    [Description("What the person has selected in the editor right now: each selected node's id, name and type, plus frame, the top-level layer it sits in. Selections of deleted nodes are listed in missing. connected is false, with no items, when no editor has the document open.")]
+    public async Task<JsonElement> GetSelection([Description("Document id.")] Guid documentId, CancellationToken ct)
+    {
+        if (await store.GetHeadAsync(documentId, ct) is null)
+        {
+            throw NotFound(documentId);
+        }
+        if (selections.Current(documentId) is not { } current)
+        {
+            return JsonSerializer.SerializeToElement(new { Connected = false, Items = Array.Empty<SelectedNode>(), Message = "No editor is connected to this document." }, JsonOptions);
+        }
+        var (_, rows) = await host.ReadAsync(documentId, core => current.Ids.Select(id => Describe(core, id)).ToList(), ct);
+        var items = (rows ?? []).Where(r => r.Node is not null).Select(r => r.Node!).ToList();
+        return JsonSerializer.SerializeToElement(new
+        {
+            Connected = true,
+            Items = items,
+            Missing = (rows ?? []).Where(r => r.Node is null).Select(r => r.Id).ToList() is { Count: > 0 } missing ? missing : null,
+        }, JsonOptions);
+    }
+
+    private static (Guid Id, SelectedNode? Node) Describe(VisualCoreDocument core, Guid id)
+    {
+        if (core.Node(id) is not { } node)
+        {
+            return (id, null);
+        }
+        var top = node;
+        var topId = id;
+        while (top.TryGetProperty("parent", out var parent) && parent.ValueKind == JsonValueKind.String && core.Node(parent.GetGuid()) is { } above)
+        {
+            topId = parent.GetGuid();
+            top = above;
+        }
+        var framed = topId != id;
+        return (id, new SelectedNode(id, node.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "", node.GetProperty("type").GetString() ?? "",
+            framed ? topId : null, framed && top.TryGetProperty("name", out var topName) ? topName.GetString() : null));
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
