@@ -76,7 +76,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSe
     }
 
     [McpServerTool(Name = "get_nodes", ReadOnly = true, Idempotent = true)]
-    [Description("Full nodes: every stored property, component definition and values, and box, the laid-out rect relative to the parent.")]
+    [Description("Full nodes: every stored property, component definition and values, and box, the laid-out rect relative to the parent. Text nodes also report textSize, the size of their text at the box width.")]
     public async Task<JsonElement> GetNodes(
         [Description("Document id.")] Guid documentId,
         [Description("Ids of the nodes to read, layers inside instances included.")] Guid[] nodeIds,
@@ -89,7 +89,7 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSe
     }
 
     [McpServerTool(Name = "get_layout", ReadOnly = true, Idempotent = true)]
-    [Description("Laid-out boxes in absolute canvas coordinates for a subtree or the whole document, in document order like get_document. overflows marks a layer that extends outside its parent; check it after building to catch clipped text and misaligned children.")]
+    [Description("Laid-out boxes in absolute canvas coordinates for a subtree or the whole document, in document order like get_document. overflows marks a layer that extends outside its parent or text that does not fit its box, and overflow lists why: clipped (the parent clips on purpose, by clipContent or prototype scrolling), escapes (an unclipped parent), text (the text is larger than its box, so it is cut off). Check it after building to catch real errors; clipped alone is usually intended.")]
     public async Task<JsonElement> GetLayout(
         [Description("Document id.")] Guid documentId,
         [Description("Root of the subtree; the whole document when omitted.")] Guid? rootId = null,
@@ -339,13 +339,19 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSe
         return ordered;
     }
 
-    private sealed record LayoutRow(Guid Id, string Name, string Type, int Depth, double X, double Y, double W, double H, bool? Overflows);
+    private sealed record LayoutRow(Guid Id, string Name, string Type, int Depth, double X, double Y, double W, double H, bool? Overflows, string[]? Overflow);
+
+    private static bool ClipsOnPurpose(JsonElement? node, int depth) =>
+        node is { } value &&
+        ((value.TryGetProperty("clipContent", out var clip) && clip.ValueKind == JsonValueKind.True) ||
+         (depth == 0 && value.TryGetProperty("prototypeOverflow", out var scroll) && scroll.GetString() is not (null or "none")));
 
     /// <summary>Null when <paramref name="rootId"/> is not in the document.</summary>
     private static List<LayoutRow>? Layout(VisualCoreDocument core, Guid? rootId, Guid? mode)
     {
         var rows = new List<LayoutRow>();
         var ancestors = new List<LayoutRow>();
+        var clipping = new List<bool>();
         int? rootDepth = null;
         foreach (var row in InDocumentOrder(core.Layers()))
         {
@@ -354,19 +360,31 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSe
             if (ancestors.Count > depth)
             {
                 ancestors.RemoveRange(depth, ancestors.Count - depth);
+                clipping.RemoveRange(depth, clipping.Count - depth);
             }
-            var box = core.Node(id, mode)?.GetProperty("box");
+            var node = core.Node(id, mode);
+            var box = node?.GetProperty("box");
             var parent = depth > 0 && ancestors.Count >= depth ? ancestors[depth - 1] : null;
             var x = (box?.GetProperty("x").GetDouble() ?? 0) + (parent?.X ?? 0);
             var y = (box?.GetProperty("y").GetDouble() ?? 0) + (parent?.Y ?? 0);
             var w = box?.GetProperty("w").GetDouble() ?? 0;
             var h = box?.GetProperty("h").GetDouble() ?? 0;
             const double Slack = 0.5;
-            var overflows = parent is not null &&
-                (x < parent.X - Slack || y < parent.Y - Slack || x + w > parent.X + parent.W + Slack || y + h > parent.Y + parent.H + Slack);
+            var kinds = new List<string>(2);
+            if (parent is not null &&
+                (x < parent.X - Slack || y < parent.Y - Slack || x + w > parent.X + parent.W + Slack || y + h > parent.Y + parent.H + Slack))
+            {
+                kinds.Add(clipping[depth - 1] ? "clipped" : "escapes");
+            }
+            if (node is { } laidOut && laidOut.TryGetProperty("textSize", out var textSize) &&
+                (textSize.GetProperty("w").GetDouble() > w + Slack || textSize.GetProperty("h").GetDouble() > h + Slack))
+            {
+                kinds.Add("text");
+            }
             var laid = new LayoutRow(id, row.GetProperty("name").GetString() ?? "", row.GetProperty("type").GetString()!, depth,
-                Math.Round(x, 2), Math.Round(y, 2), Math.Round(w, 2), Math.Round(h, 2), overflows ? true : null);
+                Math.Round(x, 2), Math.Round(y, 2), Math.Round(w, 2), Math.Round(h, 2), kinds.Count > 0 ? true : null, kinds.Count > 0 ? [.. kinds] : null);
             ancestors.Add(laid);
+            clipping.Add(ClipsOnPurpose(node, depth));
 
             if (rootId is null || id == rootId)
             {

@@ -340,6 +340,8 @@ export interface NodeFields {
   readonly text?: TextRun;
   readonly componentValues?: ComponentValues;
   readonly name: string;
+  /** Plain note text that is never rendered. Empty or absent means no notes; at most 4096 UTF-8 bytes. */
+  readonly notes?: string;
   /** Style-addressable name inside a main component. Empty or absent means no part; kebab-case and unique within the component. */
   readonly part?: string;
   readonly x: number;

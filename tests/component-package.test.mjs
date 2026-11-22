@@ -498,6 +498,19 @@ test('part names round-trip in snapshot 23 portable components and refuse older 
   assert.throws(() => readComponent(JSON.stringify(bundle)), /version 23/);
 });
 
+test('node notes round-trip in snapshot 26 portable components and refuse older files', () => {
+  const source = fixture();
+  source.version = 26;
+  source.nodes[1].notes = 'Swap the icon';
+  const bundle = exportComponent(source, id(10));
+  assert.equal(bundle.snapshot.version, 26);
+  assert.equal(bundle.snapshot.nodes.find((node) => node.id === id(11)).notes, 'Swap the icon');
+  const read = readComponent(JSON.stringify(bundle));
+  assert.deepEqual(read.snapshot.nodes, bundle.snapshot.nodes);
+  bundle.snapshot.version = 25;
+  assert.throws(() => readComponent(JSON.stringify(bundle)), /version 26/);
+});
+
 test('base and visibility rules round-trip in snapshot 24 portable components and refuse older files', () => {
   for (const rule of [
     { when: {}, target: id(11), patch: { opacity: 0.5 } },

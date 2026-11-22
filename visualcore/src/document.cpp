@@ -28,6 +28,7 @@ bool nonNegative(const Value<double>& value) {
 constexpr std::string_view kFrameStyling = "text, lines, paths and images take no stroke, shadows, corner radius or auto layout";
 
 bool isValidPatch(const NodePatch& patch) {
+    if(patch.notes && !validNotes(*patch.notes)) return refuse("notes must be UTF-8 text of at most 4096 bytes and 2048 characters, without control characters other than newline");
     if(patch.part && !patch.part->empty() && !validKebabName(*patch.part)) return refuse("part must be lowercase kebab-case starting with a letter, up to 64 characters");
     if(patch.prototypeFlowName && !validPrototypeFlowName(*patch.prototypeFlowName)) return refuse("prototypeFlowName must be single-line text of at most 128 UTF-8 bytes");
     if(patch.interactions && !validTriggeredInteractions(*patch.interactions)) return refuse("interactions needs at most 16 valid trigger actions");
@@ -281,6 +282,7 @@ std::optional<OpBody> Document::create(const CreateNode& op) {
         if(o.patch.prototypeFlowName) return refused("overrides cannot set prototypeFlowName");
         if(o.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
         if(o.patch.part) return refused("overrides cannot set part");
+        if(o.patch.notes) return refused("overrides cannot set notes");
     }
     if (!node.overrides.empty()) {
         Document preview = *this;
@@ -522,6 +524,7 @@ std::optional<OpBody> Document::setOverride(const SetOverride& op) {
     if(op.patch.prototypeFlowName) return refused("overrides cannot set prototypeFlowName");
     if(op.patch.prototypeStart) return refused("overrides cannot set prototypeStart");
     if(op.patch.part) return refused("overrides cannot set part");
+    if(op.patch.notes) return refused("overrides cannot set notes");
     if(op.patch.interaction && !validInteraction(*op.patch.interaction)) return std::nullopt;
     if(op.patch.interactions) for(const auto& entry:*op.patch.interactions) if(!validInteraction(entry.interaction)) return std::nullopt;
     if (isSwapTarget(op.instance) && op.node != it->second.component && op.patch != NodePatch{}) return refused("an instance swap property controls this instance; override its root only");
@@ -826,8 +829,8 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
             return refuse("a text property controls this layer's content; change its metrics with textStyle instead of text");
         if (textTarget && !validTextPaint(p)) return refuse(kFrameStyling);
         if (!isValidPatch(p) || !isValidPatchRefs(p)) return false;
-        if (p.type || p.component || p.componentValues || p.typography || p.name || p.part || p.locked || p.absolute || p.widthSizing || p.heightSizing)
-            return refuse("rules cannot change type, component, componentValues, typography, name, part, locked, absolute or sizing");
+        if (p.type || p.component || p.componentValues || p.typography || p.name || p.notes || p.part || p.locked || p.absolute || p.widthSizing || p.heightSizing)
+            return refuse("rules cannot change type, component, componentValues, typography, name, notes, part, locked, absolute or sizing");
         if (rule.target == component && (p.x || p.y || p.w || p.h)) return refuse("rules cannot move or resize the component itself");
     }
     return true;
@@ -1139,6 +1142,7 @@ void Document::expand(const Id& source, const Id& key, const Id& parent, const I
         effective.visible = original.visible && effective.visible;
         effective.locked = original.locked;
         effective.name = original.name;
+        effective.notes = original.notes;
         effective.part = original.part;
         effective.order = original.order;
         applyLayers(effective);

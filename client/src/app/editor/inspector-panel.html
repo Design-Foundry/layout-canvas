@@ -613,6 +613,20 @@
         </section>
       }
     </fieldset>
+    @if (!n.inInstance) {
+      <section class="section">
+        <label class="notes-field">
+          Notes
+          <textarea
+            aria-label="Notes"
+            rows="4"
+            maxlength="2048"
+            [value]="n.notes ?? ''"
+            (change)="setNotes($event)"
+          ></textarea>
+        </label>
+      </section>
+    }
   }
   @if (exportTargets().length) {
     <app-export-panel [targets]="exportTargets()" [render]="exportRender()" />

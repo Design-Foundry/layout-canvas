@@ -72,9 +72,18 @@ test('document envelope refuses components, unknown formats and extra metadata',
   ]) assert.throws(() => readDocument(JSON.stringify(changed)), /complete Canvas document/);
 });
 
+test('whole-document round trip preserves node notes in snapshot 26', () => {
+  const snapshot = fixture();
+  snapshot.version = 26;
+  snapshot.nodes[0].notes = 'Ask legal\nabout the copy';
+  const bundle = readDocument(JSON.stringify(exportDocument(snapshot, 'Demo')));
+  assert.equal(bundle.snapshot.version, 26);
+  assert.deepEqual(bundle.snapshot, snapshot);
+});
+
 test('native snapshot envelope refuses unsupported versions and missing structural lists', () => {
   for (const snapshot of [
-    { ...fixture(), version: 26 },
+    { ...fixture(), version: 27 },
     { ...fixture(), version: 0 },
     { ...fixture(), version: 21.5 },
     { ...fixture(), nodes: [null] },
