@@ -730,6 +730,149 @@
           }
         }
       }
+    },
+    "/api/icons/material-symbols/glyphs": {
+      "get": {
+        "tags": [
+          "Icons"
+        ],
+        "operationId": "SearchGlyphs",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IconSearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/icons/material-symbols/glyphs/{glyph}": {
+      "get": {
+        "tags": [
+          "Icons"
+        ],
+        "operationId": "GetGlyph",
+        "parameters": [
+          {
+            "name": "glyph",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "style",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fill",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "wght",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "opsz",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "description": "Not Found"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1064,6 +1207,47 @@
             }
           }
         }
+      },
+      "IconGlyph": {
+        "required": [
+          "glyph"
+        ],
+        "type": "object",
+        "properties": {
+          "glyph": {
+            "type": "string"
+          }
+        },
+        "description": "One glyph of an icon set."
+      },
+      "IconSearchResponse": {
+        "required": [
+          "version",
+          "total",
+          "offset",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IconGlyph"
+            }
+          }
+        },
+        "description": "A page of glyph names. Total counts every match, not just this page."
       },
       "ImportDocumentRequest": {
         "required": [
@@ -1422,6 +1606,9 @@
     },
     {
       "name": "Fonts"
+    },
+    {
+      "name": "Icons"
     }
   ]
 }

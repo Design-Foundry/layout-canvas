@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Canvas.Server;
 using Canvas.Server.Documents;
 using Canvas.Server.Fonts;
+using Canvas.Server.Icons;
 using Canvas.Server.Mcp;
 using Canvas.Server.Storage;
 
@@ -30,6 +31,12 @@ if (packaged)
         builder.Configuration["Storage:Fonts"] = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Canvas", "fonts");
     }
+
+    if (Environment.GetEnvironmentVariable("Storage__Icons") is null)
+    {
+        builder.Configuration["Storage:Icons"] = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Canvas", "icons");
+    }
 }
 
 builder.Services.AddOpenApi();
@@ -47,6 +54,12 @@ builder.Services.Configure<GoogleFontsOptions>(builder.Configuration.GetSection(
 builder.Services.AddSingleton<FontFileStore>();
 builder.Services.AddSingleton<GoogleFontsProvider>();
 builder.Services.AddSingleton<GoogleFontsRegistrar>();
+builder.Services.AddHttpClient(MaterialSymbolsProvider.HttpClientName)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+builder.Services.Configure<MaterialSymbolsOptions>(builder.Configuration.GetSection(MaterialSymbolsOptions.Section));
+builder.Services.AddSingleton<IconFileStore>();
+builder.Services.AddSingleton<MaterialSymbolsProvider>();
+builder.Services.AddSingleton<IconRegistrar>();
 builder.Services.AddSingleton<DocumentStore>();
 builder.Services.Configure<DocumentHostOptions>(builder.Configuration.GetSection(DocumentHostOptions.Section));
 builder.Services.AddSingleton<DocumentHost>();
@@ -80,6 +93,7 @@ api.MapGet("/health", () => TypedResults.Ok(new HealthResponse("ok", typeof(Prog
 
 api.MapDocuments();
 api.MapFonts();
+api.MapIcons();
 app.MapCanvasMcp();
 
 if (serveClient)

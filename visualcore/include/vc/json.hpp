@@ -66,8 +66,8 @@ namespace vc {
 [[nodiscard]] std::optional<std::vector<FontFile>> fontFilesFromJson(std::string_view data);
 /// The registry key of an icon reference given as a JSON string (path form) or object, or nothing.
 [[nodiscard]] std::optional<std::string> iconSourceKeyFromJson(std::string_view data);
-/// An icon reference as the JSON string or object a node takes, in the shape documents store.
-[[nodiscard]] std::string iconToJson(const IconRef& icon);
+/// An icon reference given as a path string or object, written in the structured shape documents store.
+[[nodiscard]] std::optional<std::string> normalizeIconJson(std::string_view data);
 /// Parse a token or mode definition in the same shape the ops use.
 [[nodiscard]] std::optional<Token> tokenFromJson(std::string_view data);
 [[nodiscard]] std::optional<Mode> modeFromJson(std::string_view data);

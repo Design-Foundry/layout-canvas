@@ -13,7 +13,7 @@ A document is a tree of nodes plus tokens and modes. Edit it with `apply_ops`; r
 
 `{ "id", "type", "parent", "order", "name", "x", "y", "w", "h", ...properties }`
 
-Types: `frame`, `component`, `instance`, `rect`, `ellipse`, `text`, `line`, `path`, `image`. Frames and components hold children.
+Types: `frame`, `component`, `instance`, `rect`, `ellipse`, `text`, `line`, `path`, `image`, `icon`. Frames and components hold children.
 
 Common properties (all optional):
 - `x`, `y`: position relative to the parent; ignored for children placed by auto layout unless `absolute: true`.
@@ -58,7 +58,14 @@ All five fields are required when `layout` is present. Typical card: a `column` 
 - `line`: a segment from the top-left to the bottom-right corner of its box, or bottom-left to top-right with `lineReverse: true`. A horizontal line has `h: 0`. Thickness is `lineWidth`, color is `fill`.
 - `path`: `"path": { "points": [{ "x", "y" }], "closed", "filled", "inHandles", "outHandles" }`. Points and handles are normalized to the node's box (0 to 1). At most 64 points, one contour. `inHandles`/`outHandles` (one per point) make cubic curves; a handle equal to its point is a sharp corner. `filled` needs `closed`. Stroke width is `lineWidth`, color is `fill`. Lines and paths use fixed sizing.
 
+### Icons
+
+- `icon`: a glyph of an icon set, tinted by `fill`, with `opacity` as other nodes. Create one with `{ "type": "icon", "icon": "material-symbols/arrow_back", "fill": { "token": "<color token id>" } }`; the box is 24 by 24 unless you set `w` and `h`, and the glyph is drawn square in the middle of it. Use `search_icons` to find glyph names (`arrow_back`, `home`, `search`, `settings`).
+- `icon` takes the path form `material-symbols/<glyph>` with optional modifiers, `material-symbols/arrow_back?style=rounded&fill=1&wght=500`, or the stored object `{ "set", "glyph", "axes" }` (`set` defaults to Material Symbols; `get_nodes` returns the object and `iconPath`, the path form). Axes: `style` `outlined` (default), `rounded` or `sharp`; `FILL` 0 (default) or 1 (`fill` in the path form); `wght` 100 to 700 in steps of 100 (default 400); `opsz` 20, 24 (default), 40 or 48. Other values are refused. A glyph the source does not have loads and draws a missing-glyph box.
+- Icons take no stroke, shadows, radius, layout or children, and use `fixed`, `hug` or `fill` sizing like a rect. An instance overrides `icon` or `fill` on a copied icon layer, and a variant rule may set `icon`, to swap the glyph. It needs snapshot version 27 or later (written only when a document uses icons).
+
 ### Prototype viewport scrolling
+
 
 - An authored top-level `frame` can set `prototypeOverflow: "none" | "vertical" | "horizontal" | "both"`. The default is `"none"`; use it in `SetProps` to remove scrolling. A non-default value requires snapshot version 19 or later.
 - The frame's `w` and `h` define its viewport. Place child content beyond its bounds to enable scrolling on the selected axes during Play. The same frame setting applies when it is presented as a screen or opened as an overlay.
@@ -204,3 +211,7 @@ Snapshot version 25 adds optional `fonts` and `fontStacks` arrays; the bundled I
 - Provider `googlefonts`: `key` is the exact Google Fonts family name (`"Roboto Mono"`) and `familyVersion` is the 40 character commit of the google/fonts repository the family is pinned to. The server resolves the family's files from that commit, nobody supplies them. Variable families give `axes` as continuous ranges; families that ship both upright and italic files add an `ital` axis with `values` `[0, 1]`; static families give `wght` as the list of their weights. Text in a family whose files have not been fetched yet falls back to the other fonts of its stack.
 - Font stack: `{ "id", "identifier", "displayName", "entries": ["<font id>", ...], "genericFallback": "sans-serif" | "serif" | "monospace" | "system-ui" | "none", "order" }`. Text validates its axes and features against the first entry.
 - The bundled Inter font and stack are always present and cannot be changed or deleted.
+
+## Icon sets
+
+Snapshot version 27 adds an optional `iconSets` array, written when the document has an `icon` layer, an override or a variant rule that sets `icon`. The built-in Material Symbols set `00000000-0000-0000-0000-000000000200` exists without being listed, cannot be changed, and is the only set: `{ "id", "identifier": "material-symbols", "displayName", "version", "axes": [{ "tag", "values": [...], "default" }] }`. `version` is the google/material-design-icons commit the SVGs come from. Icon files are provider data, not document content: the server fetches the SVG of each glyph the document uses on demand and the editor draws it.

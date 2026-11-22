@@ -219,6 +219,15 @@ char* vc_icon_source_key(const char* icon) {
     });
 }
 
+char* vc_icon_normalize(const char* icon) {
+    vc::clearDiagnostic();
+    return guarded([&]() -> char* {
+        if (!icon) return nullptr;
+        const auto json = vc::normalizeIconJson(icon);
+        return json ? copyOut(*json) : nullptr;
+    });
+}
+
 char* vc_font_capabilities(const unsigned char* bytes, size_t size) {
     return guarded([&]() -> char* {
         if (!bytes) return nullptr;

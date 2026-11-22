@@ -41,6 +41,15 @@ internal static partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "vc_register_font_family", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int RegisterFontFamily(string provider, string key, string version, string files);
 
+    [LibraryImport(Library, EntryPoint = "vc_register_icon", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RegisterIcon(string key, string svg);
+
+    [LibraryImport(Library, EntryPoint = "vc_icon_source_key", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint IconSourceKey(string icon);
+
+    [LibraryImport(Library, EntryPoint = "vc_icon_normalize", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint IconNormalize(string icon);
+
     [LibraryImport(Library, EntryPoint = "vc_font_capabilities")]
     internal static partial nint FontCapabilities(ReadOnlySpan<byte> bytes, nuint size);
 

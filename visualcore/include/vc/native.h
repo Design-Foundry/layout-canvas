@@ -59,6 +59,11 @@ VC_API int vc_register_icon(const char* key, const char* svg);
  * the reason in `vc_last_error`. Free with `vc_free`. */
 VC_API char* vc_icon_source_key(const char* icon);
 
+/* An icon reference given as its path form or as JSON, written as the `{ set, glyph, axes }` object
+ * documents store, with axes at their default left out. Null when it is not a valid reference, with the
+ * reason in `vc_last_error`. Free with `vc_free`. */
+VC_API char* vc_icon_normalize(const char* icon);
+
 /* What font bytes offer, as `{ "axes": [{ "tag", "min", "max", "default" }], "features" }`, or null
  * when they are not a usable OpenType face. Free with `vc_free`. */
 VC_API char* vc_font_capabilities(const unsigned char* bytes, size_t size);

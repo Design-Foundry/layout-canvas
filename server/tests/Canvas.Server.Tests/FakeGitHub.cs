@@ -60,6 +60,13 @@ public sealed class FakeGitHub : HttpMessageHandler
         }
         """;
 
+    /// <summary>The SVG the fake serves for <paramref name="glyph"/> at <paramref name="file"/>, which tells apart the files.</summary>
+    public static string IconSvg(string glyph, string file) =>
+        $"""<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M0-960H480V0H0Z"/><!-- {glyph} {file} --></svg>""";
+
+    public void ServeIcon(string glyph, string style, string file) =>
+        ServeRaw($"symbols/web/{glyph}/materialsymbols{style}/{file}", Encoding.UTF8.GetBytes(IconSvg(glyph, $"{style}/{file}")));
+
     private readonly Dictionary<string, Func<HttpResponseMessage>> routes = new();
 
     public List<Uri> Requests { get; } = [];
@@ -78,8 +85,27 @@ public sealed class FakeGitHub : HttpMessageHandler
             "opensans/OpenSans[wdth,wght].ttf", "ibmplexsans/IBMPlexSans-Regular.ttf", "oldstatic/OldStatic-Regular.ttf");
         github.ServeTree("apache", "roboto/Roboto[wdth,wght].ttf");
         github.ServeTree("ufl", "ubuntu/Ubuntu-Regular.ttf");
+        github.ServeIconTree("10k", "arrow_back", "arrow_forward", "arrow_upward", "home", "keyboard_arrow_left", "no_svg_glyph", "search", "settings");
+        foreach (var glyph in new[] { "10k", "arrow_back", "arrow_forward", "arrow_upward", "home", "keyboard_arrow_left", "search", "settings" })
+        {
+            github.ServeIcon(glyph, "outlined", $"{glyph}_24px.svg");
+            github.ServeIcon(glyph, "rounded", $"{glyph}_wght500fill1_24px.svg");
+            github.ServeIcon(glyph, "sharp", $"{glyph}_fill1_48px.svg");
+            github.ServeIcon(glyph, "outlined", $"{glyph}_wght100_20px.svg");
+        }
         return github;
     }
+
+    /// <summary>Serves the folder list of <c>symbols/web</c>, the glyph inventory.</summary>
+    public void ServeIconTree(params string[] glyphs) =>
+        routes["api.github.com|symbols/web"] = () => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(new
+            {
+                truncated = false,
+                tree = glyphs.Select(g => new { path = g, type = "tree" }).Append(new { path = "README.md", type = "blob" }),
+            })),
+        };
 
     public void ServeRaw(string path, byte[] bytes) =>
         routes[$"raw.githubusercontent.com|{path}"] = () => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };

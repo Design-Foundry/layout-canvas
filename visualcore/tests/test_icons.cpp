@@ -380,6 +380,12 @@ TEST_CASE("the native interface registers icons and reports their keys", "[icons
     vc_free(key);
     REQUIRE(vc_icon_source_key(R"({"glyph":"Home"})") == nullptr);
     vc_free(vc_last_error());
+    char* normalized = vc_icon_normalize(R"("material-symbols/home?wght=700&fill=0")");
+    REQUIRE(normalized != nullptr);
+    REQUIRE(std::string{normalized} == R"({"axes":{"wght":700},"glyph":"home","set":"00000000-0000-0000-0000-000000000200"})");
+    vc_free(normalized);
+    REQUIRE(vc_icon_normalize(R"("nope")") == nullptr);
+    vc_free(vc_last_error());
     char* object = vc_icon_source_key(R"({"glyph":"home","axes":{"wght":700}})");
     REQUIRE(std::string{object} == "material-symbols/home?style=outlined&FILL=0&wght=700&opsz=24");
     vc_free(object);

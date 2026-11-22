@@ -795,7 +795,14 @@ std::optional<TextStyle> readTextStyle(const json& v) {
 
 json writeIcon(const IconRef& icon) {
     json axes = json::object();
-    for (const auto& [tag, value] : icon.axes) std::visit([&](const auto& v) { axes[tag] = v; }, value);
+    for (const auto& [tag, value] : icon.axes) {
+        if (const auto* number = std::get_if<double>(&value)) {
+            if (*number == std::floor(*number)) axes[tag] = static_cast<long long>(*number);
+            else axes[tag] = *number;
+        } else {
+            axes[tag] = std::get<std::string>(value);
+        }
+    }
     json out{{"set", icon.set.toString()}, {"glyph", icon.glyph}};
     if (!axes.empty()) out["axes"] = std::move(axes);
     return out;
@@ -1188,6 +1195,7 @@ std::optional<Node> readNode(const json& j) {
     n.type = *type;
     n.order = *order;
     n.fillVisible = defaultFillVisible(n.type) || (j.contains("fill") && !j["fill"].is_null());
+    if (n.type == NodeType::Icon) n.w = n.h = kDefaultIconSize;
 
     if (j.contains("parent")) {
         const auto parent = requireId(j, "parent");
@@ -1874,7 +1882,10 @@ std::string layersToJson(const Document& document) {
 }
 
 json writeIconSet(const IconSet& set) {
-    const auto value = [](const IconAxisValue& v) { return std::visit([](const auto& x) { return json(x); }, v); };
+    const auto value = [](const IconAxisValue& v) {
+        if (const auto* name = std::get_if<std::string>(&v)) return json(*name);
+        return json(static_cast<long long>(std::get<double>(v)));
+    };
     json axes = json::array();
     for (const IconAxis& axis : set.axes) {
         json values = json::array();
@@ -2298,8 +2309,12 @@ std::optional<std::string> iconSourceKeyFromJson(std::string_view data) {
     return iconSourceKey(*ref);
 }
 
-std::string iconToJson(const IconRef& icon) {
-    return writeIcon(icon).dump();
+std::optional<std::string> normalizeIconJson(std::string_view data) {
+    const json j = json::parse(data, nullptr, false);
+    if (j.is_discarded()) return refused("the icon is not valid JSON");
+    const auto ref = readIcon(j);
+    if (!ref) return std::nullopt;
+    return writeIcon(*ref).dump();
 }
 
 } // namespace vc
