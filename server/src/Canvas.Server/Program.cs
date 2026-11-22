@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Canvas.Server;
 using Canvas.Server.Documents;
 using Canvas.Server.Fonts;
 using Canvas.Server.Mcp;
@@ -59,10 +60,11 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 
 var serveClient = app.Environment.WebRootPath is { } webRoot && Directory.Exists(webRoot);
+var clientFiles = new StaticFileOptions { OnPrepareResponse = context => ClientCaching.Apply(context.Context.Response, context.File.Name) };
 if (serveClient)
 {
     app.UseDefaultFiles();
-    app.UseStaticFiles();
+    app.UseStaticFiles(clientFiles);
     app.UseRouting();
 }
 
@@ -82,7 +84,7 @@ app.MapCanvasMcp();
 
 if (serveClient)
 {
-    app.MapFallbackToFile("{**path:regex(^(?!api(/|$)|mcp(/|$))[^.]*$)}", "index.html");
+    app.MapFallbackToFile("{**path:regex(^(?!api(/|$)|mcp(/|$))[^.]*$)}", "index.html", clientFiles);
 }
 
 if (packaged && Environment.GetEnvironmentVariable("CANVAS_NO_BROWSER") is null)
