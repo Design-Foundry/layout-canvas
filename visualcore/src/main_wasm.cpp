@@ -526,6 +526,20 @@ std::string registerFontFace(const std::string& id, const emscripten::val& bytes
     return problem ? problem : "";
 }
 
+std::string usedIcons() {
+    return rt ? vc::usedIconsToJson(rt->session.document()) : "[]";
+}
+
+std::string registerIcon(const std::string& key, const std::string& svg) {
+    const char* problem = vc::registerIconSvg(key, svg);
+    return problem ? problem : "";
+}
+
+std::string iconSourceKey(const std::string& icon) {
+    const auto key = vc::iconSourceKeyFromJson(icon);
+    return key ? *key : "";
+}
+
 EMSCRIPTEN_BINDINGS(visualcore) {
     using namespace emscripten;
 
@@ -556,6 +570,9 @@ EMSCRIPTEN_BINDINGS(visualcore) {
         .function("zoom", &vc::Camera::zoom);
 
     function("registerFontFace", &registerFontFace);
+    function("registerIcon", &registerIcon);
+    function("iconSourceKey", &iconSourceKey);
+    function("usedIcons", &usedIcons);
     function("attach", &attach);
     function("detach", &detach);
     function("addRandomShapes", &addRandomShapes);

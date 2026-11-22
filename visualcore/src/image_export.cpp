@@ -68,8 +68,8 @@ std::optional<Rect> exportBounds(const Document& document, const Id& id, const I
 }
 
 bool buildExportDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode,
-                         std::vector<DrawItem>& out) {
-    return buildIsolatedDrawList(document, id, view, mode, out);
+                         std::vector<DrawItem>& out, double pixelScale) {
+    return buildIsolatedDrawList(document, id, view, mode, out, pixelScale);
 }
 
 void unpremultiplyPixels(std::uint8_t* pixels, std::size_t pixelCount, bool bgra) {

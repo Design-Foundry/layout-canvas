@@ -36,6 +36,7 @@ const NODE_TYPES = new Set([
   'line',
   'path',
   'image',
+  'icon',
 ]);
 
 function object(value: unknown): value is Record<string, any> {
@@ -45,7 +46,7 @@ function object(value: unknown): value is Record<string, any> {
 function snapshot(value: unknown): asserts value is ComponentSnapshot {
   if (
     !object(value) ||
-    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26].includes(value['version']) ||
+    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27].includes(value['version']) ||
     !Array.isArray(value['nodes']) ||
     !Array.isArray(value['tokens']) ||
     !Array.isArray(value['modes']) ||
@@ -133,6 +134,13 @@ function snapshot(value: unknown): asserts value is ComponentSnapshot {
   };
   for (const node of value['nodes']) {
     const patches = [...(node?.overrides ?? []), ...(node?.definition?.rules ?? [])];
+    if (
+      value['version'] < 27 &&
+      (node?.type === 'icon' || patches.some((item: any) => item?.patch?.icon !== undefined))
+    )
+      throw new Error('Icon layers require Canvas snapshot version 27.');
+    if ((node?.type === 'icon') !== (node?.icon !== undefined))
+      throw new Error('Only icon layers take an icon, and every icon layer needs one.');
     if (value['version'] < 26 && node?.notes !== undefined)
       throw new Error('Node notes require Canvas snapshot version 26.');
     if (

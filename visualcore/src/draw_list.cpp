@@ -1,9 +1,12 @@
 #include "vc/draw_list.hpp"
 #include "vc/geometry.hpp"
+#include "vc/icon.hpp"
+#include "vc/text.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <unordered_set>
 #include <map>
 
 namespace vc {
@@ -143,8 +146,8 @@ Color withAlpha(const Oklch& color, double opacity) {
 
 class Builder {
 public:
-    Builder(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root,Vec2 scroll)
-        : document_(document), view_(view), mode_(mode), out_(out),root_(root),scroll_(scroll) {}
+    Builder(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root,Vec2 scroll,double pixelScale)
+        : document_(document), view_(view), mode_(mode), out_(out),root_(root),scroll_(scroll),pixelScale_(pixelScale) {}
 
     /// Builds only `target` and what it contains, ignoring the clip, opacity and paint of its ancestors.
     /// Afterwards `isolated()` is the item range that belongs to the target.
@@ -238,6 +241,10 @@ private:
                 }
                 identify(ownStart,id);continue;
             }
+            if (node.type == NodeType::Icon) {
+                drawIcon(node,box,visibleArea,clip,alpha);
+                identify(ownStart,id);continue;
+            }
             if (node.type == NodeType::Line) {
                 const auto quad=grow(box,node.lineWidth/2);
                 if (node.fillVisible && (node.lineWidth>0 || node.path.filled) && quad.intersects(visibleArea)) {
@@ -317,6 +324,36 @@ private:
         }
     }
 
+    void drawIcon(const Node& node, const Rect& box, const Rect& visibleArea, const Rect& clip, double alpha) {
+        if (!node.fillVisible || box.w<=0 || box.h<=0 || !box.intersects(visibleArea)) return;
+        const double side=std::min(box.w,box.h);
+        const Rect quad{box.x+(box.w-side)/2,box.y+(box.h-side)/2,side,side};
+        const auto fill=document_.resolveColor(node.fill,mode_);
+        auto color=fill?withAlpha(*fill,alpha):kUnresolvedColor; if(!fill) color.a=float(alpha);
+        const auto key=iconSourceKey(node.icon);
+        if(iconRegistered(key)) {
+            const Rect uv=iconGlyphUv(key,budgetedIconSide(key,iconRasterSide(side*pixelScale_)));
+            if(uv.w>0 && uv.h>0) {
+                out_.push_back({DrawKind::Glyph,false,quad,{uv,{}},{},color,intersect(clip,box)});
+                ++drawn_;
+            }
+            return;
+        }
+        const double width=std::max(1.0,side/12);
+        out_.push_back({DrawKind::Stroke,false,quad,{quad,{}},{grow(quad,-width),{}},color,clip,0.0,StrokeStyle::Solid,width});
+        ++drawn_;
+    }
+
+    /// Halves the raster side of an icon that would take the rasters of one build past a quarter of the atlas,
+    /// so a crowd of large icons cannot push the text glyphs out.
+    int budgetedIconSide(const std::string& key, int side) {
+        constexpr std::size_t budget=std::size_t(kTextAtlasSize)*kTextAtlasSize/4;
+        const auto cost=[](int s){return std::size_t(s)*std::size_t(s);};
+        while(side>16 && !iconRasters_.contains(key+"@"+std::to_string(side)) && iconPixels_+cost(side)>budget) side/=2;
+        if(iconRasters_.insert(key+"@"+std::to_string(side)).second) iconPixels_+=cost(side);
+        return side;
+    }
+
     static double extent(const std::vector<ResolvedShadow>& shadows, const std::optional<ResolvedStroke>& stroke) {
         double reach = 0.0;
         for (const ResolvedShadow& s : shadows) {
@@ -371,6 +408,9 @@ private:
     std::size_t drawn_ = 0;
     Id root_;
     Vec2 scroll_;
+    double pixelScale_ = 1.0;
+    std::unordered_set<std::string> iconRasters_;
+    std::size_t iconPixels_ = 0;
     Id isolate_;
     std::unordered_set<Id> path_;
     bool inside_ = false;
@@ -380,14 +420,14 @@ private:
 
 } // namespace
 
-std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root,Vec2 scroll) {
-    return Builder{document, view, mode, out,root,scroll}.run();
+std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,const Id& root,Vec2 scroll,double pixelScale) {
+    return Builder{document, view, mode, out,root,scroll,pixelScale}.run();
 }
 
-bool buildIsolatedDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode, std::vector<DrawItem>& out) {
+bool buildIsolatedDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode, std::vector<DrawItem>& out, double pixelScale) {
     const Node* node=document.view(id);
     if(!node || !node->visible) return false;
-    Builder builder{document, view, mode, out, {}, {}};
+    Builder builder{document, view, mode, out, {}, {}, pixelScale};
     builder.isolate(id).run();
     const auto [begin,end]=builder.isolated();
     out.resize(end);

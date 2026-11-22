@@ -118,6 +118,7 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
     swapIn(inverse.imageFit,patch.imageFit,node.imageFit);
     swapIn(inverse.imageCrop,patch.imageCrop,node.imageCrop);
     swapIn(inverse.path, patch.path, node.path);
+    swapIn(inverse.icon, patch.icon, node.icon);
     swapIn(inverse.lineWidth, patch.lineWidth, node.lineWidth);
     swapIn(inverse.lineReverse, patch.lineReverse, node.lineReverse);
     swapIn(inverse.typography, patch.typography, node.typography);
@@ -180,6 +181,7 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
     if(top.imageFit) out.imageFit=top.imageFit;
     if(top.imageCrop) out.imageCrop=top.imageCrop;
     if (top.path) out.path = top.path;
+    if (top.icon) out.icon = top.icon;
     if (top.lineWidth) out.lineWidth = top.lineWidth;
     if (top.lineReverse) out.lineReverse = top.lineReverse;
     if (top.typography) out.typography = top.typography;
@@ -243,6 +245,7 @@ NodePatch fullPatch(const Node& n) {
     if(!n.prototypeFlowName.empty()) p.prototypeFlowName=n.prototypeFlowName;
     if(n.prototypeOverflow!=PrototypeOverflow::None) p.prototypeOverflow=n.prototypeOverflow;
     if(n.type==NodeType::Image){p.image=n.image;p.imageFit=n.imageFit;p.imageCrop=n.imageCrop;}
+    if (n.type == NodeType::Icon) p.icon=n.icon;
     if (n.type == NodeType::Line || n.type == NodeType::Path) p.lineWidth=n.lineWidth;
     if (n.type == NodeType::Line) p.lineReverse=n.lineReverse;
     if (n.type == NodeType::Path) p.path=n.path;

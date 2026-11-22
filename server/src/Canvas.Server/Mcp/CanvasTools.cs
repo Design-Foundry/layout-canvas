@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
 using Canvas.Server.Documents;
+using Canvas.Server.Icons;
 using Canvas.Server.VisualCore;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
@@ -11,7 +12,7 @@ namespace Canvas.Server.Mcp;
 
 /// <summary>Tools that read and edit Canvas documents through the same op log the editor syncs with.</summary>
 [McpServerToolType]
-public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSelections selections, RenderRequests renders)
+public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSelections selections, RenderRequests renders, MaterialSymbolsProvider icons)
 {
     private static readonly Lazy<string> FormatGuide = new(() =>
     {
@@ -88,6 +89,42 @@ public sealed class CanvasTools(DocumentStore store, DocumentHost host, EditorSe
         var (found, nodes) = await host.ReadAsync(documentId,
             core => nodeIds.Select(id => core.Node(id, mode) ?? JsonSerializer.SerializeToElement(new { id, error = "no such node" })).ToList(), ct);
         return found ? JsonSerializer.SerializeToElement(nodes, JsonOptions) : throw NotFound(documentId);
+    }
+
+    [McpServerTool(Name = "search_icons", ReadOnly = true, Idempotent = true)]
+    [Description("Searches the glyph names of the Material Symbols icon set: names that start with the query come first, then names that contain it, each group in alphabetical order. Use a name as { \"type\": \"icon\", \"icon\": \"material-symbols/<glyph>\" } (see get_format_guide for style, fill and weight). Returns glyphs, the total number of matches and the axis values the set offers.")]
+    public async Task<JsonElement> SearchIcons(
+        [Description("Part of a glyph name, such as \"arrow\" or \"arrow_back\"; spaces count as underscores. Empty lists every glyph.")] string? query = null,
+        [Description("How many matches to skip, for paging. Default 0.")] int offset = 0,
+        [Description("Page size, 1 to 200. Default 50.")] int limit = 50,
+        CancellationToken ct = default)
+    {
+        if (offset < 0)
+        {
+            throw new McpException("The offset is zero or more.");
+        }
+        try
+        {
+            var found = await icons.SearchAsync(query, offset, Math.Clamp(limit, 1, 200), icons.DefaultCommit, ct);
+            return JsonSerializer.SerializeToElement(new
+            {
+                Set = MaterialSymbolsProvider.SetName,
+                found.Total,
+                found.Offset,
+                Glyphs = found.Items.Select(item => item.Glyph).ToList(),
+                Axes = new Dictionary<string, object>
+                {
+                    ["style"] = IconVariant.Styles,
+                    ["FILL"] = new[] { 0, 1 },
+                    ["wght"] = IconVariant.Weights,
+                    ["opsz"] = IconVariant.OpticalSizes,
+                },
+            }, JsonOptions);
+        }
+        catch (IconsUnavailableException e)
+        {
+            throw new McpException($"Material Symbols is not available: {e.Message}");
+        }
     }
 
     [McpServerTool(Name = "get_layout", ReadOnly = true, Idempotent = true)]

@@ -9,4 +9,7 @@ public sealed class StorageOptions
 
     /// <summary>Folder of the font file store, absolute or relative to the content root.</summary>
     public string Fonts { get; set; } = "data/fonts";
+
+    /// <summary>Folder of the icon file store, absolute or relative to the content root. An <c>icons</c> folder next to the fonts folder when not set.</summary>
+    public string? Icons { get; set; }
 }

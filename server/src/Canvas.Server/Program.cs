@@ -2,8 +2,10 @@ using System.Text.Json.Serialization;
 using Canvas.Server;
 using Canvas.Server.Documents;
 using Canvas.Server.Fonts;
+using Canvas.Server.Icons;
 using Canvas.Server.Mcp;
 using Canvas.Server.Storage;
+using Canvas.Server.VisualCore;
 
 var packaged = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"));
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -30,6 +32,12 @@ if (packaged)
         builder.Configuration["Storage:Fonts"] = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Canvas", "fonts");
     }
+
+    if (Environment.GetEnvironmentVariable("Storage__Icons") is null)
+    {
+        builder.Configuration["Storage:Icons"] = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Canvas", "icons");
+    }
 }
 
 builder.Services.AddOpenApi();
@@ -47,6 +55,16 @@ builder.Services.Configure<GoogleFontsOptions>(builder.Configuration.GetSection(
 builder.Services.AddSingleton<FontFileStore>();
 builder.Services.AddSingleton<GoogleFontsProvider>();
 builder.Services.AddSingleton<GoogleFontsRegistrar>();
+builder.Services.AddHttpClient(MaterialSymbolsProvider.HttpClientName)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+builder.Services.AddOptions<MaterialSymbolsOptions>()
+    .Bind(builder.Configuration.GetSection(MaterialSymbolsOptions.Section))
+    .Validate(o => o.Commit == NativeIcons.MaterialSymbolsCommit,
+        $"MaterialSymbols:Commit has to be {NativeIcons.MaterialSymbolsCommit}, the commit the built-in icon set is pinned to.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<IconFileStore>();
+builder.Services.AddSingleton<MaterialSymbolsProvider>();
+builder.Services.AddSingleton<IconRegistrar>();
 builder.Services.AddSingleton<DocumentStore>();
 builder.Services.Configure<DocumentHostOptions>(builder.Configuration.GetSection(DocumentHostOptions.Section));
 builder.Services.AddSingleton<DocumentHost>();
@@ -80,6 +98,7 @@ api.MapGet("/health", () => TypedResults.Ok(new HealthResponse("ok", typeof(Prog
 
 api.MapDocuments();
 api.MapFonts();
+api.MapIcons();
 app.MapCanvasMcp();
 
 if (serveClient)

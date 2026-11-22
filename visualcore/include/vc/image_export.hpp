@@ -51,7 +51,7 @@ struct TilePixels {
 /// without the clipping, opacity or paint of its ancestors. Canvas overlays are never part of it. False
 /// if the node does not exist or is hidden.
 bool buildExportDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode,
-                         std::vector<DrawItem>& out);
+                         std::vector<DrawItem>& out, double pixelScale = 1.0);
 
 /// Converts premultiplied RGBA (or BGRA when `bgra`) to straight RGBA in place.
 void unpremultiplyPixels(std::uint8_t* pixels, std::size_t pixelCount, bool bgra);

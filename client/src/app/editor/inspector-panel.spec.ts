@@ -251,4 +251,23 @@ describe('component inspector', () => {
       [...element.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Hug'),
     ).toBe(false);
   });
+  it('shows the icon section with fill, opacity and sizing but no stroke, effects or radius', async () => {
+    const fixture = await setup({
+      ...node('icon'),
+      layout: { ...node('icon').layout, type: 'none' },
+      icon: { set: '00000000-0000-0000-0000-000000000200', glyph: 'arrow_back' },
+    });
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.querySelector('app-icon-panel')).not.toBeNull();
+    expect((element.querySelector('[aria-label="Glyph"]') as HTMLInputElement).value).toBe('arrow_back');
+    expect(element.querySelector('app-color-field')).not.toBeNull();
+    expect(element.textContent?.toLowerCase()).toContain('opacity');
+    expect(element.textContent).not.toContain('Corner radius');
+    expect(element.textContent).not.toContain('Auto layout');
+    expect(element.querySelector('[aria-label="Add stroke"]')).toBeNull();
+    expect(element.querySelector('[aria-label="Add shadow"]')).toBeNull();
+    expect(
+      [...element.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Hug'),
+    ).toBe(true);
+  });
 });

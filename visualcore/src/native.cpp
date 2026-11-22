@@ -195,6 +195,43 @@ int vc_register_font_family(const char* provider, const char* key, const char* v
     });
 }
 
+int vc_register_icon(const char* key, const char* svg) {
+    vc::clearDiagnostic();
+    return guarded([&]() -> int {
+        const char* problem = nullptr;
+        if (!key || !svg) {
+            problem = "key and svg are required";
+        } else {
+            problem = vc::registerIconSvg(key, svg);
+        }
+        if (!problem) return 1;
+        vc::restoreDiagnostic(vc::Diagnostic{"icon", problem});
+        return 0;
+    });
+}
+
+char* vc_icon_source_key(const char* icon) {
+    vc::clearDiagnostic();
+    return guarded([&]() -> char* {
+        if (!icon) return nullptr;
+        const auto key = vc::iconSourceKeyFromJson(icon);
+        return key ? copyOut(*key) : nullptr;
+    });
+}
+
+char* vc_material_symbols_commit(void) {
+    return guarded([&]() -> char* { return copyOut(vc::materialSymbolsSet().version); });
+}
+
+char* vc_icon_normalize(const char* icon) {
+    vc::clearDiagnostic();
+    return guarded([&]() -> char* {
+        if (!icon) return nullptr;
+        const auto json = vc::normalizeIconJson(icon);
+        return json ? copyOut(*json) : nullptr;
+    });
+}
+
 char* vc_font_capabilities(const unsigned char* bytes, size_t size) {
     return guarded([&]() -> char* {
         if (!bytes) return nullptr;

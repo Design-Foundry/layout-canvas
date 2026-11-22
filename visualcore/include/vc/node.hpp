@@ -1,4 +1,5 @@
 #pragma once
+#include "vc/icon.hpp"
 #include "vc/text.hpp"
 #include "vc/math.hpp"
 #include "vc/raster.hpp"
@@ -35,6 +36,8 @@ enum class NodeType {
     Line,
     Path,
     Image,
+    /// A glyph of an icon set, tinted by its fill.
+    Icon,
 };
 
 /// Sides and corners are listed in this order everywhere: top, end, bottom, start (DF's logical
@@ -167,6 +170,7 @@ struct NodePatch {
     std::optional<std::string> imageFit;
     std::optional<ImageCrop> imageCrop;
     std::optional<Path> path;
+    std::optional<IconRef> icon;
     std::optional<double> lineWidth;
     std::optional<bool> lineReverse;
     /// Source text style binding. Nil clears the binding; copied-layer binding changes are refused.
@@ -271,6 +275,7 @@ struct Node {
     std::string imageFit = "cover";
     ImageCrop imageCrop;
     Path path;
+    IconRef icon;
     double lineWidth = 2.0;
     bool lineReverse = false;
     Id typography;

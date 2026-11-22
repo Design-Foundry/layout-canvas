@@ -249,7 +249,7 @@ void Renderer::State::exportStep(const std::shared_ptr<ExportJob>& job) {
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         const auto atlasGeneration = textAtlasGeneration();
-        if (!buildExportDrawList(document, job->node, view, job->mode, drawItems)) {
+        if (!buildExportDrawList(document, job->node, view, job->mode, drawItems, plan.scale)) {
             exporting = false;
             return job->onDone("node is no longer available");
         }
@@ -673,7 +673,7 @@ void Renderer::State::buildInstances() {
                     const Rect sourceView{(view.x-layer.offset.x)/layer.scale,(view.y-layer.offset.y)/layer.scale,
                                           view.w/layer.scale,view.h/layer.scale};
                     const auto& sourceDocument=layer.document?*layer.document:editor.prototypeDocument();
-                    stats.visible+=buildDrawList(sourceDocument,sourceView,editor.activeMode(),layerItems,layer.screen,layer.scroll);
+                    stats.visible+=buildDrawList(sourceDocument,sourceView,editor.activeMode(),layerItems,layer.screen,layer.scroll,camera.zoom()*dpr*layer.scale);
                     for(auto& item:layerItems) {
                         transformDrawItem(item,layer.offset,1,layer.viewport,layer.scale);
                         drawItems.push_back(std::move(item));
@@ -705,7 +705,7 @@ void Renderer::State::buildInstances() {
             }
         } else {
             releaseComposition();
-            stats.visible=buildDrawList(document,view,editor.activeMode(),drawItems);
+            stats.visible=buildDrawList(document,view,editor.activeMode(),drawItems,{},{},camera.zoom()*dpr);
         }
         if(!editor.presenting()) addSelectionOutlines();
         if(textAtlasGeneration()==atlasGeneration) break;

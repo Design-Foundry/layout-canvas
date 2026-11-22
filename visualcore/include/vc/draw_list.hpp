@@ -49,16 +49,17 @@ struct DrawItem {
     std::uint32_t primitive = 0;
 };
 
+/// `pixelScale` is the device pixels per world unit, which picks the raster size of icons.
 /// Fills `out` with what's visible inside `view`, in paint order, resolving tokens in `mode`.
 /// Returns how many nodes contributed at least one item.
 std::size_t buildDrawList(const Document& document, const Rect& view, const Id& mode, std::vector<DrawItem>& out,
-                          const Id& root = {}, Vec2 scroll = {});
+                          const Id& root = {}, Vec2 scroll = {}, double pixelScale = 1.0);
 
 /// Like buildDrawList, but for node `id` (any depth, expanded instance ids included) and what it contains
 /// only: nothing of its ancestors, siblings or their clips and opacity is applied. False if the node is
 /// missing or hidden.
 bool buildIsolatedDrawList(const Document& document, const Id& id, const Rect& view, const Id& mode,
-                           std::vector<DrawItem>& out);
+                           std::vector<DrawItem>& out, double pixelScale = 1.0);
 
 /// Translate native presentation geometry, keeping glyph/image UV coordinates unchanged.
 void transformDrawItem(DrawItem& item, Vec2 offset, double opacity,

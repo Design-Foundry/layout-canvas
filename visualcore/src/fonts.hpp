@@ -74,5 +74,11 @@ struct Capabilities {
 [[nodiscard]] std::optional<Capabilities> capabilities(std::string_view face);
 /// The files declared for a family and version, or nothing.
 [[nodiscard]] std::optional<std::vector<FontFile>> familyFiles(std::string_view provider, std::string_view key, std::string_view version);
+/// Cached atlas cell of a named bitmap, shared with the text glyphs.
+[[nodiscard]] std::optional<Rect> atlasFind(const std::string& name);
+/// Remembers that `name` has no cell, so it is not rasterized again until the atlas is cleared.
+void atlasNote(const std::string& name);
+/// Copies a coverage bitmap into the atlas under `name`. Empty when it does not fit.
+[[nodiscard]] Rect atlasPlace(const std::string& name, int width, int height, std::span<const std::uint8_t> bitmap);
 
 } // namespace vc::fonts

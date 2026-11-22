@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 26;
+constexpr int kSnapshotVersion = 27;
 
 bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
@@ -24,7 +24,7 @@ bool positionedPrototype(const Interaction& interaction) {
     return (interaction.transition!=PrototypeTransition::Instant && interaction.transition!=PrototypeTransition::Dissolve) || interaction.placement!=OverlayPlacement::Center;
 }
 
-constexpr std::array<std::pair<NodeType, std::string_view>, 9> kNodeTypes{{
+constexpr std::array<std::pair<NodeType, std::string_view>, 10> kNodeTypes{{
     {NodeType::Frame, "frame"},
     {NodeType::Rect, "rect"},
     {NodeType::Ellipse, "ellipse"},
@@ -34,6 +34,7 @@ constexpr std::array<std::pair<NodeType, std::string_view>, 9> kNodeTypes{{
     {NodeType::Line, "line"},
     {NodeType::Path, "path"},
     {NodeType::Image, "image"},
+    {NodeType::Icon, "icon"},
 }};
 
 std::string_view typeName(NodeType type) {
@@ -182,6 +183,7 @@ json writeValues(const ComponentValues& values) {
 
 json writeAxes(const FontAxes& axes);
 json writeFeatures(const FontFeatures& features);
+json writeIcon(const IconRef& icon);
 
 void writePatch(json& out, const NodePatch& p) {
     if(p.prototypeStart) out["prototypeStart"]=*p.prototypeStart;
@@ -228,6 +230,7 @@ void writePatch(json& out, const NodePatch& p) {
         }
         if(p.path->filled) out["path"]["filled"]=true;
     }
+    if (p.icon) out["icon"] = writeIcon(*p.icon);
     if (p.lineWidth) out["lineWidth"] = *p.lineWidth;
     if (p.lineReverse) out["lineReverse"] = *p.lineReverse;
     if (p.typography) out["typography"] = p.typography->toString();
@@ -344,7 +347,7 @@ json write(const Node& n) {
 
 enum class Shape { String, Boolean, Number };
 
-constexpr std::string_view kNodeTypeNames = "frame, rect, ellipse, component, instance, text, line, path or image";
+constexpr std::string_view kNodeTypeNames = "frame, rect, ellipse, component, instance, text, line, path, image or icon";
 
 std::string slot(std::size_t index) {
     return "[" + std::to_string(index) + "]";
@@ -790,6 +793,56 @@ std::optional<TextStyle> readTextStyle(const json& v) {
     return style;
 }
 
+json writeIcon(const IconRef& icon) {
+    json axes = json::object();
+    for (const auto& [tag, value] : icon.axes) {
+        if (const auto* number = std::get_if<double>(&value)) {
+            if (*number == std::floor(*number)) axes[tag] = static_cast<long long>(*number);
+            else axes[tag] = *number;
+        } else {
+            axes[tag] = std::get<std::string>(value);
+        }
+    }
+    json out{{"set", icon.set.toString()}, {"glyph", icon.glyph}};
+    if (!axes.empty()) out["axes"] = std::move(axes);
+    return out;
+}
+
+/// An icon as its path form, `material-symbols/arrow_back?style=rounded`, or as `{ set, glyph, axes }`.
+std::optional<IconRef> readIcon(const json& j) {
+    const char* why = nullptr;
+    if (j.is_string()) {
+        auto parsed = parseIconPath(j.get_ref<const std::string&>(), &why);
+        if (!parsed) return refused(why);
+        return parsed;
+    }
+    if (!j.is_object()) return refused("must be an icon path such as material-symbols/arrow_back, or an object with set, glyph and axes");
+    for (const auto& [key, unused] : j.items())
+        if (key != "set" && key != "glyph" && key != "axes") {DiagnosticScope field{key};return refused("unknown key, use set, glyph or axes");}
+    IconRef ref;
+    ref.set = kMaterialSymbolsSetId;
+    if (j.contains("set")) {
+        DiagnosticScope field{"set"};
+        const auto set = readId(j["set"]);
+        if (!set) return std::nullopt;
+        ref.set = *set;
+    }
+    if (!require(j, "glyph", Shape::String)) return std::nullopt;
+    ref.glyph = j["glyph"].get<std::string>();
+    if (j.contains("axes")) {
+        DiagnosticScope field{"axes"};
+        if (!j["axes"].is_object()) return refused("must be an object of axis values");
+        for (const auto& [tag, value] : j["axes"].items()) {
+            DiagnosticScope entry{tag};
+            if (value.is_string()) ref.axes[tag] = value.get<std::string>();
+            else if (value.is_number()) ref.axes[tag] = value.get<double>();
+            else return refused("an axis value is a name or a number");
+        }
+    }
+    if (const char* problem = normalizeIcon(ref)) return refused(problem);
+    return ref;
+}
+
 std::optional<NodePatch> readPatch(const json& j) {
     NodePatch p;
     if(!readField(j,"prototypeStart",p.prototypeStart,readBool)) return std::nullopt;
@@ -940,6 +993,7 @@ std::optional<NodePatch> readPatch(const json& j) {
         if(const char* why=pathProblem(path)) return refused(why);
         p.path=std::move(path);
     }
+    if (!readField(j, "icon", p.icon, readIcon)) return std::nullopt;
     if (!readField(j,"lineWidth",p.lineWidth,readNumber) || !readField(j,"lineReverse",p.lineReverse,readBool)) return std::nullopt;
     if (!readField(j, "typography", p.typography, readId)) return std::nullopt;
     if (!readField(j, "textWrap", p.textWrap, readBool)) return std::nullopt;
@@ -1141,6 +1195,7 @@ std::optional<Node> readNode(const json& j) {
     n.type = *type;
     n.order = *order;
     n.fillVisible = defaultFillVisible(n.type) || (j.contains("fill") && !j["fill"].is_null());
+    if (n.type == NodeType::Icon) n.w = n.h = kDefaultIconSize;
 
     if (j.contains("parent")) {
         const auto parent = requireId(j, "parent");
@@ -1162,6 +1217,8 @@ std::optional<Node> readNode(const json& j) {
     if (*type != NodeType::Image && patch->image) return misplaced("image", "only image nodes take an image");
     if (*type != NodeType::Image && patch->imageFit) return misplaced("imageFit", "only image nodes take imageFit");
     if (*type != NodeType::Image && patch->imageCrop) return misplaced("imageCrop", "only image nodes take imageCrop");
+    if (*type == NodeType::Icon && !patch->icon) return misplaced("icon", "icon nodes need an icon");
+    if (*type != NodeType::Icon && patch->icon) return misplaced("icon", "only icon nodes take an icon");
     if (*type == NodeType::Instance && (patch->interaction || patch->interactions)) return misplaced("interaction", "instance interactions use component-root overrides");
     if (patch->prototypeFlowName && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeFlowName", "only root frames take flow names");
     if (patch->prototypeStart && (*type != NodeType::Frame || !n.parent.isNil())) return misplaced("prototypeStart", "only root frames take flow starting flags");
@@ -1767,6 +1824,7 @@ std::string inspectNodeJson(const Document& document, const Node& source, const 
     }
     if (!node.parent.isNil()) out["parent"] = node.parent.toString();
     writePatch(out, fullPatch(node));
+    if (node.type == NodeType::Icon) out["iconPath"] = iconPath(node.icon);
     out["componentValues"] = writeValues(source.componentValues);
     if (source.type == NodeType::Component) out["definition"] = writeDefinition(source.definition);
     else if (source.type == NodeType::Instance) {
@@ -1823,6 +1881,21 @@ std::string layersToJson(const Document& document) {
     return rows.dump();
 }
 
+json writeIconSet(const IconSet& set) {
+    const auto value = [](const IconAxisValue& v) {
+        if (const auto* name = std::get_if<std::string>(&v)) return json(*name);
+        return json(static_cast<long long>(std::get<double>(v)));
+    };
+    json axes = json::array();
+    for (const IconAxis& axis : set.axes) {
+        json values = json::array();
+        for (const auto& v : axis.values) values.push_back(value(v));
+        axes.push_back({{"tag", axis.tag}, {"values", values}, {"default", value(axis.defaultValue)}});
+    }
+    return {{"id", set.id.toString()}, {"identifier", set.identifier}, {"displayName", set.displayName},
+            {"version", set.version}, {"axes", axes}};
+}
+
 std::string snapshotToJson(const Document& document) {
     json modes = json::array();
     for (const Mode* mode : document.modes()) modes.push_back(writeMode(*mode));
@@ -1861,6 +1934,7 @@ std::string snapshotToJson(const Document& document) {
     bool parts = false;
     bool notes = false;
     bool cellVisibility = false;
+    bool icons = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     for (const Font* font : document.fonts()) fontModel = fontModel || font->id != kInterFontId;
     for (const FontStack* stack : document.fontStacks()) fontModel = fontModel || stack->id != kInterStackId;
@@ -1877,6 +1951,7 @@ std::string snapshotToJson(const Document& document) {
         namedFlows = namedFlows || !node.prototypeFlowName.empty();
         parts = parts || !node.part.empty();
         notes = notes || !node.notes.empty();
+        icons = icons || node.type == NodeType::Icon;
         scrolling = scrolling || node.prototypeOverflow!=PrototypeOverflow::None;
         multipleInteractions = multipleInteractions || !node.interactions.empty();
         componentStates = componentStates || statePrototype(node.interaction) || std::any_of(node.interactions.begin(),node.interactions.end(),[](const auto& e){return statePrototype(e.interaction);});
@@ -1887,6 +1962,7 @@ std::string snapshotToJson(const Document& document) {
         textProperties = textProperties || !node.definition.texts.empty();
         const auto styleVersion = [&](const NodePatch& patch) {
             path = path || patch.path.has_value();
+            icons = icons || patch.icon.has_value();
             image = image || patch.image || patch.imageFit || patch.imageCrop;
             prototype = prototype || patch.interaction.has_value() || patch.prototypeStart.has_value();
             extended = extended || (patch.interaction && extendedPrototype(*patch.interaction));
@@ -1908,13 +1984,18 @@ std::string snapshotToJson(const Document& document) {
         }
     });
     fontModel = fontModel || typography;
-    json out{{"version", notes ? 26 : fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
+    json out{{"version", icons ? 27 : notes ? 26 : fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
     if (fontModel) {
         json fonts = json::array(), stacks = json::array();
         for (const Font* font : document.fonts()) fonts.push_back(writeFont(*font));
         for (const FontStack* stack : document.fontStacks()) stacks.push_back(writeFontStack(*stack));
         out["fonts"] = std::move(fonts);
         out["fontStacks"] = std::move(stacks);
+    }
+    if (icons) {
+        json sets = json::array();
+        for (const IconSet& set : document.iconSets()) sets.push_back(writeIconSet(set));
+        out["iconSets"] = std::move(sets);
     }
     return out.dump();
 }
@@ -1984,6 +2065,19 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
                 if (stack->id != kInterStackId) ops.push_back(CreateFontStack{std::move(*stack)});
             }
         }
+        if (j.contains("iconSets")) {
+            DiagnosticScope list{"iconSets"};
+            if (version < 27) return refused("icon sets need snapshot version 27 or later");
+            if (!j["iconSets"].is_array()) return refused("must be an array");
+            for (std::size_t i = 0; i < j["iconSets"].size(); ++i) {
+                DiagnosticScope entry{slot(i)};
+                const auto& set = j["iconSets"][i];
+                if (!set.is_object()) return refused("an icon set must be an object");
+                const auto id = requireId(set, "id");
+                if (!id) return std::nullopt;
+                if (!findIconSet(*id)) {DiagnosticScope field{"id"};return refused("unknown icon set");}
+            }
+        }
         DiagnosticScope list{"tokens"};
         for (std::size_t i = 0; i < j["tokens"].size(); ++i) {
             DiagnosticScope entry{slot(i)};
@@ -2012,6 +2106,8 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         if (!node) return std::nullopt;
         if (version < 25 && gFontModelReads != fontReads) return refused("font stacks, axes and features need snapshot version 25 or later");
         if(version<24 && std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.when.empty() || r.patch.visible.has_value();})) return refused("base rules and rules that set visible need snapshot version 24 or later");
+        const auto iconPatch=[](const NodePatch& p){return p.icon.has_value();};
+        if(version<27 && (node->type==NodeType::Icon || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return iconPatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return iconPatch(r.patch);}))) return refused("icon layers need snapshot version 27 or later");
         if(version<26 && (j["nodes"][index].contains("notes") || !node->notes.empty())) return refused("node notes need snapshot version 26 or later");
         if(version<23 && (j["nodes"][index].contains("part") || !node->part.empty())) return refused("component part names need snapshot version 23 or later");
         if(version<22 && (j["nodes"][index].contains("prototypeFlowName") || std::any_of(node->overrides.begin(),node->overrides.end(),[](const auto& o){return o.patch.prototypeFlowName.has_value();}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.patch.prototypeFlowName.has_value();}))) return refused("named flows need snapshot version 22 or later");
@@ -2199,6 +2295,45 @@ std::optional<Token> tokenFromJson(std::string_view data) {
 
 std::optional<Mode> modeFromJson(std::string_view data) {
     return readMode(json::parse(data, nullptr, false));
+}
+
+} // namespace vc
+
+namespace vc {
+
+std::optional<std::string> iconSourceKeyFromJson(std::string_view data) {
+    const json j = json::parse(data, nullptr, false);
+    if (j.is_discarded()) return refused("the icon is not valid JSON");
+    const auto ref = readIcon(j);
+    if (!ref) return std::nullopt;
+    return iconSourceKey(*ref);
+}
+
+std::optional<std::string> normalizeIconJson(std::string_view data) {
+    const json j = json::parse(data, nullptr, false);
+    if (j.is_discarded()) return refused("the icon is not valid JSON");
+    const auto ref = readIcon(j);
+    if (!ref) return std::nullopt;
+    return writeIcon(*ref).dump();
+}
+
+} // namespace vc
+
+namespace vc {
+
+std::string usedIconsToJson(const Document& document) {
+    json out = json::array();
+    std::unordered_set<std::string> seen;
+    const auto note = [&](const IconRef& icon) {
+        std::string key = iconSourceKey(icon);
+        if (seen.insert(key).second) out.push_back({{"key", std::move(key)}, {"icon", writeIcon(icon)}});
+    };
+    document.forEachInPaintOrder([&](const Node& node) {
+        if (node.type == NodeType::Icon) note(node.icon);
+        for (const auto& o : node.overrides) if (o.patch.icon) note(*o.patch.icon);
+        for (const auto& r : node.definition.rules) if (r.patch.icon) note(*r.patch.icon);
+    });
+    return out.dump();
 }
 
 } // namespace vc

@@ -39,6 +39,7 @@ export type LayerKind =
   | 'ellipse'
   | 'text'
   | 'image'
+  | 'icon'
   | 'component'
   | 'instance';
 
@@ -65,6 +66,7 @@ export const LAYER_ICONS: Readonly<Record<LayerKind, string>> = {
   ellipse: 'radio_button_unchecked',
   text: 'title',
   image: 'image',
+  icon: 'star',
   component: 'widgets',
   instance: 'diamond',
 };
