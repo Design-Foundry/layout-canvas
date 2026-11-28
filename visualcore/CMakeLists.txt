@@ -156,6 +156,7 @@ else()
             tests/test_native.cpp
             tests/test_tokens.cpp
             tests/test_gradient_tokens.cpp
+            tests/test_paints.cpp
             tests/test_text.cpp
             tests/test_font_registry.cpp
             tests/test_font_model.cpp

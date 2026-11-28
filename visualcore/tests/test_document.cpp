@@ -84,14 +84,14 @@ TEST_CASE("set props returns the previous values of the touched fields only") {
 
     vc::NodePatch patch;
     patch.x = 50;
-    patch.fill = vc::TokenRef{idOf(100)};
+    patch.fills = std::vector<vc::Paint>{vc::Paint{vc::TokenRef{idOf(100)}}};
     const auto inverse = doc.apply(SetProps{idOf(1), patch});
 
     const auto& undo = std::get<SetProps>(*inverse).patch;
     REQUIRE(undo.x == 0.0);
-    REQUIRE(undo.fill == vc::Value<vc::Oklch>{vc::Oklch{}});
+    REQUIRE(undo.fills == std::vector<vc::Paint>{vc::Paint{vc::Oklch{}}});
     REQUIRE_FALSE(undo.y);
-    REQUIRE(std::get<vc::TokenRef>(doc.find(idOf(1))->fill).token == idOf(100));
+    REQUIRE(std::get<vc::TokenRef>(doc.find(idOf(1))->fills.front().source).token == idOf(100));
 }
 
 TEST_CASE("siblings paint in key order, parents before children") {

@@ -666,7 +666,7 @@ struct InteractivePrototype : Prototype {
         main=add(NodeType::Component,{},1000,0,90,80);
         visual=add(NodeType::Rect,main,5,5,30,20);
         ComponentDefinition definition;definition.axes.push_back({"state",{"idle","active"},"idle"});
-        NodePatch active;active.x=35;active.w=50;active.cornerRadius=8.;active.fill=Oklch{.7,.15,140};
+        NodePatch active;active.x=35;active.w=50;active.cornerRadius=8.;active.fills=std::vector<vc::Paint>{vc::Paint{Oklch{.7,.15,140}}};
         definition.rules.push_back({{{"state","active"}},visual,active});
         REQUIRE(session.applyRemote(SetComponentDefinition{main,definition}));
         NodePatch action;Interaction interaction;interaction.action=PrototypeAction::ChangeState;interaction.stateValues={{"state","active"}};action.interaction=interaction;patch(main,action);

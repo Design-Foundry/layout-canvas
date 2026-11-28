@@ -46,43 +46,43 @@ Node newShape(Tool tool) {
     Node node;
     switch (tool) {
     case Tool::Pencil:
-        node.type=NodeType::Path; node.name="Pencil"; node.fill=Oklch{0.95,0,0}; node.absolute=true;
+        node.type=NodeType::Path; node.name="Pencil"; node.fills = {Paint{Oklch{0.95,0,0}}}; node.absolute=true;
         break;
     case Tool::Polygon:
     case Tool::Star:
         node.type=NodeType::Path; node.name=tool==Tool::Star ? "Star" : "Polygon";
-        node.fill=Oklch{0.89,0,0}; node.absolute=true;
+        node.fills = {Paint{Oklch{0.89,0,0}}}; node.absolute=true;
         break;
     case Tool::Pen:
-        node.type=NodeType::Path; node.name="Path"; node.fill=Oklch{0.95,0,0}; node.absolute=true;
+        node.type=NodeType::Path; node.name="Path"; node.fills = {Paint{Oklch{0.95,0,0}}}; node.absolute=true;
         break;
     case Tool::Line:
-        node.type=NodeType::Line; node.name="Line"; node.fill=Oklch{0.95,0,0}; node.absolute=true;
+        node.type=NodeType::Line; node.name="Line"; node.fills = {Paint{Oklch{0.95,0,0}}}; node.absolute=true;
         break;
     case Tool::Text:
         node.type = NodeType::Text;
         node.name = "Text";
         node.text.content = "Texto";
         node.text.fontSize = 24;
-        node.fill = Oklch{0.95, 0.0, 0.0};
+        node.fills = {Paint{Oklch{0.95, 0.0, 0.0}}};
         node.widthSizing = Sizing::Hug;
         node.heightSizing = Sizing::Hug;
         break;
     case Tool::Frame:
         node.type = NodeType::Frame;
         node.name = "Frame";
-        node.fill = Oklch{1.0, 0.0, 0.0};
+        node.fills = {Paint{Oklch{1.0, 0.0, 0.0}}};
         node.clipContent = true;
         break;
     case Tool::Ellipse:
         node.type = NodeType::Ellipse;
         node.name = "Ellipse";
-        node.fill = Oklch{0.89, 0.0, 0.0};
+        node.fills = {Paint{Oklch{0.89, 0.0, 0.0}}};
         break;
     default:
         node.type = NodeType::Rect;
         node.name = "Rectangle";
-        node.fill = Oklch{0.89, 0.0, 0.0};
+        node.fills = {Paint{Oklch{0.89, 0.0, 0.0}}};
         break;
     }
     return node;
@@ -1154,7 +1154,7 @@ std::optional<Id> Editor::createComponent() {
     component.y = bounds.y - origin.y;
     component.w = bounds.w;
     component.h = bounds.h;
-    component.fill = Oklch{1.0, 0.0, 0.0};
+    component.fills = {Paint{Oklch{1.0, 0.0, 0.0}}};
     component.fillVisible = false;
 
     std::vector<Id> moved = selection_;

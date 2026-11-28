@@ -32,7 +32,7 @@ Node sampleNode() {
     n.y = -40;
     n.w = 320;
     n.h = 200;
-    n.fill = vc::Oklch{0.98, 0.01, 250, 1};
+    n.fills = std::vector<vc::Paint>{vc::Paint{vc::Oklch{0.98, 0.01, 250, 1}}};
     n.cornerRadius = vc::TokenRef{kRadiusToken};
     n.opacity = 0.75;
     n.clipContent = true;
@@ -51,7 +51,7 @@ TEST_CASE("every op kind survives a json round trip") {
     const Node node = sampleNode();
     vc::NodePatch patch;
     patch.x = 3;
-    patch.fill = vc::TokenRef{kRadiusToken};
+    patch.fills = std::vector<vc::Paint>{vc::Paint{vc::TokenRef{kRadiusToken}}};
     patch.visible = false;
 
     const OpBody ops[] = {
@@ -174,7 +174,7 @@ TEST_CASE("inspected nodes carry hex fills, the laid-out box and every field") {
     vc::Document doc;
     REQUIRE(doc.apply(vc::CreateToken{radiusToken()}));
     Node n = sampleNode();
-    n.fill = *vc::fromHex("#3a86ff");
+    n.fills = std::vector<vc::Paint>{vc::Paint{*vc::fromHex("#3a86ff")}};
     REQUIRE(doc.apply(CreateNode{n}));
 
     const std::string json = vc::inspectNodeJson(doc, n, vc::kDefaultModeId);
@@ -183,7 +183,7 @@ TEST_CASE("inspected nodes carry hex fills, the laid-out box and every field") {
     REQUIRE(json.find("\"stroke\":") != std::string::npos);
     REQUIRE(json.find("\"inFlow\":false") != std::string::npos);
 
-    n.fill = vc::TokenRef{kRadiusToken};
+    n.fills = std::vector<vc::Paint>{vc::Paint{vc::TokenRef{kRadiusToken}}};
     REQUIRE(vc::inspectNodeJson(doc, n, vc::kDefaultModeId).find("hex") == std::string::npos);
 }
 

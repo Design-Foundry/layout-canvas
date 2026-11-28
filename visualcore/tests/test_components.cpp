@@ -233,7 +233,7 @@ TEST_CASE("declared boolean properties and multi-axis variants resolve without d
     d.axes.push_back({"size", {"compact", "large"}, "compact"});
     d.axes.push_back({"tone", {"neutral", "danger"}, "neutral"});
     vc::NodePatch wide; wide.w = 90;
-    vc::NodePatch red; red.fill = Oklch{0.5, 0.2, 25};
+    vc::NodePatch red; red.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.5, 0.2, 25}}};
     vc::NodePatch rounded; rounded.cornerRadius = 12.0;
     d.rules.push_back({{{"size", "large"}}, f.badge, wide});
     d.rules.push_back({{{"tone", "danger"}}, f.badge, red});
@@ -247,7 +247,7 @@ TEST_CASE("declared boolean properties and multi-axis variants resolve without d
     REQUIRE(f.editor.setProps(instance, values));
     REQUIRE(f.view(copy).visible);
     REQUIRE(f.view(copy).w == 90);
-    REQUIRE(f.view(copy).fill == *red.fill);
+    REQUIRE(f.view(copy).fills == *red.fills);
     REQUIRE(f.view(copy).cornerRadius == vc::Value<double>{12.0});
     REQUIRE(f.session.document().find(instance)->component == f.component);
     REQUIRE(f.session.document().find(instance)->overrides.empty());
@@ -384,11 +384,11 @@ TEST_CASE("instances follow edits to their component") {
     Fixture f;
     const Id instance = *f.editor.createInstance(f.component);
     vc::NodePatch blue;
-    blue.fill = Oklch{0.6, 0.2, 250};
+    blue.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.6, 0.2, 250}}};
     f.session.edit(vc::SetProps{f.badge, blue});
 
     const Id copy = f.session.document().viewChildren(instance).at(0);
-    REQUIRE(f.view(copy).fill == vc::Value<Oklch>{Oklch{0.6, 0.2, 250}});
+    REQUIRE(f.view(copy).fills == std::vector<vc::Paint>{vc::Paint{Oklch{0.6, 0.2, 250}}});
 }
 
 TEST_CASE("style edits on an instance become overrides, geometry stays its own") {
@@ -398,7 +398,7 @@ TEST_CASE("style edits on an instance become overrides, geometry stays its own")
 
     vc::NodePatch patch;
     patch.x = 500.0;
-    patch.fill = Oklch{0.3, 0.1, 30};
+    patch.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.3, 0.1, 30}}};
     patch.fillVisible = true;
     REQUIRE(f.editor.setProps(instance, patch));
 
@@ -406,8 +406,8 @@ TEST_CASE("style edits on an instance become overrides, geometry stays its own")
     REQUIRE(node.x == 500);
     REQUIRE(node.overrides.size() == 1);
     REQUIRE(node.overrides[0].node == f.component);
-    REQUIRE(f.view(instance).fill == vc::Value<Oklch>{Oklch{0.3, 0.1, 30}});
-    REQUIRE(f.session.document().find(f.component)->fill != vc::Value<Oklch>{Oklch{0.3, 0.1, 30}});
+    REQUIRE(f.view(instance).fills == std::vector<vc::Paint>{vc::Paint{Oklch{0.3, 0.1, 30}}});
+    REQUIRE(f.session.document().find(f.component)->fills != std::vector<vc::Paint>{vc::Paint{Oklch{0.3, 0.1, 30}}});
     REQUIRE(f.session.takeOutbox().size() == 2);
 
     f.editor.undo();
@@ -482,9 +482,9 @@ TEST_CASE("resetting one copied layer preserves the instance root and sibling in
     const Id second = *f.editor.createInstance(f.component);
     const Id b = f.session.document().viewChildren(second).at(0);
     vc::NodePatch red;
-    red.fill = Oklch{0.5, 0.2, 25};
+    red.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.5, 0.2, 25}}};
     vc::NodePatch blue;
-    blue.fill = Oklch{0.5, 0.2, 250};
+    blue.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.5, 0.2, 250}}};
     REQUIRE(f.editor.setProps(a, red));
     REQUIRE(f.editor.setProps(b, blue));
     vc::NodePatch root;
@@ -492,17 +492,17 @@ TEST_CASE("resetting one copied layer preserves the instance root and sibling in
     REQUIRE(f.editor.setProps(first, root));
     REQUIRE(vc::inspectNodeJson(f.session.document(), f.view(a), {}).find("\"overrides\":1") != std::string::npos);
     REQUIRE(f.editor.resetOverrides(a));
-    REQUIRE(f.view(a).fill == f.session.document().find(f.badge)->fill);
-    REQUIRE(f.view(b).fill == *blue.fill);
+    REQUIRE(f.view(a).fills == f.session.document().find(f.badge)->fills);
+    REQUIRE(f.view(b).fills == *blue.fills);
     REQUIRE(f.view(first).clipContent);
     REQUIRE(f.session.document().find(first)->overrides.size() == 1);
     REQUIRE(vc::inspectNodeJson(f.session.document(), f.view(a), {}).find("\"overrides\":0") != std::string::npos);
     REQUIRE_FALSE(f.editor.resetOverrides(a));
     REQUIRE(f.editor.undo());
-    REQUIRE(f.view(a).fill == *red.fill);
-    REQUIRE(f.view(b).fill == *blue.fill);
+    REQUIRE(f.view(a).fills == *red.fills);
+    REQUIRE(f.view(b).fills == *blue.fills);
     REQUIRE(f.editor.redo());
-    REQUIRE(f.view(a).fill == f.session.document().find(f.badge)->fill);
+    REQUIRE(f.view(a).fills == f.session.document().find(f.badge)->fills);
 }
 
 TEST_CASE("switching a clean instance preserves geometry and is undoable") {
@@ -553,7 +553,7 @@ TEST_CASE("switching a component refuses cycles, missing mains and unreviewed ov
     REQUIRE(f.session.edit(vc::SetOverride{instance, f.badge, hidden}));
     const Node before = *f.session.document().find(instance);
     patch.component = other.id;
-    patch.fill = Oklch{0.5, 0.1, 180};
+    patch.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.5, 0.1, 180}}};
     REQUIRE_FALSE(f.editor.setProps(instance, patch));
     REQUIRE(*f.session.document().find(instance) == before);
     REQUIRE(f.editor.resetOverrides(instance));
@@ -655,10 +655,10 @@ TEST_CASE("double-clicking an instance selects the copy under the pointer, edits
     REQUIRE(f.editor.selection() == std::vector<Id>{copy});
 
     vc::NodePatch red;
-    red.fill = Oklch{0.6, 0.2, 30};
+    red.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.6, 0.2, 30}}};
     REQUIRE(f.editor.setProps(copy, red));
-    REQUIRE(f.view(copy).fill == vc::Value<Oklch>{Oklch{0.6, 0.2, 30}});
-    REQUIRE(f.session.document().find(f.badge)->fill != vc::Value<Oklch>{Oklch{0.6, 0.2, 30}});
+    REQUIRE(f.view(copy).fills == std::vector<vc::Paint>{vc::Paint{Oklch{0.6, 0.2, 30}}});
+    REQUIRE(f.session.document().find(f.badge)->fills != std::vector<vc::Paint>{vc::Paint{Oklch{0.6, 0.2, 30}}});
     REQUIRE(f.session.document().find(instance)->overrides.at(0).node == f.badge);
     REQUIRE(f.editor.selection() == std::vector<Id>{copy});
 

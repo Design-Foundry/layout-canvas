@@ -49,6 +49,16 @@ instance override of `visible` wins over both. A layer hidden by a rule is hidde
 any other layer for rendering, hit testing, auto layout and prototype playback. Base
 rules and rules that set `visible` need snapshot 24.
 
+## Fills
+
+A node's fill is a stack of paints, bottom first, up to 16. A paint is a solid color, a color
+or gradient token, or a gradient written on the node (linear, radial or conic, 2 to 32 stops).
+Each paint has its own visibility and an opacity from 0 to 1, and `fillVisible` hides the whole
+stack. Text, lines, paths and icons take their color from the first visible solid paint.
+Rectangles, ellipses, frames and components draw every visible solid paint in order. Gradient
+paints are stored and validated but not drawn yet. A single plain solid color is still written
+as `fill`; a stack, a gradient or a paint option is written as `fills` and needs snapshot 30.
+
 ## Component states
 
 A main component can declare up to 32 states, each with a lowercase kebab-case name and a
@@ -71,7 +81,7 @@ Snapshots remain versioned by the features they contain. Text starts at version 
 independent metrics, wrapping, face selection and shared typography progressively
 require versions 6–11. Lines use 12, straight unfilled paths 13, curved/filled paths
 14, raster images 15, click prototypes 16, overlay/dissolve options 17 and directional
-transitions/overlay placement 18, component part names 23, base variant rules or rules that set visibility 24, node notes 26, icons 27, gradient tokens 28 and component states or rule states 29. Earlier documents retain their minimum version. Downlevel
+transitions/overlay placement 18, component part names 23, base variant rules or rules that set visibility 24, node notes 26, icons 27, gradient tokens 28, component states or rule states 29 and fill stacks 30. Earlier documents retain their minimum version. Downlevel
 snapshots containing unsupported newer data are refused.
 
 Prototype playback uses the same native renderer and does not produce document

@@ -215,7 +215,7 @@ TEST_CASE("an icon is a tinted, fixed leaf with no stroke or shadows", "[icons]"
     Document doc;
     REQUIRE(doc.apply(CreateNode{frame(1)}));
     Node tinted = icon(2, 1, "home");
-    tinted.fill = Oklch{0.6, 0.1, 200.0, 1.0};
+    tinted.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.6, 0.1, 200.0, 1.0}}};
     tinted.opacity = 0.5;
     REQUIRE(doc.apply(CreateNode{tinted}));
     NodePatch stroke;
@@ -432,7 +432,7 @@ TEST_CASE("an instance swaps the glyph and tint of an icon through an override",
     REQUIRE(s.copiedMark().icon.glyph == "arrow_back");
     NodePatch patch;
     patch.icon = ref("close", {{"style", std::string{"sharp"}}});
-    patch.fill = Oklch{0.7, 0.2, 30.0, 1.0};
+    patch.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.7, 0.2, 30.0, 1.0}}};
     const auto inverse = s.doc.apply(SetOverride{s.instance, s.glyph, patch});
     REQUIRE(inverse.has_value());
     REQUIRE(s.copiedMark().icon.glyph == "close");
@@ -494,7 +494,7 @@ TEST_CASE("cloning keeps icons and clone patches can swap them", "[icons][compon
     Document doc;
     REQUIRE(doc.apply(CreateNode{frame(1)}));
     Node mark = icon(2, 1, "home");
-    mark.fill = Oklch{0.5, 0.1, 100.0, 1.0};
+    mark.fills = std::vector<vc::Paint>{vc::Paint{Oklch{0.5, 0.1, 100.0, 1.0}}};
     REQUIRE(doc.apply(CreateNode{mark}));
     NodePatch swap;
     swap.icon = ref("settings", {{"wght", 200.0}});
@@ -502,7 +502,7 @@ TEST_CASE("cloning keeps icons and clone patches can swap them", "[icons][compon
     REQUIRE(inverse.has_value());
     const Id copy = derivedId(idOf(50), idOf(2));
     REQUIRE(doc.find(copy)->icon.glyph == "settings");
-    REQUIRE(doc.find(copy)->fill == mark.fill);
+    REQUIRE(doc.find(copy)->fills == mark.fills);
     REQUIRE(doc.find(idOf(2))->icon.glyph == "home");
     REQUIRE(doc.apply(*inverse));
     REQUIRE(doc.find(copy) == nullptr);
@@ -528,7 +528,7 @@ TEST_CASE("an icon fill can be a color token", "[icons]") {
     REQUIRE(doc.apply(CreateToken{token}));
     REQUIRE(doc.apply(CreateNode{frame(1)}));
     Node node = icon(2, 1, "home");
-    node.fill = TokenRef{idOf(90)};
+    node.fills = std::vector<vc::Paint>{vc::Paint{TokenRef{idOf(90)}}};
     REQUIRE(doc.apply(CreateNode{node}));
     REQUIRE(registerIconSvg(iconSourceKey(ref("home")), kLeftHalf) == nullptr);
     std::vector<DrawItem> items;

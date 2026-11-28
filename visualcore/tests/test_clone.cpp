@@ -57,7 +57,7 @@ struct Scene {
         REQUIRE(doc.apply(CreateNode{other}));
 
         Node frame = make(kFrame, NodeType::Frame, 0, "a2", "Card");
-        frame.fill = TokenRef{idOf(kToken)};
+        frame.fills = std::vector<vc::Paint>{vc::Paint{TokenRef{idOf(kToken)}}};
         frame.layout.type = LayoutType::Column;
         frame.layout.gap = 8.0;
         frame.prototypeStart = true;
@@ -70,7 +70,7 @@ struct Scene {
         REQUIRE(doc.apply(CreateNode{text}));
 
         Node rect = make(kRect, NodeType::Rect, kFrame, "a1", "Button");
-        rect.fill = TokenRef{idOf(kToken)};
+        rect.fills = std::vector<vc::Paint>{vc::Paint{TokenRef{idOf(kToken)}}};
         rect.interaction = navigate(kFrame);
         REQUIRE(doc.apply(CreateNode{rect}));
 
@@ -133,14 +133,14 @@ TEST_CASE("cloning a frame copies its subtree under derived ids") {
     REQUIRE(root.name == "Card");
     REQUIRE(root.order == "a5");
     REQUIRE(root.parent.isNil());
-    REQUIRE(root.fill == Value<Oklch>{TokenRef{idOf(kToken)}});
+    REQUIRE(root.fills == std::vector<Paint>{Paint{TokenRef{idOf(kToken)}}});
     REQUIRE(root.layout.type == LayoutType::Column);
     REQUIRE(root.layout.gap == Value<double>{8.0});
 
     const auto kids = scene.doc.children(root.id);
     REQUIRE(kids == std::vector<Id>{scene.copyOf(kText), scene.copyOf(kRect), scene.copyOf(kInner), scene.copyOf(kInstance)});
     REQUIRE(scene.doc.find(scene.copyOf(kText))->text.content == "Hello");
-    REQUIRE(scene.doc.find(scene.copyOf(kRect))->fill == Value<Oklch>{TokenRef{idOf(kToken)}});
+    REQUIRE(scene.doc.find(scene.copyOf(kRect))->fills == std::vector<Paint>{Paint{TokenRef{idOf(kToken)}}});
     REQUIRE(scene.doc.find(scene.copyOf(kInnerText))->parent == scene.copyOf(kInner));
     for (const std::uint64_t source : {kText, kRect, kInner, kInnerText, kInstance}) {
         REQUIRE(scene.doc.find(scene.copyOf(source))->order == scene.doc.find(idOf(source))->order);

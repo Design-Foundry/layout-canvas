@@ -318,7 +318,7 @@ void cancelPropsPreview() {
 
 std::string colorToHex(const std::string& color) {
     const auto patch = vc::patchFromJson("{\"fill\":" + color + "}");
-    const auto* oklch = patch && patch->fill ? std::get_if<vc::Oklch>(&*patch->fill) : nullptr;
+    const auto* oklch = patch && patch->fills && !patch->fills->empty() ? std::get_if<vc::Oklch>(&patch->fills->front().source) : nullptr;
     return oklch ? vc::toHex(*oklch) : "";
 }
 

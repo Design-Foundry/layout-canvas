@@ -212,10 +212,10 @@ TEST_CASE("nodes may only reference tokens of the right family") {
     vc::Node node;
     node.id = idOf(50);
     node.w = node.h = 10;
-    node.fill = vc::TokenRef{idOf(2)};
+    node.fills = std::vector<vc::Paint>{vc::Paint{vc::TokenRef{idOf(2)}}};
     REQUIRE_FALSE(doc.apply(vc::CreateNode{node}));
 
-    node.fill = vc::TokenRef{idOf(1)};
+    node.fills = std::vector<vc::Paint>{vc::Paint{vc::TokenRef{idOf(1)}}};
     node.cornerRadius = vc::TokenRef{idOf(2)};
     REQUIRE(doc.apply(vc::CreateNode{node}));
 }

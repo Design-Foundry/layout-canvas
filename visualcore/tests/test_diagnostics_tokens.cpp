@@ -156,7 +156,7 @@ TEST_CASE("a node referencing the wrong token family names the token and the fam
     vc::Node node;
     node.id = idOf(50);
     node.w = node.h = 10;
-    node.fill = vc::TokenRef{idOf(2)};
+    node.fills = std::vector<vc::Paint>{vc::Paint{vc::TokenRef{idOf(2)}}};
 
     vc::clearDiagnostic();
     REQUIRE_FALSE(doc.apply(vc::CreateNode{node}));

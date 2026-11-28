@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 29;
+constexpr int kSnapshotVersion = 30;
 
 bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
@@ -130,6 +130,39 @@ json write(const Value<Oklch>& value) {
     if (const auto* ref = std::get_if<TokenRef>(&value)) return token(*ref);
     const Oklch& c = std::get<Oklch>(value);
     return {{"l", c.l}, {"c", c.c}, {"h", c.h}, {"a", c.a}};
+}
+
+json writeGradientGeometry(const Gradient& g) {
+    json out{{"geometry", nameOf(kGradientKinds, g.geometry)}};
+    if (g.repeating) out["repeating"] = true;
+    if (g.angle) out["angle"] = *g.angle;
+    if (g.shape) out["shape"] = nameOf(kRadialShapes, *g.shape);
+    if (g.extent) out["extent"] = nameOf(kRadialExtents, *g.extent);
+    if (g.centerX) out["center"] = json::array({*g.centerX, *g.centerY});
+    return out;
+}
+
+json writePaint(const Paint& paint) {
+    json out = json::object();
+    if (const auto* color = std::get_if<Oklch>(&paint.source)) {
+        out["color"] = write(Value<Oklch>{*color});
+    } else if (const auto* ref = std::get_if<TokenRef>(&paint.source)) {
+        out["token"] = ref->token.toString();
+    } else {
+        const Gradient& gradient = std::get<Gradient>(paint.source);
+        json g = writeGradientGeometry(gradient);
+        json stops = json::array();
+        for (const GradientStop& stop : gradient.stops) {
+            json item{{"color", write(stop.color)}};
+            if (stop.position) item["position"] = *stop.position;
+            stops.push_back(item);
+        }
+        g["stops"] = stops;
+        out["gradient"] = g;
+    }
+    if (!paint.visible) out["visible"] = false;
+    if (paint.opacity != 1.0) out["opacity"] = paint.opacity;
+    return out;
 }
 
 json write(const Value<double>& value) {
@@ -273,7 +306,17 @@ void writePatch(json& out, const NodePatch& p) {
     if (p.y) out["y"] = *p.y;
     if (p.w) out["w"] = *p.w;
     if (p.h) out["h"] = *p.h;
-    if (p.fill) out["fill"] = write(*p.fill);
+    if (p.fills) {
+        if (p.fills->size() == 1 && p.fills->front().isPlain()) {
+            const PaintSource& source = p.fills->front().source;
+            out["fill"] = std::holds_alternative<Oklch>(source) ? write(Value<Oklch>{std::get<Oklch>(source)})
+                                                                : write(Value<Oklch>{std::get<TokenRef>(source)});
+        } else {
+            json list = json::array();
+            for (const Paint& paint : *p.fills) list.push_back(writePaint(paint));
+            out["fills"] = list;
+        }
+    }
     if (p.fillVisible) out["fillVisible"] = *p.fillVisible;
     if (p.cornerRadius) out["cornerRadius"] = write(*p.cornerRadius);
     if (p.cornerRadii) out["cornerRadii"] = write(*p.cornerRadii);
@@ -639,6 +682,130 @@ bool readNamed(const json& j, const char* key, const std::array<std::pair<E, std
     out = *value;
     return true;
 }
+
+std::optional<Value<Oklch>> readColor(const json& j);
+
+/// Reads `geometry`, `repeating`, `angle`, `shape`, `extent` and `center` into any gradient type, then
+/// refuses geometry that does not fit the kind and fills the defaults.
+template <typename G>
+bool readGradientGeometry(const json& j, G& gradient) {
+    {
+        DiagnosticScope field{"geometry"};
+        if (!j.contains("geometry")) { refused("geometry is required: linear, radial or conic"); return false; }
+    }
+    if (!readNamed(j, "geometry", kGradientKinds, gradient.geometry, "geometry must be linear, radial or conic")) return false;
+    if (j.contains("repeating")) {
+        if (!require(j, "repeating", Shape::Boolean)) return false;
+        gradient.repeating = j["repeating"].get<bool>();
+    }
+    if (j.contains("angle")) {
+        if (!require(j, "angle", Shape::Number)) return false;
+        gradient.angle = j["angle"].get<double>();
+    }
+    if (j.contains("shape")) {
+        RadialShape shape = RadialShape::Ellipse;
+        if (!readNamed(j, "shape", kRadialShapes, shape, "shape must be circle or ellipse")) return false;
+        gradient.shape = shape;
+    }
+    if (j.contains("extent")) {
+        RadialExtent extent = RadialExtent::FarthestCorner;
+        if (!readNamed(j, "extent", kRadialExtents, extent, "extent must be closest-side, closest-corner, farthest-side or farthest-corner")) return false;
+        gradient.extent = extent;
+    }
+    if (j.contains("center")) {
+        DiagnosticScope field{"center"};
+        const json& center = j["center"];
+        if (!center.is_array() || center.size() != 2 || !center[0].is_number() || !center[1].is_number()) {
+            { refused("center must be [x, y]: two numbers, percent of the box"); return false; }
+        }
+        gradient.centerX = center[0].get<double>();
+        gradient.centerY = center[1].get<double>();
+    }
+    if (const char* why = gradientGeometryProblem(gradient)) { refused(why); return false; }
+    normalizeGradientGeometry(gradient);
+    return true;
+}
+
+thread_local int gPaintReads = 0;
+
+/// A paint: `{ "color" | "token" | "gradient", "visible"?, "opacity"? }`. `color` is `{l,c,h,a}` or a
+/// `{token}` for a color token; `token` is a color or gradient token id; `gradient` is a literal.
+std::optional<Paint> readPaint(const json& j) {
+    if (!j.is_object()) return refused("a paint must be an object with color, token or gradient");
+    for (const auto& [key, value] : j.items()) {
+        if (key != "color" && key != "token" && key != "gradient" && key != "visible" && key != "opacity") {
+            DiagnosticScope field{key};
+            return refused("has keys other than color, token, gradient, visible and opacity");
+        }
+    }
+    const int sources = int(j.contains("color")) + int(j.contains("token")) + int(j.contains("gradient"));
+    if (sources != 1) return refused("a paint takes exactly one of color, token and gradient");
+    Paint paint;
+    if (j.contains("color")) {
+        DiagnosticScope field{"color"};
+        const auto color = readColor(j["color"]);
+        if (!color) return std::nullopt;
+        if (const auto* ref = std::get_if<TokenRef>(&*color)) paint.source = *ref;
+        else paint.source = std::get<Oklch>(*color);
+    } else if (j.contains("token")) {
+        DiagnosticScope field{"token"};
+        const auto id = readId(j["token"]);
+        if (!id) return std::nullopt;
+        paint.source = TokenRef{*id};
+    } else {
+        DiagnosticScope field{"gradient"};
+        const json& g = j["gradient"];
+        if (!g.is_object()) return refused("a gradient must be an object with geometry and stops");
+        Gradient gradient;
+        if (!readGradientGeometry(g, gradient)) return std::nullopt;
+        {
+            DiagnosticScope stops{"stops"};
+            if (!g.contains("stops") || !g["stops"].is_array()) return refused("stops is required: an array of stops");
+            for (std::size_t i = 0; i < g["stops"].size(); ++i) {
+                const json& item = g["stops"][i];
+                DiagnosticScope entry{slot(i)};
+                if (!item.is_object()) return refused("must be an object with color and position");
+                GradientStop stop;
+                if (!item.contains("color")) return refused("color is required: {l, c, h, a} or a {token}");
+                {
+                    DiagnosticScope field2{"color"};
+                    const auto color = readColor(item["color"]);
+                    if (!color) return std::nullopt;
+                    stop.color = *color;
+                }
+                if (item.contains("position")) {
+                    if (!require(item, "position", Shape::Number)) return std::nullopt;
+                    stop.position = item["position"].get<double>();
+                }
+                gradient.stops.push_back(std::move(stop));
+            }
+        }
+        paint.source = std::move(gradient);
+    }
+    if (j.contains("visible")) {
+        if (!require(j, "visible", Shape::Boolean)) return std::nullopt;
+        paint.visible = j["visible"].get<bool>();
+    }
+    if (j.contains("opacity")) {
+        if (!require(j, "opacity", Shape::Number)) return std::nullopt;
+        paint.opacity = j["opacity"].get<double>();
+    }
+    ++gPaintReads;
+    return paint;
+}
+
+std::optional<std::vector<Paint>> readPaints(const json& j) {
+    if (!j.is_array()) return refused("fills must be an array of paints");
+    std::vector<Paint> paints;
+    for (std::size_t i = 0; i < j.size(); ++i) {
+        DiagnosticScope entry{slot(i)};
+        auto paint = readPaint(j[i]);
+        if (!paint) return std::nullopt;
+        paints.push_back(std::move(*paint));
+    }
+    return paints;
+}
+
 
 std::optional<double> readNumber(const json& j) {
     if (!j.is_number()) return refused("must be a number");
@@ -1047,9 +1214,19 @@ std::optional<NodePatch> readPatch(const json& j) {
     if (!readField(j, "part", p.part, readString)) return std::nullopt;
     if (p.part && !p.part->empty() && !validKebabName(*p.part)) {DiagnosticScope field{"part"};return refused("part must be lowercase kebab-case starting with a letter, up to 64 characters");}
     const bool fillCleared = j.contains("fill") && j["fill"].is_null();
+    if (j.contains("fill") && j.contains("fills")) {
+        DiagnosticScope field{"fills"};
+        return refused("fill and fills cannot be set together; fills replaces the whole stack");
+    }
+    if (j.contains("fills")) {
+        DiagnosticScope field{"fills"};
+        p.fills = readPaints(j["fills"]);
+        if (!p.fills) return std::nullopt;
+    }
+    std::optional<Value<Oklch>> legacyFill;
     const bool ok = readField(j, "name", p.name, readString) && readField(j, "x", p.x, readNumber) &&
                     readField(j, "y", p.y, readNumber) && readField(j, "w", p.w, readNumber) &&
-                    readField(j, "h", p.h, readNumber) && (fillCleared || readField(j, "fill", p.fill, readColor)) &&
+                    readField(j, "h", p.h, readNumber) && (fillCleared || readField(j, "fill", legacyFill, readColor)) &&
                     readField(j, "fillVisible", p.fillVisible, readBool) &&
                     readField(j, "cornerRadius", p.cornerRadius, readLength) &&
                     readField(j, "cornerRadii", p.cornerRadii, readFour) &&
@@ -1067,6 +1244,10 @@ std::optional<NodePatch> readPatch(const json& j) {
                     readField(j, "type", p.type, readNodeType) &&
                     readField(j, "component", p.component, readId) &&
                     readField(j, "componentValues", p.componentValues, readValues);
+    if (ok && legacyFill) {
+        p.fills = std::vector<Paint>{std::holds_alternative<Oklch>(*legacyFill) ? Paint{std::get<Oklch>(*legacyFill)}
+                                                                                 : Paint{std::get<TokenRef>(*legacyFill)}};
+    }
     if (ok && fillCleared && !p.fillVisible) p.fillVisible = false;
     return ok ? std::optional{p} : std::nullopt;
 }
@@ -1233,7 +1414,7 @@ std::optional<Node> readNode(const json& j) {
     n.id = *id;
     n.type = *type;
     n.order = *order;
-    n.fillVisible = defaultFillVisible(n.type) || (j.contains("fill") && !j["fill"].is_null());
+    n.fillVisible = defaultFillVisible(n.type) || j.contains("fills") || (j.contains("fill") && !j["fill"].is_null());
     if (n.type == NodeType::Icon) n.w = n.h = kDefaultIconSize;
 
     if (j.contains("parent")) {
@@ -1452,40 +1633,7 @@ std::optional<TokenLiteral> readLiteral(TokenType type, const json& j) {
     }
     if (type == TokenType::Gradient) {
         GradientValue gradient;
-        {
-            DiagnosticScope field{"geometry"};
-            if (!j.contains("geometry")) return refused("geometry is required: linear, radial or conic");
-        }
-        if (!readNamed(j, "geometry", kGradientKinds, gradient.geometry, "geometry must be linear, radial or conic")) return std::nullopt;
-        if (j.contains("repeating")) {
-            if (!require(j, "repeating", Shape::Boolean)) return std::nullopt;
-            gradient.repeating = j["repeating"].get<bool>();
-        }
-        if (j.contains("angle")) {
-            if (!require(j, "angle", Shape::Number)) return std::nullopt;
-            gradient.angle = j["angle"].get<double>();
-        }
-        if (j.contains("shape")) {
-            RadialShape shape = RadialShape::Ellipse;
-            if (!readNamed(j, "shape", kRadialShapes, shape, "shape must be circle or ellipse")) return std::nullopt;
-            gradient.shape = shape;
-        }
-        if (j.contains("extent")) {
-            RadialExtent extent = RadialExtent::FarthestCorner;
-            if (!readNamed(j, "extent", kRadialExtents, extent, "extent must be closest-side, closest-corner, farthest-side or farthest-corner")) return std::nullopt;
-            gradient.extent = extent;
-        }
-        if (j.contains("center")) {
-            DiagnosticScope field{"center"};
-            const json& center = j["center"];
-            if (!center.is_array() || center.size() != 2 || !center[0].is_number() || !center[1].is_number()) {
-                return refused("center must be [x, y]: two numbers, percent of the box");
-            }
-            gradient.centerX = center[0].get<double>();
-            gradient.centerY = center[1].get<double>();
-        }
-        if (const char* why = gradientGeometryProblem(gradient)) return refused(why);
-        normalizeGradientGeometry(gradient);
+        if (!readGradientGeometry(j, gradient)) return std::nullopt;
         {
             DiagnosticScope field{"stops"};
             if (!j.contains("stops") || !j["stops"].is_array()) return refused("stops is required: an array of stops");
@@ -1957,8 +2105,20 @@ std::string inspectNodeJson(const Document& document, const Node& source, const 
     else if (source.type == NodeType::Instance) {
         if (const Node* main = document.find(node.component)) out["definition"] = writeDefinition(main->definition);
     }
-    if (const auto* color = std::get_if<Oklch>(&node.fill)) {
-        out["fill"]["hex"] = toHex(*color);
+    // `fill` always mirrors the first solid paint, so the inspector keeps a color to show for a stack.
+    if (!out.contains("fill")) {
+        Value<Oklch> first = Oklch{};
+        for (const Paint& paint : node.fills) {
+            if (const auto* color = std::get_if<Oklch>(&paint.source)) { first = *color; break; }
+            if (const auto* ref = std::get_if<TokenRef>(&paint.source)) {
+                const Token* token = document.findToken(ref->token);
+                if (!token || token->type != TokenType::Gradient) { first = *ref; break; }
+            }
+        }
+        out["fill"] = write(first);
+    }
+    if (const auto* literal = out["fill"].contains("l") ? &out["fill"] : nullptr) {
+        out["fill"]["hex"] = toHex(Oklch{literal->at("l"), literal->at("c"), literal->at("h"), literal->at("a")});
     }
     const Rect box = document.box(node.id, mode);
     out["box"] = {{"x", box.x}, {"y", box.y}, {"w", box.w}, {"h", box.h}};
@@ -2062,6 +2222,7 @@ std::string snapshotToJson(const Document& document) {
     bool notes = false;
     bool cellVisibility = false;
     bool stateRules = false;
+    bool paints = false;
     bool icons = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     for (const Font* font : document.fonts()) fontModel = fontModel || font->id != kInterFontId;
@@ -2079,6 +2240,7 @@ std::string snapshotToJson(const Document& document) {
         namedFlows = namedFlows || !node.prototypeFlowName.empty();
         parts = parts || !node.part.empty();
         notes = notes || !node.notes.empty();
+        paints = paints || !(node.fills.size() == 1 && node.fills.front().isPlain());
         icons = icons || node.type == NodeType::Icon;
         scrolling = scrolling || node.prototypeOverflow!=PrototypeOverflow::None;
         multipleInteractions = multipleInteractions || !node.interactions.empty();
@@ -2089,6 +2251,7 @@ std::string snapshotToJson(const Document& document) {
         fontModel = fontModel || node.type == NodeType::Text;
         textProperties = textProperties || !node.definition.texts.empty();
         const auto styleVersion = [&](const NodePatch& patch) {
+            paints = paints || (patch.fills && !(patch.fills->size() == 1 && patch.fills->front().isPlain()));
             path = path || patch.path.has_value();
             icons = icons || patch.icon.has_value();
             image = image || patch.image || patch.imageFit || patch.imageCrop;
@@ -2116,7 +2279,7 @@ std::string snapshotToJson(const Document& document) {
     fontModel = fontModel || typography;
     bool gradientTokens = false;
     for (const Token* token : document.tokens()) gradientTokens = gradientTokens || token->type == TokenType::Gradient;
-    json out{{"version", stateRules ? 29 : gradientTokens ? 28 : icons ? 27 : notes ? 26 : fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
+    json out{{"version", paints ? 30 : stateRules ? 29 : gradientTokens ? 28 : icons ? 27 : notes ? 26 : fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
     if (fontModel) {
         json fonts = json::array(), stacks = json::array();
         for (const Font* font : document.fonts()) fonts.push_back(writeFont(*font));
@@ -2238,8 +2401,10 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
     for (std::size_t index = 0; index < j["nodes"].size(); ++index) {
         DiagnosticScope entry{slot(index)};
         const int fontReads = gFontModelReads;
+        const int paintReads = gPaintReads;
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
+        if (version < 30 && gPaintReads != paintReads) return refused("fills need snapshot version 30 or later");
         if (version < 25 && gFontModelReads != fontReads) return refused("font stacks, axes and features need snapshot version 25 or later");
         if(version<29 && (!node->definition.states.empty() || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return !r.states.empty();}))) return refused("component states and rule states need snapshot version 29 or later");
         if(version<24 && std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.when.empty() || r.patch.visible.has_value();})) return refused("base rules and rules that set visible need snapshot version 24 or later");

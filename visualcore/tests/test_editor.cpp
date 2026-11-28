@@ -437,16 +437,16 @@ TEST_CASE("a props preview shows live and commits as one op") {
 
     for (double l : {0.2, 0.4, 0.6}) {
         vc::NodePatch patch;
-        patch.fill = vc::Oklch{l, 0.1, 30};
+        patch.fills = std::vector<vc::Paint>{vc::Paint{vc::Oklch{l, 0.1, 30}}};
         REQUIRE(f.editor.previewProps(id, patch));
-        REQUIRE(std::get<vc::Oklch>(f.selected().fill).l == l);
+        REQUIRE(std::get<vc::Oklch>(f.selected().fills.front().source).l == l);
     }
     REQUIRE(f.session.takeOutbox().empty());
 
     REQUIRE(f.editor.commitPropsPreview());
     REQUIRE(f.session.takeOutbox().size() == 1);
     f.editor.undo();
-    REQUIRE(std::get<vc::Oklch>(f.selected().fill).l == 0.89);
+    REQUIRE(std::get<vc::Oklch>(f.selected().fills.front().source).l == 0.89);
 }
 
 TEST_CASE("cancelling a props preview restores the node") {
@@ -482,7 +482,7 @@ TEST_CASE("the structure revision ignores paint and geometry edits") {
     const auto any = f.editor.revision();
 
     vc::NodePatch paint;
-    paint.fill = vc::Oklch{0.5, 0.1, 100};
+    paint.fills = std::vector<vc::Paint>{vc::Paint{vc::Oklch{0.5, 0.1, 100}}};
     paint.x = 3;
     f.editor.setProps(id, paint);
     REQUIRE(f.session.structureRevision() == structure);

@@ -232,9 +232,9 @@ private:
             }
             if (node.type == NodeType::Path) {
                 const auto quad=grow(box,node.lineWidth/2);
-                if (node.fillVisible && (node.lineWidth>0 || node.path.filled) && quad.intersects(visibleArea)) {
-                    const auto fill=document_.resolveColor(node.fill,mode_);
-                    auto color=fill?withAlpha(*fill,alpha):kUnresolvedColor; if(!fill) color.a=float(alpha);
+                const auto solid=firstSolid(node,alpha);
+                if (node.fillVisible && solid && (node.lineWidth>0 || node.path.filled) && quad.intersects(visibleArea)) {
+                    const auto color=*solid;
                     DrawItem item; item.kind=DrawKind::Path;item.quad=quad;item.color=color;item.clip=clip;
                     item.strokeWidth=node.lineWidth;item.points=flattenPath(node,box);item.closed=node.path.closed;item.filled=node.path.filled;
                     out_.push_back(std::move(item));++drawn_;
@@ -247,10 +247,10 @@ private:
             }
             if (node.type == NodeType::Line) {
                 const auto quad=grow(box,node.lineWidth/2);
-                if (node.fillVisible && (node.lineWidth>0 || node.path.filled) && quad.intersects(visibleArea)) {
+                const auto solid=firstSolid(node,alpha);
+                if (node.fillVisible && solid && (node.lineWidth>0 || node.path.filled) && quad.intersects(visibleArea)) {
                     const auto points=lineEndpoints(node,box);
-                    const auto fill=document_.resolveColor(node.fill,mode_);
-                    auto color=fill?withAlpha(*fill,alpha):kUnresolvedColor; if(!fill) color.a=float(alpha);
+                    const auto color=*solid;
                     out_.push_back({DrawKind::Segment,false,quad,{{points[0].x,points[0].y,0,0},{}},{{points[1].x,points[1].y,0,0},{}},color,clip,0,StrokeStyle::Solid,node.lineWidth});
                     ++drawn_;
                 }
@@ -258,13 +258,12 @@ private:
             }
             if (node.type == NodeType::Text) {
                 const auto text = document_.layoutText(node.text, box.w, node.textWrap);
-                const auto fill = document_.resolveColor(node.fill, mode_);
-                Color color = fill ? withAlpha(*fill, alpha) : kUnresolvedColor;
-                if (!fill) color.a = static_cast<float>(alpha);
+                const auto solid = firstSolid(node, alpha);
+                const Color color = solid.value_or(kUnresolvedColor);
                 const auto textClip = intersect(clip, box);
                 bool visible = false;
                 std::uint32_t glyphIndex=0;
-                if (node.fillVisible) for (const auto& glyph : text.glyphs) {
+                if (node.fillVisible && solid) for (const auto& glyph : text.glyphs) {
                     const auto slot=glyphIndex++;
                     const Rect quad = offset(glyph.box, box.x, box.y);
                     if (!quad.intersects(intersect(view_, textClip))) continue;
@@ -294,10 +293,12 @@ private:
                     if (!it->inset) dropShadow(*it, box, radii, ellipse, clip, alpha);
                 }
                 if (node.fillVisible) {
-                    const auto fill = document_.resolveColor(node.fill, mode_);
-                    Color color = fill ? withAlpha(*fill, alpha) : kUnresolvedColor;
-                    if (!fill) color.a = static_cast<float>(alpha);
-                    out_.push_back({DrawKind::Fill, ellipse, box, {box, radii}, {}, color, clip});
+                    for (const Paint& paint : node.fills) {
+                        if (!paint.visible) continue;
+                        if (const auto color = solidPaint(paint, alpha)) {
+                            out_.push_back({DrawKind::Fill, ellipse, box, {box, radii}, {}, *color, clip});
+                        }
+                    }
                 }
                 for (auto it = shadows.rbegin(); it != shadows.rend(); ++it) {
                     if (it->inset) innerShadow(*it, box, radii, ellipse, clip, alpha);
@@ -324,12 +325,41 @@ private:
         }
     }
 
+    /// The color of a solid paint, nullopt for a gradient (gradient paints are not drawn yet). A token that
+    /// can't be resolved draws as the unresolved color, as before.
+    std::optional<Color> solidPaint(const Paint& paint, double alpha) const {
+        Value<Oklch> value = Oklch{};
+        if (const auto* color = std::get_if<Oklch>(&paint.source)) {
+            value = *color;
+        } else if (const auto* ref = std::get_if<TokenRef>(&paint.source)) {
+            const Token* token = document_.findToken(ref->token);
+            if (token && token->type == TokenType::Gradient) return std::nullopt;
+            value = *ref;
+        } else {
+            return std::nullopt;
+        }
+        const auto fill = document_.resolveColor(value, mode_);
+        const double a = alpha * paint.opacity;
+        Color color = fill ? withAlpha(*fill, a) : kUnresolvedColor;
+        if (!fill) color.a = static_cast<float>(a);
+        return color;
+    }
+
+    /// What text, lines, paths and icons draw with: the first visible solid paint of the stack.
+    std::optional<Color> firstSolid(const Node& node, double alpha) const {
+        for (const Paint& paint : node.fills) {
+            if (!paint.visible) continue;
+            if (const auto color = solidPaint(paint, alpha)) return color;
+        }
+        return std::nullopt;
+    }
+
     void drawIcon(const Node& node, const Rect& box, const Rect& visibleArea, const Rect& clip, double alpha) {
-        if (!node.fillVisible || box.w<=0 || box.h<=0 || !box.intersects(visibleArea)) return;
+        const auto solid=firstSolid(node,alpha);
+        if (!node.fillVisible || !solid || box.w<=0 || box.h<=0 || !box.intersects(visibleArea)) return;
         const double side=std::min(box.w,box.h);
         const Rect quad{box.x+(box.w-side)/2,box.y+(box.h-side)/2,side,side};
-        const auto fill=document_.resolveColor(node.fill,mode_);
-        auto color=fill?withAlpha(*fill,alpha):kUnresolvedColor; if(!fill) color.a=float(alpha);
+        const auto color=*solid;
         const auto key=iconSourceKey(node.icon);
         if(iconRegistered(key)) {
             const Rect uv=iconGlyphUv(key,budgetedIconSide(key,iconRasterSide(side*pixelScale_)));

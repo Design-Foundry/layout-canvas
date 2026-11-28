@@ -209,7 +209,7 @@ TEST_CASE("hidden fills, hidden shadows and opacity") {
     parent.type = NodeType::Frame;
     parent.opacity = 0.5;
     Node child = rect(3, 0, 0, 10, 10, 2);
-    child.fill = vc::Oklch{0, 0, 0, 1};
+    child.fills = std::vector<vc::Paint>{vc::Paint{vc::Oklch{0, 0, 0, 1}}};
     child.opacity = 0.5;
     doc.apply(CreateNode{parent});
     doc.apply(CreateNode{child});
@@ -345,7 +345,7 @@ std::vector<DrawItem> screenPaints(const Document& doc,std::uint64_t root) {
 
 TEST_CASE("Cross-screen Smart Animate matches structured names while ignoring root names and geometry") {
     Document source,target;namedScreen(source,1);namedScreen(target,11,500);
-    vc::NodePatch patch;patch.x=80.;patch.w=100.;patch.fill=vc::Oklch{.5,.1,120};
+    vc::NodePatch patch;patch.x=80.;patch.w=100.;patch.fills=std::vector<vc::Paint>{vc::Paint{vc::Oklch{.5,.1,120}}};
     REQUIRE(target.apply(vc::SetProps{idOf(13),patch}).has_value());
     const auto from=screenPaints(source,1),to=screenPaints(target,11);
     REQUIRE_FALSE(vc::interpolateDrawLists(from,to,.5).has_value());

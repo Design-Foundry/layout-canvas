@@ -146,7 +146,7 @@ NodePatch applyPatch(Node& node, const NodePatch& patch) {
     swapIn(inverse.y, patch.y, node.y);
     swapIn(inverse.w, patch.w, node.w);
     swapIn(inverse.h, patch.h, node.h);
-    swapIn(inverse.fill, patch.fill, node.fill);
+    swapIn(inverse.fills, patch.fills, node.fills);
     swapIn(inverse.fillVisible, patch.fillVisible, node.fillVisible);
     swapIn(inverse.cornerRadius, patch.cornerRadius, node.cornerRadius);
     swapIn(inverse.cornerRadii, patch.cornerRadii, node.cornerRadii);
@@ -216,7 +216,7 @@ NodePatch mergePatch(const NodePatch& base, const NodePatch& top) {
     take(out.y, top.y);
     take(out.w, top.w);
     take(out.h, top.h);
-    take(out.fill, top.fill);
+    take(out.fills, top.fills);
     take(out.fillVisible, top.fillVisible);
     take(out.cornerRadius, top.cornerRadius);
     take(out.cornerRadii, top.cornerRadii);
@@ -259,7 +259,7 @@ NodePatch fullPatch(const Node& n) {
     p.y = n.y;
     p.w = n.w;
     p.h = n.h;
-    p.fill = n.fill;
+    p.fills = n.fills;
     p.fillVisible = n.fillVisible;
     p.cornerRadius = n.cornerRadius;
     p.cornerRadii = n.cornerRadii;

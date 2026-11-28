@@ -59,7 +59,7 @@ TEST_CASE("Native line hit testing follows the segment, round cap, clipping and 
 
 TEST_CASE("Line draw list emits a clipped capsule with token color, opacity and zero-length support") {
     Lines f;auto n=f.node();n.h=0;n.lineWidth=10;n.opacity=.5;
-    const auto color=*f.editor.addToken(TokenType::Color);n.fill=TokenRef{color};
+    const auto color=*f.editor.addToken(TokenType::Color);n.fills=std::vector<vc::Paint>{vc::Paint{TokenRef{color}}};
     REQUIRE(f.session.edit(CreateNode{n}));std::vector<DrawItem> items;
     REQUIRE(buildDrawList(f.session.document(),{0,0,200,200},kDefaultModeId,items)==1);REQUIRE(items.size()==1);
     REQUIRE(items[0].kind==DrawKind::Segment);REQUIRE(items[0].quad.h==10);REQUIRE(items[0].a.rect.x==20);REQUIRE(items[0].b.rect.x==120);REQUIRE(items[0].strokeWidth==10);
