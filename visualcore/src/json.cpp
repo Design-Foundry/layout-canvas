@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 28;
+constexpr int kSnapshotVersion = 29;
 
 bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
@@ -115,6 +115,8 @@ constexpr std::array<std::pair<Align, std::string_view>, 4> kAligns{{
     {Align::Start, "start"}, {Align::Center, "center"}, {Align::End, "end"}, {Align::Stretch, "stretch"}}};
 constexpr std::array<std::pair<Sizing, std::string_view>, 3> kSizings{{
     {Sizing::Fixed, "fixed"}, {Sizing::Hug, "hug"}, {Sizing::Fill, "fill"}}};
+constexpr std::array<std::pair<StateKind, std::string_view>, 3> kStateKinds{{
+    {StateKind::Interaction, "interaction"}, {StateKind::Logical, "logical"}, {StateKind::Custom, "custom"}}};
 constexpr std::array<std::string_view, 20> kOpKinds{"CreateNode", "DeleteNode", "SetProps", "MoveNode", "CreateToken", "DeleteToken",
                                                       "ReplaceToken", "CreateMode", "DeleteMode", "ReplaceMode", "SetOverride", "SetComponentDefinition",
                                                       "CreateFont", "DeleteFont", "ReplaceFont", "CreateFontStack", "DeleteFontStack", "ReplaceFontStack",
@@ -301,7 +303,13 @@ json writeDefinition(const ComponentDefinition& definition) {
     for (const auto& a : definition.axes) out["axes"].push_back({{"name", a.name}, {"values", a.values}, {"default", a.defaultValue}});
     for (const auto& r : definition.rules) {
         json patch = json::object(); writePatch(patch, r.patch);
-        out["rules"].push_back({{"when", r.when}, {"target", r.target.toString()}, {"patch", patch}});
+        json rule{{"when", r.when}, {"target", r.target.toString()}, {"patch", patch}};
+        if (!r.states.empty()) rule["states"] = r.states;
+        out["rules"].push_back(std::move(rule));
+    }
+    if (!definition.states.empty()) {
+        out["states"] = json::array();
+        for (const auto& s : definition.states) out["states"].push_back({{"name", s.name}, {"kind", nameOf(kStateKinds, s.kind)}});
     }
     if (!definition.swaps.empty()) {
         out["swaps"] = json::array();
@@ -1072,8 +1080,21 @@ std::optional<ComponentDefinition> readDefinition(const json& j) {
         if (it == j.end()) return refused(std::string{key} + " is required");
         if (!it->is_array() || it->size() > limit) return refused(std::string{key} + " must be an array of at most " + std::to_string(limit) + " entries");
     }
-    if (j.size() != 3 + j.contains("swaps") + j.contains("texts")) return refused("has keys other than properties, axes, rules, texts and swaps");
+    if (j.size() != 3 + j.contains("swaps") + j.contains("texts") + j.contains("states")) return refused("has keys other than properties, axes, rules, texts, swaps and states");
     ComponentDefinition d;
+    if (j.contains("states")) {
+        DiagnosticScope list{"states"};
+        if (!j["states"].is_array() || j["states"].size() > 32) return refused("states must be an array of at most 32 entries");
+        for (std::size_t i = 0; i < j["states"].size(); ++i) {
+            const auto& e = j["states"][i];
+            DiagnosticScope entry{slot(i)};
+            if (!e.is_object() || e.size() != 2) return refused("must be an object with exactly name and kind");
+            if (!require(e, "name", Shape::String) || !require(e, "kind", Shape::String)) return std::nullopt;
+            const auto kind = valueOf(kStateKinds, e["kind"]);
+            if (!kind) {DiagnosticScope field{"kind"};return refused("kind must be interaction, logical or custom");}
+            d.states.push_back({e["name"].get<std::string>(), *kind});
+        }
+    }
     if (j.contains("texts")) {
         DiagnosticScope list{"texts"};
         if (!j["texts"].is_array() || j["texts"].size() > 64) return refused("texts must be an array of at most 64 entries");
@@ -1151,7 +1172,7 @@ std::optional<ComponentDefinition> readDefinition(const json& j) {
         for (std::size_t i = 0; i < j["rules"].size(); ++i) {
             const auto& r = j["rules"][i];
             DiagnosticScope entry{slot(i)};
-            if (!r.is_object() || r.size() != 3) return refused("must be an object with exactly when, target and patch");
+            if (!r.is_object() || r.size() != 3 + r.contains("states")) return refused("must be an object with exactly when, target and patch, and optionally states");
             const auto whenIt = r.find("when");
             std::map<std::string, std::string> when;
             {
@@ -1161,6 +1182,16 @@ std::optional<ComponentDefinition> readDefinition(const json& j) {
                     DiagnosticScope axis{it.key()};
                     if (!it->is_string()) return refused("must be a string");
                     when[it.key()] = it->get<std::string>();
+                }
+            }
+            std::vector<std::string> ruleStates;
+            if (r.contains("states")) {
+                DiagnosticScope field{"states"};
+                if (!r["states"].is_array() || r["states"].size() > 32) return refused("states must be an array of at most 32 strings");
+                for (std::size_t s = 0; s < r["states"].size(); ++s) {
+                    DiagnosticScope stateEntry{slot(s)};
+                    if (!r["states"][s].is_string()) return refused("must be a string");
+                    ruleStates.push_back(r["states"][s].get<std::string>());
                 }
             }
             const auto target = requireId(r, "target"); if (!target) return std::nullopt;
@@ -1177,7 +1208,7 @@ std::optional<ComponentDefinition> readDefinition(const json& j) {
                 }
                 return refused("has keys that are unknown or not written back");
             }
-            d.rules.push_back({when, *target, *patch});
+            d.rules.push_back({when, *target, *patch, std::move(ruleStates)});
         }
     }
     return d;
@@ -2030,6 +2061,7 @@ std::string snapshotToJson(const Document& document) {
     bool parts = false;
     bool notes = false;
     bool cellVisibility = false;
+    bool stateRules = false;
     bool icons = false;
     for (const Token* token : document.tokens()) typography = typography || token->type == TokenType::Typography;
     for (const Font* font : document.fonts()) fontModel = fontModel || font->id != kInterFontId;
@@ -2074,7 +2106,9 @@ std::string snapshotToJson(const Document& document) {
             partialTextStyles = partialTextStyles || (patch.textStyle && !patch.textStyle->complete());
         };
         for (const auto& o : node.overrides) styleVersion(o.patch);
+        stateRules = stateRules || !node.definition.states.empty();
         for (const auto& r : node.definition.rules) {
+            stateRules = stateRules || !r.states.empty();
             styleVersion(r.patch);
             cellVisibility = cellVisibility || r.when.empty() || r.patch.visible.has_value();
         }
@@ -2082,7 +2116,7 @@ std::string snapshotToJson(const Document& document) {
     fontModel = fontModel || typography;
     bool gradientTokens = false;
     for (const Token* token : document.tokens()) gradientTokens = gradientTokens || token->type == TokenType::Gradient;
-    json out{{"version", gradientTokens ? 28 : icons ? 27 : notes ? 26 : fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
+    json out{{"version", stateRules ? 29 : gradientTokens ? 28 : icons ? 27 : notes ? 26 : fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
     if (fontModel) {
         json fonts = json::array(), stacks = json::array();
         for (const Font* font : document.fonts()) fonts.push_back(writeFont(*font));
@@ -2207,6 +2241,7 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
         auto node = readNode(j["nodes"][index]);
         if (!node) return std::nullopt;
         if (version < 25 && gFontModelReads != fontReads) return refused("font stacks, axes and features need snapshot version 25 or later");
+        if(version<29 && (!node->definition.states.empty() || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return !r.states.empty();}))) return refused("component states and rule states need snapshot version 29 or later");
         if(version<24 && std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[](const auto& r){return r.when.empty() || r.patch.visible.has_value();})) return refused("base rules and rules that set visible need snapshot version 24 or later");
         const auto iconPatch=[](const NodePatch& p){return p.icon.has_value();};
         if(version<27 && (node->type==NodeType::Icon || std::any_of(node->overrides.begin(),node->overrides.end(),[&](const auto& o){return iconPatch(o.patch);}) || std::any_of(node->definition.rules.begin(),node->definition.rules.end(),[&](const auto& r){return iconPatch(r.patch);}))) return refused("icon layers need snapshot version 27 or later");

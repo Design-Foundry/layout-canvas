@@ -572,3 +572,33 @@ test('font stacks, axes and features round-trip in snapshot 25 and refuse older 
   instance.overrides = [{ node: text.id, patch: { textStyle: { stack, axes: { wght: 700 } } } }];
   assert.throws(() => readComponent(JSON.stringify(source)), /version 25/);
 });
+
+test('states and rule states round-trip in snapshot 29 portable components and refuse older files', () => {
+  const declared = { name: 'hover', kind: 'interaction' };
+  const cases = [
+    (source) => {
+      source.nodes[0].definition.states = [declared];
+    },
+    (source) => {
+      source.nodes[0].definition.states = [declared, { name: 'busy', kind: 'custom' }];
+      source.nodes[0].definition.rules.push({
+        when: { size: 'large' },
+        target: id(11),
+        patch: { opacity: 0.5 },
+        states: ['hover', 'busy'],
+      });
+    },
+  ];
+  for (const prepare of cases) {
+    const source = variantFixture();
+    source.version = 29;
+    prepare(source);
+    const bundle = exportComponent(source, id(10));
+    assert.equal(bundle.snapshot.version, 29);
+    const read = readComponent(JSON.stringify(bundle));
+    assert.deepEqual(read.snapshot.nodes, bundle.snapshot.nodes);
+    assert.deepEqual(read.snapshot.nodes[0].definition, source.nodes[0].definition);
+    bundle.snapshot.version = 28;
+    assert.throws(() => readComponent(JSON.stringify(bundle)), /version 29/);
+  }
+});

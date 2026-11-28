@@ -234,10 +234,20 @@ struct InstanceSwapProperty {
     friend bool operator==(const InstanceSwapProperty&, const InstanceSwapProperty&) = default;
 };
 
+enum class StateKind { Interaction, Logical, Custom };
+
+/// A runtime condition of a component, such as hover or disabled, that rules can match on.
+struct ComponentState {
+    std::string name;
+    StateKind kind = StateKind::Custom;
+    friend bool operator==(const ComponentState&, const ComponentState&) = default;
+};
+
 struct VariantRule {
     std::map<std::string, std::string> when;
     Id target;
     NodePatch patch;
+    std::vector<std::string> states;
     friend bool operator==(const VariantRule&, const VariantRule&) = default;
 };
 
@@ -253,7 +263,8 @@ struct ComponentDefinition {
         friend bool operator==(const TextProperty&, const TextProperty&) = default;
     };
     std::vector<TextProperty> texts;
-    [[nodiscard]] bool empty() const { return properties.empty() && axes.empty() && rules.empty() && swaps.empty() && texts.empty(); }
+    std::vector<ComponentState> states;
+    [[nodiscard]] bool empty() const { return properties.empty() && axes.empty() && rules.empty() && swaps.empty() && texts.empty() && states.empty(); }
     friend bool operator==(const ComponentDefinition&, const ComponentDefinition&) = default;
 };
 

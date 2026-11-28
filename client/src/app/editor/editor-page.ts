@@ -217,6 +217,120 @@ export class EditorPage {
   }
   protected readonly inlineText = signal<NodeProps | null>(null);
   protected readonly inlineBounds = signal<Rect | null>(null);
+  protected readonly inspectorMode = signal<'design' | 'prototype'>('design');
+  protected readonly inlineZoom = computed(() => {
+    const bounds = this.inlineBounds(),
+      box = this.inlineText()?.box;
+    return bounds && box && box.w > 0 && bounds.w > 0 ? bounds.w / box.w : 1;
+  });
+  protected readonly renaming = signal<{
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    w: number;
+  } | null>(null);
+  protected readonly contextMenu = signal<{
+    x: number;
+    y: number;
+    items: readonly { id: string; label: string }[];
+  } | null>(null);
+  private renameDone = false;
+  protected onCanvasDoubleClick(event: MouseEvent): void {
+    const label = [...document.querySelectorAll<HTMLElement>('.frame-label')].find((el) => {
+      const r = el.getBoundingClientRect();
+      return (
+        event.clientX >= r.left &&
+        event.clientX <= r.right &&
+        event.clientY >= r.top &&
+        event.clientY <= r.bottom
+      );
+    });
+    if (label?.dataset['id']) this.beginRename(label.dataset['id']);
+    else this.beginInlineText();
+  }
+  protected beginRename(id: string): void {
+    if (this.presentation().active || this.inlineText() || this.renaming()) return;
+    const label = this.frameLabels().find((item) => item.id === id);
+    if (!label) return;
+    this.core()?.select(id);
+    this.renameDone = false;
+    this.renaming.set({ id, name: label.name, x: label.x, y: label.y, w: Math.max(label.w, 120) });
+    setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>('.frame-rename');
+      input?.focus();
+      input?.select();
+    });
+  }
+  protected renameKey(event: KeyboardEvent): void {
+    event.stopPropagation();
+    if (event.isComposing) return;
+    if (event.key === 'Enter') (event.target as HTMLInputElement).blur();
+    else if (event.key === 'Escape') {
+      this.renameDone = true;
+      this.renaming.set(null);
+    }
+  }
+  protected commitRename(name: string): void {
+    const rename = this.renaming();
+    if (this.renameDone || !rename) return;
+    this.renameDone = true;
+    this.renaming.set(null);
+    const next = name.trim();
+    if (next && next !== rename.name) this.core()?.setProps(rename.id, { name: next });
+  }
+  protected openContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    const core = this.core();
+    if (!core || this.presentation().active || this.inlineText()) return;
+    const stage = (event.target as HTMLElement).getBoundingClientRect();
+    const x = event.clientX - stage.left,
+      y = event.clientY - stage.top;
+    setTimeout(() => {
+      const selection = core.selection(),
+        node = selection.length === 1 ? core.node(selection[0]) : null;
+      const items: { id: string; label: string }[] = [];
+      if (selection.length > 0) items.push({ id: 'createComponent', label: 'Create component' });
+      if (node?.type === 'component' || node?.type === 'instance')
+        items.push({ id: 'createInstance', label: 'Create instance' });
+      if (node?.type === 'instance') {
+        if (node.component) items.push({ id: 'goToMain', label: 'Go to main component' });
+        if (!node.inInstance) items.push({ id: 'detach', label: 'Detach instance' });
+      }
+      if (node && this.frameLabels().some((label) => label.id === node.id))
+        items.push({ id: 'rename', label: 'Rename' });
+      if (selection.length > 0) items.push({ id: 'delete', label: 'Delete' });
+      this.contextMenu.set(items.length ? { x, y, items } : null);
+    });
+  }
+  protected closeContextMenu(): void {
+    if (this.contextMenu()) this.contextMenu.set(null);
+  }
+  protected runMenuItem(id: string): void {
+    const core = this.core(),
+      node = this.selectedNode();
+    this.contextMenu.set(null);
+    if (!core) return;
+    switch (id) {
+      case 'createComponent':
+        core.createComponent();
+        break;
+      case 'delete':
+        core.deleteSelection();
+        break;
+      case 'rename':
+        if (node) this.beginRename(node.id);
+        break;
+      default:
+        if (node && id === 'createInstance') this.runComponentCommand('createInstance');
+        else if (node && id === 'goToMain') this.runComponentCommand('goToMain');
+        else if (node && id === 'detach') this.runComponentCommand('detach');
+    }
+  }
+  protected endInlineText(): void {
+    this.core()?.cancelPreview();
+    this.inlineText.set(null);
+  }
   protected beginInlineText(): void {
     if (
       this.presentation().active ||
@@ -234,8 +348,10 @@ export class EditorPage {
     core.tool = 'select';
     this.inlineBounds.set(bounds);
     this.inlineText.set(node);
+    core.previewProps(node.id, { opacity: 0 });
   }
   protected readonly saveInlineText = (id: string, text: TextRun): boolean => {
+    this.core()?.cancelPreview();
     const current = this.core()?.node(id),
       original = this.inlineText();
     if (
@@ -244,8 +360,10 @@ export class EditorPage {
       current.textBound ||
       current.locked ||
       current.text.content !== original.text.content
-    )
+    ) {
+      this.core()?.previewProps(id, { opacity: 0 });
       return false;
+    }
     return this.core()?.setProps(id, { text: { ...current.text, content: text.content } }) ?? false;
   };
   protected readonly componentOptions = computed(() => {
@@ -474,6 +592,14 @@ export class EditorPage {
       this.selectedNode()?.type === 'text'
     ) {
       this.beginInlineText();
+    } else if (
+      !command &&
+      !event.altKey &&
+      key === 'f2' &&
+      this.selectedNode() &&
+      this.frameLabels().some((label) => label.id === this.selectedNode()?.id)
+    ) {
+      this.beginRename(this.selectedNode()!.id);
     } else if (command && key === 'z') {
       if (event.shiftKey) core.redo();
       else core.undo();

@@ -59,7 +59,12 @@
 </aside>
 
 <main class="stage" [class.presenting]="presentation().active">
-  <canvas id="canvas" (dblclick)="beginInlineText()"></canvas>
+  <canvas
+    id="canvas"
+    (dblclick)="onCanvasDoubleClick($event)"
+    (contextmenu)="openContextMenu($event)"
+    (pointerdown)="closeContextMenu()"
+  ></canvas>
   @if (!presentation().active && tool() === 'pen') {
     <p
       role="status"
@@ -91,7 +96,7 @@
       (closeOverlay)="closePrototypeOverlay()"
       (exit)="exitPrototype()"
     />
-  } @else if (selectedNode() && !inlineText()) {
+  } @else if (selectedNode() && !inlineText() && inspectorMode() === 'prototype') {
     <app-prototype-connections
       [node]="selectedNode()"
       [source]="connectionSource()"
@@ -106,10 +111,39 @@
     <app-inline-text-editor
       [node]="textNode"
       [save]="saveInlineText"
-      (closed)="inlineText.set(null)"
-      [style.left]="'clamp(0px, ' + (inlineBounds()?.x ?? 0) + 'px, max(0px, calc(100% - 320px)))'"
-      [style.top]="'clamp(0px, ' + (inlineBounds()?.y ?? 0) + 'px, max(0px, calc(100% - 220px)))'"
+      [zoom]="inlineZoom()"
+      (closed)="endInlineText()"
+      [style.left.px]="inlineBounds()?.x ?? 0"
+      [style.top.px]="inlineBounds()?.y ?? 0"
+      [style.min-width.px]="inlineBounds()?.w ?? 0"
+      [style.min-height.px]="inlineBounds()?.h ?? 0"
     />
+  }
+  @if (renaming(); as rename) {
+    <input
+      class="frame-rename typography-caption"
+      aria-label="Frame name"
+      [value]="rename.name"
+      [style.left.px]="rename.x"
+      [style.top.px]="rename.y"
+      [style.width.px]="rename.w"
+      (keydown)="renameKey($event)"
+      (blur)="commitRename($any($event.target).value)"
+    />
+  }
+  @if (contextMenu(); as menu) {
+    <div
+      class="context-menu"
+      role="menu"
+      [style.left.px]="menu.x"
+      [style.top.px]="menu.y"
+      (keydown.escape)="closeContextMenu()"
+      (contextmenu)="$event.preventDefault()"
+    >
+      @for (item of menu.items; track item.id) {
+        <button type="button" role="menuitem" (click)="runMenuItem(item.id)">{{ item.label }}</button>
+      }
+    </div>
   }
   <div class="labels" [hidden]="presentation().active">
     @for (label of frameLabels(); track label.id) {
@@ -152,6 +186,7 @@
     class="inspector"
     [hidden]="presentation().active"
     [node]="selectedNode()"
+    [(mode)]="inspectorMode"
     [exportTargets]="exportTargets()"
     [exportRender]="exportRender"
     [prototypeScreens]="prototypeScreens()"

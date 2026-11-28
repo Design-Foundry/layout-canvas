@@ -565,7 +565,9 @@ export class ComponentPropertiesPanel {
     const sameCell = (cell: Readonly<Record<string, string>>) =>
       Object.keys(cell).length === Object.keys(when).length &&
       Object.entries(when).every(([k, v]) => cell[k] === v);
-    const existing = definition.rules.findIndex((r) => r.target === target && sameCell(r.when));
+    const existing = definition.rules.findIndex(
+      (r) => r.target === target && sameCell(r.when) && !r.states?.length,
+    );
     const rules = [...definition.rules];
     if (existing < 0) rules.push({ target, when, patch });
     else
