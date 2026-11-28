@@ -378,6 +378,8 @@ export interface NodeFields {
   readonly w: number;
   readonly h: number;
   readonly fill: ColorValue;
+  /** The fill stack, bottom paint first. Present when it is not one plain solid color. */
+  readonly fills?: readonly PaintProps[];
   readonly fillVisible: boolean;
   readonly cornerRadius: Length;
   readonly cornerRadii: Four<Length | null>;
@@ -393,6 +395,30 @@ export interface NodeFields {
   readonly limits: SizeLimits;
   readonly absolute: boolean;
 }
+
+export interface GradientStopProps {
+  readonly color: ColorValue;
+  /** 0 to 1. Omitted positions are spread evenly between their neighbors. */
+  readonly position?: number;
+}
+
+export interface GradientProps {
+  readonly geometry: 'linear' | 'radial' | 'conic';
+  readonly repeating?: boolean;
+  readonly angle?: number;
+  readonly shape?: 'circle' | 'ellipse';
+  readonly extent?: 'closest-side' | 'closest-corner' | 'farthest-side' | 'farthest-corner';
+  /** Percent of the box. */
+  readonly center?: readonly [number, number];
+  readonly stops: readonly GradientStopProps[];
+}
+
+/** One layer of a fill stack: a color, a color or gradient token, or a gradient. */
+export type PaintProps = (
+  | { readonly color: ColorValue }
+  | { readonly token: string }
+  | { readonly gradient: GradientProps }
+) & { readonly visible?: boolean; readonly opacity?: number };
 
 /** A node as the inspector sees it: every field, plus its laid-out box and how its parent places it. */
 export interface NodeProps extends Omit<NodeFields, 'fill'> {

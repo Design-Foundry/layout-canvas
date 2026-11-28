@@ -8,6 +8,7 @@
 #include "vc/color.hpp"
 #include "vc/id.hpp"
 #include "vc/node.hpp"
+#include "vc/paint.hpp"
 
 namespace vc {
 
@@ -89,10 +90,6 @@ struct ShadowValue {
     friend bool operator==(const ShadowValue&, const ShadowValue&) = default;
 };
 
-enum class GradientKind { Linear, Radial, Conic };
-enum class RadialShape { Circle, Ellipse };
-enum class RadialExtent { ClosestSide, ClosestCorner, FarthestSide, FarthestCorner };
-
 /// One stop of a gradient token: a color token, optionally modified, at an optional position along the
 /// gradient line (0 to 1). Omitted positions are stored omitted and completed on resolve: the first is
 /// 0, the last 1, the ones between are spread evenly between their known neighbors.
@@ -122,17 +119,7 @@ struct GradientValue {
     friend bool operator==(const GradientValue&, const GradientValue&) = default;
 };
 
-/// Stop positions with the omitted ones completed (first 0, last 1, the rest evenly between known
-/// neighbors). Positions stay as authored otherwise.
-[[nodiscard]] std::vector<double> completeStopPositions(const std::vector<GradientStopValue>& stops);
-/// CSS stop order: a position lower than the one before it is raised to it. Applied when drawing.
-void applyCssStopOrder(std::vector<double>& positions);
-
-/// Why this gradient's geometry is refused, or null. Fields that don't apply to the kind are refused,
-/// not ignored; a center needs both coordinates.
-[[nodiscard]] const char* gradientGeometryProblem(const GradientValue& gradient);
-/// Fills the defaults for the kind: angle 0 (linear, conic), ellipse and farthest-corner, center 50/50.
-void normalizeGradientGeometry(GradientValue& gradient);
+/// Gradient geometry checks and defaults are the templates in `vc/paint.hpp`.
 
 /// A token's own value. Colors are born solid: alpha comes from modifiers.
 using TokenLiteral = std::variant<Oklch, Magnitude, BorderValue, ShadowValue, TextStyle, GradientValue>;

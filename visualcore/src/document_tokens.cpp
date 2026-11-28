@@ -79,6 +79,8 @@ TokenType familyOf(TokenFamilyHint hint) {
         return TokenType::Typography;
     case TokenFamilyHint::Gradient:
         return TokenType::Gradient;
+    case TokenFamilyHint::Paint:
+        return TokenType::Color;
     }
     return TokenType::Color;
 }
@@ -596,15 +598,38 @@ bool Document::isValidPatchRefs(const NodePatch& patch) const {
         if (!valid) return;
         const Token* token = findToken(id);
         if (token && token->type == familyOf(hint)) return;
+        if (token && hint == TokenFamilyHint::Paint && token->type == TokenType::Gradient) return;
         valid = false;
         if (!token) {
             refuse("token " + id.toString() + " does not exist");
+        } else if (hint == TokenFamilyHint::Paint) {
+            refuse("token " + id.toString() + " is a " + familyName(token->type) + ", but a paint takes a color token or a gradient token");
         } else {
             refuse("token " + id.toString() + " is a " + familyName(token->type) + ", but this field takes a " +
                    familyName(familyOf(hint)) + " token");
         }
     });
     if (!valid) return false;
+    if (patch.fills) {
+        const DiagnosticScope field{"fills"};
+        if (patch.fills->empty()) return refuse("fills needs at least one paint; set fillVisible to false to hide the fill");
+        if (patch.fills->size() > kMaxFills) return refuse("fills takes at most " + std::to_string(kMaxFills) + " paints");
+        for (std::size_t i = 0; i < patch.fills->size(); ++i) {
+            const Paint& paint = (*patch.fills)[i];
+            const DiagnosticScope entry{"[" + std::to_string(i) + "]"};
+            if (!std::isfinite(paint.opacity) || paint.opacity < 0.0 || paint.opacity > 1.0) return refuse("a paint opacity must be between 0 and 1");
+            if (const auto* gradient = std::get_if<Gradient>(&paint.source)) {
+                if (const char* why = gradientGeometryProblem(*gradient)) return refuse(why);
+                if (gradient->stops.size() < 2) return refuse("a gradient needs at least two stops");
+                if (gradient->stops.size() > kMaxGradientStops) return refuse("a gradient takes at most " + std::to_string(kMaxGradientStops) + " stops");
+                for (const GradientStop& stop : gradient->stops) {
+                    if (stop.position && (!std::isfinite(*stop.position) || *stop.position < 0.0 || *stop.position > 1.0)) {
+                        return refuse("a stop position must be between 0 and 1");
+                    }
+                }
+            }
+        }
+    }
     if (patch.text)
         if (const auto why = fontUseProblem(patch.text->stack, patch.text->axes, patch.text->features)) return refuse("text: " + *why);
     if (patch.textStyle) {

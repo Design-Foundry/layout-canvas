@@ -602,3 +602,18 @@ test('states and rule states round-trip in snapshot 29 portable components and r
     assert.throws(() => readComponent(JSON.stringify(bundle)), /version 29/);
   }
 });
+
+test('fill stacks round-trip in snapshot 30 portable components and refuse older files', () => {
+  const source = variantFixture();
+  source.version = 30;
+  source.nodes[0].fills = [
+    { color: { l: 0.5, c: 0.1, h: 30, a: 1 } },
+    { gradient: { geometry: 'linear', stops: [{ color: { l: 0.9, c: 0, h: 0, a: 1 } }, { color: { l: 0.2, c: 0, h: 0, a: 1 }, position: 1 }] }, opacity: 0.5 },
+  ];
+  const bundle = exportComponent(source, id(10));
+  assert.equal(bundle.snapshot.version, 30);
+  const read = readComponent(JSON.stringify(bundle));
+  assert.deepEqual(read.snapshot.nodes[0].fills, source.nodes[0].fills);
+  bundle.snapshot.version = 29;
+  assert.throws(() => readComponent(JSON.stringify(bundle)), /version 30/);
+});

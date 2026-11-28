@@ -631,8 +631,8 @@ TEST_CASE("Text with an unresolved fill keeps its paint opacity on the fallback 
         else token.source = {{kDefaultModeId, Id{78,i - 1}}};
         REQUIRE(doc.apply(CreateToken{token}));
     }
-    text.fill = TokenRef{Id{78,70}};
-    REQUIRE_FALSE(doc.resolveColor(text.fill, kDefaultModeId));
+    text.fills = std::vector<vc::Paint>{vc::Paint{TokenRef{Id{78,70}}}};
+    REQUIRE_FALSE(doc.resolveColor(std::get<TokenRef>(text.fills.front().source), kDefaultModeId));
     REQUIRE(doc.apply(CreateNode{text}));
     std::vector<DrawItem> items;
     buildDrawList(doc, {-100,-100,1000,1000}, kDefaultModeId, items);

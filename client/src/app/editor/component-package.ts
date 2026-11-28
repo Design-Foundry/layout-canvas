@@ -46,7 +46,7 @@ function object(value: unknown): value is Record<string, any> {
 function snapshot(value: unknown): asserts value is ComponentSnapshot {
   if (
     !object(value) ||
-    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29].includes(value['version']) ||
+    ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].includes(value['version']) ||
     !Array.isArray(value['nodes']) ||
     !Array.isArray(value['tokens']) ||
     !Array.isArray(value['modes']) ||
@@ -150,6 +150,13 @@ function snapshot(value: unknown): asserts value is ComponentSnapshot {
       )
     )
       throw new Error('Base rules and rules that set visible require Canvas snapshot version 24.');
+    if (
+      value['version'] < 30 &&
+      (node?.fills !== undefined ||
+        (node?.overrides ?? []).some((entry: any) => entry?.patch?.fills !== undefined) ||
+        (node?.definition?.rules ?? []).some((rule: any) => rule?.patch?.fills !== undefined))
+    )
+      throw new Error('Fill stacks require Canvas snapshot version 30.');
     if (
       value['version'] < 29 &&
       (node?.definition?.states !== undefined ||

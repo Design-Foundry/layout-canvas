@@ -10,6 +10,7 @@
 #include <vector>
 #include "vc/color.hpp"
 #include "vc/id.hpp"
+#include "vc/paint.hpp"
 #include "vc/value.hpp"
 
 namespace vc {
@@ -187,7 +188,9 @@ struct NodePatch {
     std::optional<double> y;
     std::optional<double> w;
     std::optional<double> h;
-    std::optional<Value<Oklch>> fill;
+    /// Replaces the whole fill stack, bottom paint first.
+    std::optional<std::vector<Paint>> fills;
+    /// Hides or shows every paint of the stack at once; each paint also has its own `visible`.
     std::optional<bool> fillVisible;
     std::optional<Value<double>> cornerRadius;
     std::optional<std::array<std::optional<Value<double>>, 4>> cornerRadii;
@@ -311,7 +314,9 @@ struct Node {
     double w = 0.0;
     double h = 0.0;
 
-    Value<Oklch> fill = Oklch{};
+    /// The fill stack, bottom paint first. Text, lines and paths take their color from the first
+    /// visible solid paint.
+    std::vector<Paint> fills{Paint{Oklch{}}};
     bool fillVisible = true;
     Value<double> cornerRadius = 0.0;
     /// Per-corner overrides of `cornerRadius`.
@@ -358,7 +363,8 @@ NodePatch applyPatch(Node& node, const NodePatch& patch);
 /// instances (whose children are copies of their component's).
 [[nodiscard]] bool isContainer(NodeType type);
 
-enum class TokenFamilyHint { Color, Dimension, Opacity, Border, Shadow, Typography, Gradient };
+/// `Paint` accepts a color or a gradient token.
+enum class TokenFamilyHint { Color, Dimension, Opacity, Border, Shadow, Typography, Gradient, Paint };
 
 /// Calls `fn(tokenId, expectedFamily)` for every token a patch refers to.
 template <typename Fn>
@@ -370,7 +376,14 @@ void forEachPatchTokenRef(const NodePatch& patch, Fn&& fn) {
     const auto visitColor = [&](const Value<Oklch>& value) { visit(value, TokenFamilyHint::Color); };
     const auto visitLength = [&](const Value<double>& value) { visit(value, TokenFamilyHint::Dimension); };
 
-    if (patch.fill) visitColor(*patch.fill);
+    if (patch.fills) {
+        for (const Paint& paint : *patch.fills) {
+            if (const auto* ref = std::get_if<TokenRef>(&paint.source)) fn(ref->token, TokenFamilyHint::Paint);
+            else if (const auto* gradient = std::get_if<Gradient>(&paint.source)) {
+                for (const GradientStop& stop : gradient->stops) visitColor(stop.color);
+            }
+        }
+    }
     if (patch.cornerRadius) visitLength(*patch.cornerRadius);
     if (patch.cornerRadii) {
         for (const auto& corner : *patch.cornerRadii) {

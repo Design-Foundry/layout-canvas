@@ -115,7 +115,7 @@ test('whole-document round trip preserves icon layers and icon sets in snapshot 
 
 test('native snapshot envelope refuses unsupported versions and missing structural lists', () => {
   for (const snapshot of [
-    { ...fixture(), version: 30 },
+    { ...fixture(), version: 31 },
     { ...fixture(), version: 0 },
     { ...fixture(), version: 21.5 },
     { ...fixture(), nodes: [null] },
