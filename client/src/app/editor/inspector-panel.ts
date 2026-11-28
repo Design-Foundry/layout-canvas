@@ -1,5 +1,5 @@
 import { CdkConnectedOverlay, ConnectedPosition } from '@angular/cdk/overlay';
-import { Component, ElementRef, computed, effect, input, output, signal } from '@angular/core';
+import { Component, ElementRef, computed, effect, input, model, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import {
@@ -145,7 +145,7 @@ function replaceAt<T>(items: Four<T>, index: number, value: T): Four<T> {
 export class InspectorPanel {
   readonly prototypeScreens = input<readonly import('@canvas/bridge').PrototypeScreen[]>([]);
   readonly prototypeStateAxes = input<readonly import('@canvas/bridge').VariantAxis[]>([]);
-  protected readonly mode = signal<'design' | 'prototype'>('design');
+  readonly mode = model<'design' | 'prototype'>('design');
   protected readonly partError = signal('');
   readonly saveLine = input<(id: string, patch: NodePatch) => boolean>(() => false);
   readonly saveStyleBinding = input<(id: string, patch: NodePatch) => boolean>(() => false);

@@ -1,7 +1,7 @@
 import {
   Component,
-  computed,
   ElementRef,
+  computed,
   afterNextRender,
   input,
   output,
@@ -15,84 +15,64 @@ import type { NodeProps, TextRun } from '@canvas/bridge';
   selector: 'app-inline-text-editor',
   imports: [FormsModule],
   template: `
-    <section aria-label="Edit text on canvas" (keydown)="key($event)">
-      <label
-        >Text
-        <textarea
-          #field
-          aria-label="Canvas text content"
-          wrap="off"
-          rows="3"
-          [readOnly]="node().textBound"
-          [style.font-weight]="weight()"
-          [style.font-variation-settings]="variations()"
-          [style.font-feature-settings]="features()"
-          [ngModel]="draft()"
-          (ngModelChange)="draft.set($event)"
-          (blur)="commit()"
-        ></textarea>
-      </label>
-      @if (node().textBound) {
-        <p>
-          Content is controlled by a declared property. Edit it on the owning component or instance
-          in the inspector.
-        </p>
-      } @else {
-        <p>Enter: new line · Ctrl/⌘+Enter: save · Escape: cancel</p>
-        <button type="button" (mousedown)="$event.preventDefault()" (click)="commit()">
-          Save text
-        </button>
-      }
-      <button type="button" (mousedown)="$event.preventDefault()" (click)="cancel()">Cancel</button>
-      @if (error()) {
-        <p role="alert">{{ error() }}</p>
-      }
-    </section>
+    <textarea
+      #field
+      aria-label="Canvas text content"
+      wrap="off"
+      rows="1"
+      [readOnly]="node().textBound"
+      [style.font-size.px]="(node().text?.fontSize ?? 16) * zoom()"
+      [style.line-height]="node().text?.lineHeight ?? 1.4"
+      [style.letter-spacing.px]="(node().text?.letterSpacing ?? 0) * zoom()"
+      [style.text-align]="node().text?.align ?? 'left'"
+      [style.color]="color()"
+      [style.font-weight]="weight()"
+      [style.font-variation-settings]="variations()"
+      [style.font-feature-settings]="features()"
+      [ngModel]="draft()"
+      (ngModelChange)="draft.set($event)"
+      (keydown)="key($event)"
+      (blur)="commit()"
+    ></textarea>
+    @if (node().textBound) {
+      <p class="note">Content is controlled by a declared property. Edit it in the inspector.</p>
+    }
+    @if (error()) {
+      <p class="note" role="alert">{{ error() }}</p>
+    }
   `,
   styles: `
     :host {
       position: absolute;
       z-index: 5;
-      width: min(320px, 100%);
-      max-width: 100%;
-    }
-    section {
-      padding: 10px;
-      border: 1px solid #8d67e8;
-      border-radius: 6px;
-      background: var(--color--semantic--surface-default, #202020);
-      color: var(--color--semantic--text-default, #fff);
-      box-shadow: 0 4px 20px #0005;
-    }
-    label {
-      display: grid;
-      gap: 6px;
-      font-size: 12px;
+      display: block;
     }
     textarea {
-      font:
-        20px/1.4 CanvasInter,
-        sans-serif;
-      color: inherit;
+      display: block;
+      field-sizing: content;
+      min-width: 100%;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      outline: 1px solid #8d67e8;
+      outline-offset: 2px;
       background: transparent;
-      width: 100%;
-      box-sizing: border-box;
-      resize: vertical;
-      border: 1px solid #777;
-      border-radius: 4px;
+      resize: none;
+      overflow: hidden;
+      font-family: CanvasInter, sans-serif;
     }
-    p {
+    .note {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin: 8px 0 0;
+      padding: 4px 8px;
+      width: max-content;
+      max-width: 280px;
+      border-radius: 4px;
       font-size: 12px;
-      margin: 8px 0;
-    }
-    button {
-      color: inherit;
-      background: transparent;
-      border: 1px solid #777;
-      border-radius: 4px;
-      padding: 5px 9px;
-      margin-right: 8px;
-      cursor: pointer;
+      background: var(--color--semantic--surface-default, #202020);
+      color: var(--color--semantic--text-default, #fff);
     }
     [role='alert'] {
       color: #ffbd83;
@@ -101,6 +81,9 @@ import type { NodeProps, TextRun } from '@canvas/bridge';
 })
 export class InlineTextEditor {
   readonly node = input.required<NodeProps>();
+  readonly save = input.required<(id: string, text: TextRun) => boolean>();
+  readonly zoom = input(1);
+  readonly closed = output<void>();
   readonly weight = computed(() => this.node().text?.axes?.['wght'] ?? 400);
   readonly variations = computed(
     () => `'wght' ${this.weight()}, 'slnt' ${this.node().text?.axes?.['slnt'] ?? 0}`,
@@ -111,8 +94,10 @@ export class InlineTextEditor {
         .map(([tag, value]) => `'${tag}' ${value === true ? 1 : value === false ? 0 : value}`)
         .join(', ') || null,
   );
-  readonly save = input.required<(id: string, text: TextRun) => boolean>();
-  readonly closed = output<void>();
+  protected readonly color = computed(() => {
+    const fill = this.node().fill as { hex?: string } | undefined;
+    return fill?.hex ?? 'inherit';
+  });
   protected readonly draft = signal('');
   protected readonly error = signal('');
   private readonly field = viewChild<ElementRef<HTMLTextAreaElement>>('field');

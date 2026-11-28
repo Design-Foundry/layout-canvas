@@ -643,6 +643,12 @@ void Editor::pointerDown(Vec2 screen, PointerButton button, Modifiers modifiers)
     if (button == PointerButton::Middle || (button == PointerButton::Primary && tool_ == Tool::Hand)) {
         gesture_ = Gesture::Pan;
         viewport_.pointerDown(screen);
+    } else if (button == PointerButton::Secondary) {
+        if (tool_ != Tool::Select) return;
+        Id target = frameLabelAt(screen);
+        if (target.isNil()) target = pickAt(hitTest(session_.document(), downWorld_, false, activeMode_, 4 / camera_.zoom()));
+        if (target.isNil()) clearSelection();
+        else if (!isSelected(target)) select(target);
     } else if (button != PointerButton::Primary) {
         return;
     } else if (tool_ == Tool::Pen) {
