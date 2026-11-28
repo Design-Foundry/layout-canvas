@@ -387,3 +387,99 @@ TEST_CASE("rule patches carry visible and an empty cell on the wire") {
     const vc::OpBody op = vc::SetComponentDefinition{*Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000201"), definition};
     REQUIRE(*vc::opFromJson(vc::opKind(op), vc::opToJson(op)) == op);
 }
+
+namespace {
+struct StateDocument {
+    Id mainId = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000301");
+    Id labelId = *Id::parse("0192a4b1-7c3d-4e5f-8a6b-000000000302");
+    std::unique_ptr<vc::Document> build(const vc::ComponentDefinition& definition) const {
+        auto doc = std::make_unique<vc::Document>();
+        Node main;
+        main.id = mainId;
+        main.type = vc::NodeType::Component;
+        main.order = "a0";
+        Node label;
+        label.id = labelId;
+        label.parent = mainId;
+        label.order = "a0";
+        REQUIRE(doc->apply(CreateNode{main}));
+        REQUIRE(doc->apply(CreateNode{label}));
+        REQUIRE(doc->apply(vc::SetComponentDefinition{mainId, definition}));
+        return doc;
+    }
+};
+}
+
+TEST_CASE("component states and state rules need snapshot version 29") {
+    const StateDocument fixture;
+    vc::NodePatch faded;
+    faded.opacity = 0.5;
+    vc::ComponentDefinition declared;
+    declared.states = {{"hover", vc::StateKind::Interaction}, {"disabled", vc::StateKind::Logical}, {"busy", vc::StateKind::Custom}};
+    auto ruled = declared;
+    ruled.axes.push_back({"size", {"small", "large"}, "small"});
+    ruled.rules.push_back({{{"size", "large"}}, fixture.labelId, faded, {"hover", "busy"}});
+    auto plain = ruled;
+    plain.states.clear();
+    plain.rules[0].states.clear();
+    REQUIRE(vc::snapshotToJson(*fixture.build(plain)).find("\"version\":3}") != std::string::npos);
+
+    for (const auto& definition : {declared, ruled}) {
+        const auto doc = fixture.build(definition);
+        const std::string json = vc::snapshotToJson(*doc);
+        REQUIRE(json.find("\"version\":29") != std::string::npos);
+        REQUIRE(json.find("\"states\"") != std::string::npos);
+        const auto ops = vc::snapshotFromJson(json);
+        REQUIRE(ops.has_value());
+        vc::Document loaded;
+        for (const OpBody& op : *ops) REQUIRE(loaded.apply(op));
+        REQUIRE(loaded.find(fixture.mainId)->definition == definition);
+        REQUIRE(vc::snapshotToJson(loaded) == json);
+
+        auto old = json;
+        old.replace(old.find("\"version\":29"), 12, "\"version\":28");
+        REQUIRE_FALSE(vc::snapshotFromJson(old).has_value());
+    }
+}
+
+TEST_CASE("a rule with states and a definition with states keep their keys on the wire") {
+    const StateDocument fixture;
+    vc::NodePatch faded;
+    faded.opacity = 0.5;
+    vc::ComponentDefinition definition;
+    definition.states = {{"focus-visible", vc::StateKind::Interaction}};
+    definition.rules.push_back({{}, fixture.labelId, faded, {"focus-visible"}});
+    const vc::OpBody op = vc::SetComponentDefinition{fixture.mainId, definition};
+    REQUIRE(*vc::opFromJson(vc::opKind(op), vc::opToJson(op)) == op);
+    const std::string json = vc::opToJson(op);
+    REQUIRE(json.find(R"("states":[{"kind":"interaction","name":"focus-visible"}])") != std::string::npos);
+    REQUIRE(json.find(R"("states":["focus-visible"])") != std::string::npos);
+
+    vc::ComponentDefinition without;
+    without.rules.push_back({{}, fixture.labelId, faded});
+    REQUIRE(vc::opToJson(vc::SetComponentDefinition{fixture.mainId, without}).find("states") == std::string::npos);
+}
+
+TEST_CASE("definition and rule readers keep strict keys with states") {
+    const std::string id = "0192a4b1-7c3d-4e5f-8a6b-000000000302";
+    const auto read = [&](const std::string&, const std::string& ruleExtra) {
+        return vc::componentDefinitionFromJson(R"({"properties":[],"axes":[],"rules":[{"when":{},"target":")" + id + R"(","patch":{"opacity":0.5})" + ruleExtra + R"(}]})");
+    };
+    const auto withStates = [&](const std::string& states, const std::string& ruleExtra) {
+        return vc::componentDefinitionFromJson(R"({"properties":[],"axes":[],"rules":[{"when":{},"target":")" + id + R"(","patch":{"opacity":0.5})" + ruleExtra + R"(}],"states":)" + states + "}");
+    };
+    REQUIRE(read("", "").has_value());
+    REQUIRE(withStates(R"([{"name":"hover","kind":"interaction"}])", R"(,"states":["hover"])").has_value());
+    REQUIRE_FALSE(read("", R"(,"extra":1)").has_value());
+    REQUIRE_FALSE(read("", R"(,"state":["hover"])").has_value());
+    REQUIRE_FALSE(withStates("[]", R"(,"states":"hover")").has_value());
+    REQUIRE_FALSE(withStates("[]", R"(,"states":[1])").has_value());
+    REQUIRE_FALSE(withStates("[]", R"(,"states":["hover"],"extra":1)").has_value());
+    REQUIRE_FALSE(withStates(R"([{"name":"hover","kind":"pointer"}])", "").has_value());
+    REQUIRE_FALSE(withStates(R"([{"name":"hover"}])", "").has_value());
+    REQUIRE_FALSE(withStates(R"([{"name":"hover","kind":"custom","extra":1}])", "").has_value());
+    REQUIRE_FALSE(withStates(R"({"hover":"custom"})", "").has_value());
+    std::string many = "[";
+    for (int i = 0; i < 33; ++i) many += std::string{i ? "," : ""} + R"({"name":"s","kind":"custom"})";
+    REQUIRE_FALSE(withStates(many + "]", "").has_value());
+}

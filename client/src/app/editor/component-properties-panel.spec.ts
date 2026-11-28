@@ -273,6 +273,95 @@ describe('declared component properties', () => {
     panel.addRule();
     expect(saves).toHaveLength(count);
   });
+  it('keeps declared states and rule states through every definition edit', async () => {
+    const { fixture, saves } = await setup('component');
+    const states = [
+      { name: 'hover', kind: 'interaction' as const },
+      { name: 'busy', kind: 'custom' as const },
+    ];
+    const original: ComponentDefinition = {
+      ...definition,
+      states,
+      rules: [
+        { target: 'icon', when: {}, patch: { opacity: 0.5 }, states: ['hover'] },
+        { target: 'icon', when: { size: 'large' }, patch: { w: 20 }, states: ['hover', 'busy'] },
+        { target: 'icon', when: { size: 'large' }, patch: { w: 30 } },
+      ],
+    };
+    fixture.componentRef.setInput('node', {
+      id: 'main',
+      type: 'component',
+      definition: original,
+    } as unknown as NodeProps);
+    await fixture.whenStable();
+    const panel = fixture.componentInstance as any;
+    const control = { control: { setValue: () => undefined } };
+    const stateRules = () => saves.at(-1)?.rules.map((rule) => rule.states);
+    const expected = [['hover'], ['hover', 'busy'], undefined];
+
+    panel.ruleFieldChanged(0, 'opacity', '0.7', control);
+    expect(saves.at(-1)?.rules[0].patch).toEqual({ opacity: 0.7 });
+    expect(saves.at(-1)?.states).toEqual(states);
+    expect(stateRules()).toEqual(expected);
+
+    panel.ruleFieldChanged(1, 'w', '25', control);
+    expect(saves.at(-1)?.rules[1].patch).toEqual({ w: 25 });
+    expect(stateRules()).toEqual(expected);
+
+    panel.removeRuleField(2, 'w');
+    expect(saves.at(-1)?.rules.map((rule) => rule.states)).toEqual([['hover'], ['hover', 'busy']]);
+    expect(saves.at(-1)?.states).toEqual(states);
+
+    panel.axisName = 'density';
+    panel.axisChoices = 'tight, loose';
+    panel.addAxis();
+    expect(saves.at(-1)?.states).toEqual(states);
+    expect(saves.at(-1)?.rules.map((rule) => rule.states)).toEqual([['hover'], ['hover', 'busy']]);
+
+    panel.propertyDefaultChanged('show-icon', false);
+    expect(saves.at(-1)?.states).toEqual(states);
+
+    panel.removeAxis('tone');
+    expect(saves.at(-1)?.states).toEqual(states);
+    expect(saves.at(-1)?.rules.map((rule) => rule.states)).toEqual([['hover'], ['hover', 'busy']]);
+
+    panel.removeAxis('size');
+    expect(saves.at(-1)?.rules.map((rule) => rule.states)).toEqual([['hover']]);
+    expect(saves.at(-1)?.states).toEqual(states);
+
+    panel.removeRule(0);
+    expect(saves.at(-1)?.states).toEqual(states);
+    expect(original.rules).toHaveLength(3);
+  });
+  it('adds a stateless rule beside a state rule with the same cell without merging them', async () => {
+    const { fixture, saves } = await setup('component');
+    fixture.componentRef.setInput('node', {
+      id: 'main',
+      type: 'component',
+      definition: {
+        ...definition,
+        states: [{ name: 'hover', kind: 'interaction' }],
+        rules: [{ target: 'icon', when: {}, patch: { opacity: 0.5 }, states: ['hover'] }],
+      },
+    } as unknown as NodeProps);
+    await fixture.whenStable();
+    const panel = fixture.componentInstance as any;
+    panel.ruleTarget = 'icon';
+    panel.cell = {};
+    panel.ruleField = 'opacity';
+    panel.ruleValue = '0.8';
+    panel.addRule();
+    expect(saves.at(-1)?.rules).toEqual([
+      { target: 'icon', when: {}, patch: { opacity: 0.5 }, states: ['hover'] },
+      { target: 'icon', when: {}, patch: { opacity: 0.8 } },
+    ]);
+    panel.ruleValue = '0.9';
+    panel.addRule();
+    expect(saves.at(-1)?.rules).toEqual([
+      { target: 'icon', when: {}, patch: { opacity: 0.5 }, states: ['hover'] },
+      { target: 'icon', when: {}, patch: { opacity: 0.9 } },
+    ]);
+  });
   it('refuses text fields on non-text anatomy and invalid metrics before saving', async () => {
     const { fixture, saves } = await setup('component');
     fixture.componentRef.setInput('snapshot', () => ({

@@ -27,7 +27,7 @@ function validateSnapshot(value: unknown): asserts value is DocumentSnapshot {
     !object(value) ||
     !Number.isInteger(value['version']) ||
     (value['version'] as number) < 1 ||
-    (value['version'] as number) > 27 ||
+    (value['version'] as number) > 29 ||
     Object.keys(value).some((key) => !['version', 'nodes', 'modes', 'tokens', 'fonts', 'fontStacks', 'iconSets'].includes(key)) ||
     !Array.isArray(value['nodes']) ||
     value['nodes'].length > 10000 ||

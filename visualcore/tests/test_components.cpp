@@ -1349,3 +1349,250 @@ TEST_CASE("rules still refuse other identity fields and undeclared axes after al
     invalid.rules = {{{}, f.badge, f.shown(false)}};
     REQUIRE(f.editor.setComponentDefinition(f.component, invalid));
 }
+
+namespace {
+struct StateFixture : CellFixture {
+    StateFixture() {
+        definition.states = {{"hover", vc::StateKind::Interaction}, {"disabled", vc::StateKind::Logical}, {"selected", vc::StateKind::Custom}};
+    }
+    static vc::VariantRule rule(std::map<std::string, std::string> when, std::vector<std::string> states, const Id& target, const vc::NodePatch& patch) {
+        return {std::move(when), target, patch, std::move(states)};
+    }
+    std::shared_ptr<vc::Document> detached() const { return session.document().detachedCopy(); }
+    static Id copyIn(const vc::Document& document, const Id& instance, const Id& source) {
+        for (const Id& key : document.viewChildren(instance))
+            if (document.sourceOf(key) == source) return key;
+        return {};
+    }
+    static vc::Value<double> radiusOf(const vc::Document& document, const Id& key) { return document.view(key)->cornerRadius; }
+};
+}
+
+TEST_CASE("component states are validated like other declarations") {
+    StateFixture f;
+    const auto refused = [&](const std::vector<vc::ComponentState>& states) {
+        auto invalid = f.definition;
+        invalid.states = states;
+        return !f.editor.setComponentDefinition(f.component, invalid);
+    };
+    REQUIRE(f.editor.setComponentDefinition(f.component, f.definition));
+    REQUIRE(refused({{"Hover", vc::StateKind::Custom}}));
+    REQUIRE(refused({{"two words", vc::StateKind::Custom}}));
+    REQUIRE(refused({{"", vc::StateKind::Custom}}));
+    REQUIRE(refused({{"busy", vc::StateKind::Custom}, {"busy", vc::StateKind::Logical}}));
+    REQUIRE(refused({{"pressed", vc::StateKind::Interaction}}));
+    REQUIRE(refused({{"selected", vc::StateKind::Interaction}}));
+    REQUIRE(refused({{"hover", static_cast<vc::StateKind>(7)}}));
+    for (const auto* name : {"hover", "active", "focus", "focus-visible"})
+        REQUIRE_FALSE(refused({{name, vc::StateKind::Interaction}}));
+    REQUIRE_FALSE(refused({{"hover", vc::StateKind::Custom}}));
+    REQUIRE_FALSE(refused({{"size", vc::StateKind::Custom}}));
+    std::vector<vc::ComponentState> many;
+    for (int i = 0; i < 32; ++i) many.push_back({"state-" + std::string(1, static_cast<char>('a' + i / 26)) + std::string(1, static_cast<char>('a' + i % 26)), vc::StateKind::Custom});
+    REQUIRE_FALSE(refused(many));
+    many.push_back({"one-more", vc::StateKind::Custom});
+    REQUIRE(refused(many));
+}
+
+TEST_CASE("a rule lists declared states once") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({}, {"hover"}, f.badge, f.radius(3))};
+    REQUIRE(f.editor.setComponentDefinition(f.component, f.definition));
+    f.definition.rules = {StateFixture::rule({{"size", "large"}}, {"hover", "selected"}, f.badge, f.radius(3))};
+    REQUIRE(f.editor.setComponentDefinition(f.component, f.definition));
+    f.definition.rules = {StateFixture::rule({}, {"pressed"}, f.badge, f.radius(3))};
+    REQUIRE_FALSE(f.editor.setComponentDefinition(f.component, f.definition));
+    f.definition.rules = {StateFixture::rule({}, {"hover", "hover"}, f.badge, f.radius(3))};
+    REQUIRE_FALSE(f.editor.setComponentDefinition(f.component, f.definition));
+    f.definition.rules = {StateFixture::rule({}, {"size"}, f.badge, f.radius(3))};
+    REQUIRE_FALSE(f.editor.setComponentDefinition(f.component, f.definition));
+}
+
+TEST_CASE("state rules never apply while authoring") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({}, {"hover"}, f.badge, f.radius(9)), StateFixture::rule({{"size", "large"}}, {"hover", "disabled"}, f.badge, f.shown(false))};
+    f.install();
+    const Id large = f.instanceIn("large");
+    REQUIRE(f.view(f.badge).cornerRadius == vc::Value<double>{0.0});
+    REQUIRE(f.view(f.badge).visible);
+    REQUIRE(f.view(f.copyOf(large, f.badge)).cornerRadius == vc::Value<double>{0.0});
+    REQUIRE(f.view(f.copyOf(large, f.badge)).visible);
+    REQUIRE(f.view(f.copyOf(large, f.badge)).cornerRadius == vc::Value<double>{0.0});
+}
+
+TEST_CASE("an active state applies its rules only to that occurrence of the detached copy") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({}, {"hover"}, f.badge, f.radius(9))};
+    f.install();
+    const Id first = f.instanceIn("small"), second = f.instanceIn("small");
+    auto copy = f.detached();
+    const Id firstBadge = StateFixture::copyIn(*copy, first, f.badge), secondBadge = StateFixture::copyIn(*copy, second, f.badge);
+    REQUIRE(StateFixture::radiusOf(*copy, firstBadge) == vc::Value<double>{0.0});
+    REQUIRE(copy->setActiveStates(first, {"hover"}));
+    REQUIRE(StateFixture::radiusOf(*copy, firstBadge) == vc::Value<double>{9.0});
+    REQUIRE(StateFixture::radiusOf(*copy, secondBadge) == vc::Value<double>{0.0});
+    REQUIRE_FALSE(copy->setActiveStates(first, {"hover"}));
+    REQUIRE(copy->setActiveStates(second, {"hover"}));
+    REQUIRE(StateFixture::radiusOf(*copy, secondBadge) == vc::Value<double>{9.0});
+    REQUIRE(copy->setActiveStates(first, {}));
+    REQUIRE(StateFixture::radiusOf(*copy, firstBadge) == vc::Value<double>{0.0});
+    REQUIRE(StateFixture::radiusOf(*copy, secondBadge) == vc::Value<double>{9.0});
+    REQUIRE(f.view(f.copyOf(second, f.badge)).cornerRadius == vc::Value<double>{0.0});
+}
+
+TEST_CASE("every listed state must be active and the axis cell must match") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({{"size", "large"}}, {"hover", "selected"}, f.badge, f.radius(9))};
+    f.install();
+    const Id large = f.instanceIn("large"), small = f.instanceIn("small");
+    auto copy = f.detached();
+    const Id largeBadge = StateFixture::copyIn(*copy, large, f.badge), smallBadge = StateFixture::copyIn(*copy, small, f.badge);
+    REQUIRE(copy->setActiveStates(large, {"hover"}));
+    REQUIRE(StateFixture::radiusOf(*copy, largeBadge) == vc::Value<double>{0.0});
+    REQUIRE(copy->setActiveStates(large, {"hover", "selected"}));
+    REQUIRE(StateFixture::radiusOf(*copy, largeBadge) == vc::Value<double>{9.0});
+    REQUIRE(copy->setActiveStates(small, {"hover", "selected"}));
+    REQUIRE(StateFixture::radiusOf(*copy, smallBadge) == vc::Value<double>{0.0});
+}
+
+TEST_CASE("a state rule overrides a more specific non-state rule on the same field") {
+    StateFixture f;
+    f.definition.axes.push_back({"tone", {"neutral", "danger"}, "neutral"});
+    f.definition.rules = {StateFixture::rule({{"size", "large"}, {"tone", "danger"}}, {}, f.badge, f.radius(12)),
+                          StateFixture::rule({}, {"hover"}, f.badge, f.radius(2))};
+    f.install();
+    const Id instance = f.instanceIn("large");
+    vc::NodePatch values;
+    values.componentValues = vc::ComponentValues{{"size", std::string{"large"}}, {"tone", std::string{"danger"}}};
+    REQUIRE(f.editor.setProps(instance, values));
+    auto copy = f.detached();
+    const Id badge = StateFixture::copyIn(*copy, instance, f.badge);
+    REQUIRE(StateFixture::radiusOf(*copy, badge) == vc::Value<double>{12.0});
+    REQUIRE(copy->setActiveStates(instance, {"hover"}));
+    REQUIRE(StateFixture::radiusOf(*copy, badge) == vc::Value<double>{2.0});
+}
+
+TEST_CASE("state rules order by cell size, then state count, then declaration") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({{"size", "large"}}, {"hover"}, f.badge, f.radius(5)),
+                          StateFixture::rule({}, {"hover", "selected"}, f.badge, f.radius(7)),
+                          StateFixture::rule({}, {"hover"}, f.badge, f.radius(3)),
+                          StateFixture::rule({}, {"hover"}, f.badge, f.radius(4))};
+    f.install();
+    const Id large = f.instanceIn("large"), small = f.instanceIn("small");
+    auto copy = f.detached();
+    const Id largeBadge = StateFixture::copyIn(*copy, large, f.badge), smallBadge = StateFixture::copyIn(*copy, small, f.badge);
+    REQUIRE(copy->setActiveStates(small, {"hover"}));
+    REQUIRE(StateFixture::radiusOf(*copy, smallBadge) == vc::Value<double>{4.0});
+    REQUIRE(copy->setActiveStates(small, {"hover", "selected"}));
+    REQUIRE(StateFixture::radiusOf(*copy, smallBadge) == vc::Value<double>{7.0});
+    REQUIRE(copy->setActiveStates(large, {"hover", "selected"}));
+    REQUIRE(StateFixture::radiusOf(*copy, largeBadge) == vc::Value<double>{5.0});
+}
+
+TEST_CASE("a state rule can hide a layer and an instance override still wins") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({}, {"disabled"}, f.badge, f.shown(false)), StateFixture::rule({}, {"hover"}, f.badge, f.radius(6))};
+    f.install();
+    const Id hidden = f.instanceIn("small"), overridden = f.instanceIn("small");
+    vc::NodePatch keep; keep.visible = true; keep.cornerRadius = 1.0;
+    REQUIRE(f.editor.setProps(f.copyOf(overridden, f.badge), keep));
+    auto copy = f.detached();
+    REQUIRE(copy->setActiveStates(hidden, {"disabled", "hover"}));
+    REQUIRE(copy->setActiveStates(overridden, {"disabled", "hover"}));
+    REQUIRE_FALSE(copy->view(StateFixture::copyIn(*copy, hidden, f.badge))->visible);
+    REQUIRE(StateFixture::radiusOf(*copy, StateFixture::copyIn(*copy, hidden, f.badge)) == vc::Value<double>{6.0});
+    REQUIRE(copy->view(StateFixture::copyIn(*copy, overridden, f.badge))->visible);
+    REQUIRE(StateFixture::radiusOf(*copy, StateFixture::copyIn(*copy, overridden, f.badge)) == vc::Value<double>{1.0});
+}
+
+TEST_CASE("a nested instance occurrence takes its own active states") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({}, {"hover"}, f.badge, f.radius(9))};
+    f.install();
+    Node outer; outer.id = f.session.newId(); outer.type = NodeType::Component; outer.order = "a9"; outer.x = 500; outer.w = outer.h = 100;
+    REQUIRE(f.session.edit(CreateNode{outer}));
+    Node nested; nested.id = f.session.newId(); nested.type = NodeType::Instance; nested.component = f.component; nested.parent = outer.id; nested.order = "a0"; nested.w = 200; nested.h = 100;
+    REQUIRE(f.session.edit(CreateNode{nested}));
+    const Id host = *f.editor.createInstance(outer.id);
+    auto copy = f.detached();
+    const Id occurrence = StateFixture::copyIn(*copy, host, nested.id);
+    REQUIRE_FALSE(occurrence.isNil());
+    const Id badge = StateFixture::copyIn(*copy, occurrence, f.badge);
+    REQUIRE_FALSE(badge.isNil());
+    REQUIRE_FALSE(copy->setActiveStates(host, {"hover"}));
+    REQUIRE(copy->setActiveStates(occurrence, {"hover"}));
+    REQUIRE(StateFixture::radiusOf(*copy, badge) == vc::Value<double>{9.0});
+    REQUIRE(f.session.document().view(StateFixture::copyIn(f.session.document(), StateFixture::copyIn(f.session.document(), host, nested.id), f.badge))->cornerRadius == vc::Value<double>{0.0});
+}
+
+TEST_CASE("active states are refused for undeclared names, non-instances and authored documents") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({}, {"hover"}, f.badge, f.radius(9))};
+    f.install();
+    const Id instance = f.instanceIn("small");
+    auto copy = f.detached();
+    REQUIRE_FALSE(copy->setActiveStates(instance, {"pressed"}));
+    REQUIRE_FALSE(copy->setActiveStates(instance, {"hover", "size"}));
+    REQUIRE_FALSE(copy->setActiveStates(f.badge, {"hover"}));
+    REQUIRE_FALSE(copy->setActiveStates(f.component, {"hover"}));
+    REQUIRE_FALSE(copy->setActiveStates(f.session.newId(), {"hover"}));
+    REQUIRE(StateFixture::radiusOf(*copy, StateFixture::copyIn(*copy, instance, f.badge)) == vc::Value<double>{0.0});
+    vc::Document authored;
+    const auto ops = vc::snapshotFromJson(vc::snapshotToJson(f.session.document()));
+    REQUIRE(ops.has_value());
+    for (const auto& op : *ops) REQUIRE(authored.apply(op));
+    REQUIRE_FALSE(authored.setActiveStates(instance, {"hover"}));
+    REQUIRE_FALSE(authored.setActiveStates(instance, {}));
+    REQUIRE(StateFixture::radiusOf(authored, StateFixture::copyIn(authored, instance, f.badge)) == vc::Value<double>{0.0});
+}
+
+TEST_CASE("detached copies carry active states without sharing them") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({}, {"hover"}, f.badge, f.radius(9))};
+    f.install();
+    const Id instance = f.instanceIn("small");
+    auto first = f.detached();
+    REQUIRE(first->setActiveStates(instance, {"hover"}));
+    auto second = first->detachedCopy();
+    const Id firstBadge = StateFixture::copyIn(*first, instance, f.badge), secondBadge = StateFixture::copyIn(*second, instance, f.badge);
+    REQUIRE(StateFixture::radiusOf(*second, secondBadge) == vc::Value<double>{9.0});
+    REQUIRE(second->setActiveStates(instance, {}));
+    REQUIRE(StateFixture::radiusOf(*second, secondBadge) == vc::Value<double>{0.0});
+    REQUIRE(StateFixture::radiusOf(*first, firstBadge) == vc::Value<double>{9.0});
+    REQUIRE(StateFixture::radiusOf(*f.detached(), StateFixture::copyIn(*f.detached(), instance, f.badge)) == vc::Value<double>{0.0});
+    REQUIRE(vc::snapshotToJson(*first) == vc::snapshotToJson(f.session.document()));
+}
+
+TEST_CASE("a definition cannot drop or rename a state a rule still uses") {
+    StateFixture f;
+    f.definition.rules = {StateFixture::rule({}, {"hover"}, f.badge, f.radius(9))};
+    f.install();
+    auto removed = f.definition;
+    removed.states.erase(removed.states.begin());
+    REQUIRE_FALSE(f.editor.setComponentDefinition(f.component, removed));
+    auto renamed = f.definition;
+    renamed.states[0].name = "active";
+    REQUIRE_FALSE(f.editor.setComponentDefinition(f.component, renamed));
+    auto unused = f.definition;
+    unused.states.erase(unused.states.begin() + 1);
+    REQUIRE(f.editor.setComponentDefinition(f.component, unused));
+    auto cleared = unused;
+    cleared.rules.clear();
+    cleared.states.clear();
+    REQUIRE(f.editor.setComponentDefinition(f.component, cleared));
+}
+
+TEST_CASE("states and state rules survive undo and redo of the definition edit") {
+    StateFixture f;
+    const auto before = f.session.document().find(f.component)->definition;
+    f.definition.rules = {StateFixture::rule({}, {"hover"}, f.badge, f.radius(9))};
+    f.install();
+    REQUIRE(f.session.document().find(f.component)->definition == f.definition);
+    REQUIRE(f.editor.undo());
+    REQUIRE(f.session.document().find(f.component)->definition == before);
+    REQUIRE(f.session.document().find(f.component)->definition.states.empty());
+    REQUIRE(f.editor.redo());
+    REQUIRE(f.session.document().find(f.component)->definition == f.definition);
+    REQUIRE(f.session.document().find(f.component)->definition.rules.at(0).states == std::vector<std::string>{"hover"});
+}

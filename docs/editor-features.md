@@ -49,13 +49,29 @@ instance override of `visible` wins over both. A layer hidden by a rule is hidde
 any other layer for rendering, hit testing, auto layout and prototype playback. Base
 rules and rules that set `visible` need snapshot 24.
 
+## Component states
+
+A main component can declare up to 32 states, each with a lowercase kebab-case name and a
+kind: `interaction` (`hover`, `active`, `focus` or `focus-visible`), `logical` or
+`custom`. State names are separate from axes and properties. A rule may list declared
+states beside its cell and matches only when its cell matches and every listed state is
+active on the instance. Rules without states apply first, as above. Rules with states
+apply after them, ordered by cell size, then by number of states, then by declaration
+order, so a state rule overrides a non-state rule for the same field. Text properties and
+instance overrides still apply last.
+
+States are never authored: while editing, no state is active and state rules do not
+apply. A playback copy of the document can hold the active states of one instance
+occurrence, which are never saved. A definition cannot drop or rename a state that a rule
+still lists. Declaring states or listing them in a rule needs snapshot 29.
+
 ## Persistence and rendering
 
 Snapshots remain versioned by the features they contain. Text starts at version 5;
 independent metrics, wrapping, face selection and shared typography progressively
 require versions 6–11. Lines use 12, straight unfilled paths 13, curved/filled paths
 14, raster images 15, click prototypes 16, overlay/dissolve options 17 and directional
-transitions/overlay placement 18, component part names 23, base variant rules or rules that set visibility 24, node notes 26 and icons 27. Earlier documents retain their minimum version. Downlevel
+transitions/overlay placement 18, component part names 23, base variant rules or rules that set visibility 24, node notes 26, icons 27, gradient tokens 28 and component states or rule states 29. Earlier documents retain their minimum version. Downlevel
 snapshots containing unsupported newer data are refused.
 
 Prototype playback uses the same native renderer and does not produce document

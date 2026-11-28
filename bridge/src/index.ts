@@ -223,13 +223,20 @@ export interface VariantAxis {
   readonly values: readonly string[];
   readonly default: string;
 }
+export type ComponentStateKind = 'interaction' | 'logical' | 'custom';
+export interface ComponentState {
+  readonly name: string;
+  readonly kind: ComponentStateKind;
+}
 export interface VariantRule {
   readonly when: Readonly<Record<string, string>>;
   readonly target: string;
   readonly patch: NodePatch;
+  readonly states?: readonly string[];
 }
 export interface ComponentDefinition {
   readonly texts?: readonly TextProperty[];
+  readonly states?: readonly ComponentState[];
   readonly swaps?: readonly InstanceSwapProperty[];
   readonly properties: readonly BooleanProperty[];
   readonly axes: readonly VariantAxis[];

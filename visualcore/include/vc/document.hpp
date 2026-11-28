@@ -64,11 +64,17 @@ public:
         copy->tokens_=tokens_;copy->modes_=modes_;copy->fonts_=fonts_;copy->fontStacks_=fontStacks_;
         copy->unavailableFonts_=unavailableFonts_;
         copy->playbackValues_=playbackValues_;
+        copy->playbackStates_=playbackStates_;
+        copy->detached_=true;
         return copy;
     }
     /// Ephemeral variant axes on one expanded instance occurrence. Never serialized or
     /// applied as an authored operation; presentation uses this only on detached documents.
     bool setPlaybackState(const Id& key, const std::map<std::string,std::string>& values);
+    /// The states active on one expanded instance occurrence, replacing any earlier set. Each name must be
+    /// declared by the occurrence's component. Only detached documents hold active states; an authored
+    /// document refuses them. Returns false when nothing changed.
+    bool setActiveStates(const Id& key, const std::set<std::string>& names);
 
     /// Applies `op` and returns its inverse, or nothing if the op is invalid for the current state
     /// (unknown node, cycle, deleting a node with children). Invalid ops leave the document untouched.
@@ -216,6 +222,7 @@ private:
         Id prefix;
         const ComponentDefinition* definition = nullptr;
         const ComponentValues* values = nullptr;
+        const std::set<std::string>* states = nullptr;
     };
     struct Expansion {
         Id childrenOf;
@@ -257,6 +264,9 @@ private:
     std::unordered_map<Id, FontStack> fontStacks_;
     struct PlaybackValues { Id component; ComponentValues values; };
     std::unordered_map<Id, PlaybackValues> playbackValues_;
+    struct ActiveStates { Id component; std::set<std::string> names; };
+    std::unordered_map<Id, ActiveStates> playbackStates_;
+    bool detached_ = false;
 
     struct TreeEntry {
         const Node* node = nullptr;

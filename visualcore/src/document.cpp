@@ -2,6 +2,7 @@
 #include "vc/diagnostics.hpp"
 #include "vc/layout.hpp"
 
+#include <tuple>
 #include <utility>
 #include <unordered_set>
 
@@ -768,6 +769,7 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
     if (definition.texts.size() > 64 || definition.properties.size() > 64 || definition.swaps.size() > 64)
         return refuse("a definition has at most 64 text, boolean and swap properties each");
     if (definition.axes.size() > 8) return refuse("a definition has at most 8 variant axes");
+    if (definition.states.size() > 32) return refuse("a definition has at most 32 states");
     if (definition.rules.size() > 256) return refuse("a definition has at most 256 rules");
     constexpr std::string_view kNameRule = "names and axis values are lowercase kebab-case starting with a letter, up to 64 characters";
     const auto inComponent = [&](const Id& target) { return enclosingComponent(target) == component; };
@@ -812,6 +814,19 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
             if (!choices.insert(value).second) return refuse("axis values must be unique");
         }
     }
+    {
+        std::unordered_set<std::string> stateNames;
+        constexpr std::array<std::string_view, 4> interactionStates{"hover", "active", "focus", "focus-visible"};
+        for (std::size_t i = 0; i < definition.states.size(); ++i) {
+            const auto& state = definition.states[i];
+            const DiagnosticScope scope{"states[" + std::to_string(i) + "]"};
+            if (!validKebabName(state.name)) return refuse(kNameRule);
+            if (!stateNames.insert(state.name).second) return refuse("state names must be unique");
+            if (state.kind == StateKind::Interaction && std::find(interactionStates.begin(), interactionStates.end(), state.name) == interactionStates.end())
+                return refuse("an interaction state is one of: hover, active, focus, focus-visible");
+            if (state.kind != StateKind::Interaction && state.kind != StateKind::Logical && state.kind != StateKind::Custom) return refuse("kind must be interaction, logical or custom");
+        }
+    }
     targets.clear();
     for (std::size_t i = 0; i < definition.swaps.size(); ++i) {
         const auto& swap = definition.swaps[i];
@@ -843,6 +858,15 @@ bool Document::validDefinition(const Id& component, const ComponentDefinition& d
             const auto axis = std::find_if(definition.axes.begin(), definition.axes.end(), [&](const VariantAxis& a) { return a.name == name; });
             if (axis == definition.axes.end()) return refuse("when names an axis the definition does not declare: " + name);
             if (std::find(axis->values.begin(), axis->values.end(), value) == axis->values.end()) return refuse("when uses a value the axis does not declare: " + value);
+        }
+        {
+            const DiagnosticScope field{"states"};
+            std::unordered_set<std::string> used;
+            for (const auto& name : rule.states) {
+                if (std::none_of(definition.states.begin(), definition.states.end(), [&](const ComponentState& s) { return s.name == name; }))
+                    return refuse("states names a state the definition does not declare: " + name);
+                if (!used.insert(name).second) return refuse("a rule lists each state once");
+            }
         }
         const DiagnosticScope patchScope{"patch"};
         if(p.interaction || p.interactions || p.prototypeStart || p.prototypeFlowName || p.prototypeOverflow) return refuse("variant rules cannot set prototype interactions, starting screens or overflow");
@@ -1089,6 +1113,22 @@ bool Document::setPlaybackState(const Id& key,const std::map<std::string,std::st
     treeDirty_=true;layoutDirty_=true;return true;
 }
 
+bool Document::setActiveStates(const Id& key, const std::set<std::string>& names) {
+    if(!detached_) return false;
+    const auto* node=view(key);
+    if(!node || node->type!=NodeType::Instance) return false;
+    const auto* component=find(node->component);
+    if(!component || component->type!=NodeType::Component) return false;
+    for(const auto& name:names)
+        if(std::none_of(component->definition.states.begin(),component->definition.states.end(),[&](const auto& state){return state.name==name;})) return false;
+    const auto existing=playbackStates_.find(key);
+    const bool unchanged=existing==playbackStates_.end() ? names.empty() : existing->second.component==component->id && existing->second.names==names;
+    if(unchanged) return false;
+    if(names.empty()) playbackStates_.erase(key);
+    else playbackStates_[key]={component->id,names};
+    treeDirty_=true;layoutDirty_=true;return true;
+}
+
 void Document::buildTree() const {
     if (!treeDirty_) {
         return;
@@ -1142,9 +1182,11 @@ Document::Expansion Document::expandNode(const Id& source, const Id& key, const 
                 const auto axis = std::find_if(layer.definition->axes.begin(), layer.definition->axes.end(), [&](const VariantAxis& a) { return a.name == name; });
                 matchesCell = matchesCell && (value ? std::get<std::string>(*value) : axis->defaultValue) == expected;
             }
+            for (const auto& state : rule.states) matchesCell = matchesCell && layer.states && layer.states->count(state);
             if (matchesCell) matches.push_back(&rule);
         }
-        std::stable_sort(matches.begin(), matches.end(), [](const VariantRule* a, const VariantRule* b) { return a->when.size() < b->when.size(); });
+        const auto rank = [](const VariantRule* r) { return std::tuple{!r->states.empty(), r->when.size(), r->states.size()}; };
+        std::stable_sort(matches.begin(), matches.end(), [&](const VariantRule* a, const VariantRule* b) { return rank(a) < rank(b); });
         for (const auto* rule : matches) applyPatch(node, rule->patch);
         for (const auto& text : layer.definition->texts) if (text.target == target) {
             const auto* value = valueOf(text.name);
@@ -1173,9 +1215,12 @@ Document::Expansion Document::expandNode(const Id& source, const Id& key, const 
     const auto temporary=playbackValues_.find(key);
     const ComponentValues& values=component && temporary!=playbackValues_.end() && temporary->second.component==component->id
         ? temporary->second.values : original.componentValues;
+    const auto activeStates=playbackStates_.find(key);
+    const std::set<std::string>* states=component && activeStates!=playbackStates_.end() && activeStates->second.component==component->id
+        ? &activeStates->second.names : nullptr;
     if (component && depth < kMaxInstanceDepth) {
         effective = *component;
-        applyDefinition(effective, component->id, {nullptr, {}, &component->definition, &values});
+        applyDefinition(effective, component->id, {nullptr, {}, &component->definition, &values, states});
         if (const NodePatch* patch = findOverride(original.overrides, original.component)) applyPatch(effective, *patch);
         effective.x = original.x;
         effective.y = original.y;
@@ -1192,8 +1237,8 @@ Document::Expansion Document::expandNode(const Id& source, const Id& key, const 
         effective.part = original.part;
         effective.order = original.order;
         applyLayers(effective);
-        inner = {{&original.overrides, {}, &component->definition, &values}};
-        for (const OverrideLayer& layer : layers) inner.push_back({layer.overrides, keyIn(layer), layer.definition, layer.values});
+        inner = {{&original.overrides, {}, &component->definition, &values, states}};
+        for (const OverrideLayer& layer : layers) inner.push_back({layer.overrides, keyIn(layer), layer.definition, layer.values, layer.states});
         childrenOf = component->id;
     } else {
         if (original.type == NodeType::Component) {

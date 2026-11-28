@@ -55,6 +55,23 @@ test('whole-document round trip preserves base and visibility rules in snapshot 
   assert.deepEqual(bundle.snapshot, snapshot);
 });
 
+test('whole-document round trip preserves component states and rule states in snapshot 25', () => {
+  const snapshot = fixture();
+  snapshot.version = 25;
+  const main = snapshot.nodes.find((node) => node.id === id(6));
+  main.definition.states = [
+    { name: 'hover', kind: 'interaction' },
+    { name: 'busy', kind: 'custom' },
+  ];
+  main.definition.rules = [
+    { when: {}, target: id(6), patch: { opacity: 0.5 }, states: ['hover'] },
+    { when: { state: 'on' }, target: id(6), patch: { opacity: 0.2 }, states: ['hover', 'busy'] },
+  ];
+  const bundle = readDocument(JSON.stringify(exportDocument(snapshot, 'Demo')));
+  assert.equal(bundle.snapshot.version, 25);
+  assert.deepEqual(bundle.snapshot, snapshot);
+});
+
 test('export captures a detached snapshot instead of retaining mutable authoring references', () => {
   const snapshot = fixture();
   const bundle = exportDocument(snapshot, 'Demo');
@@ -98,7 +115,7 @@ test('whole-document round trip preserves icon layers and icon sets in snapshot 
 
 test('native snapshot envelope refuses unsupported versions and missing structural lists', () => {
   for (const snapshot of [
-    { ...fixture(), version: 28 },
+    { ...fixture(), version: 30 },
     { ...fixture(), version: 0 },
     { ...fixture(), version: 21.5 },
     { ...fixture(), nodes: [null] },
