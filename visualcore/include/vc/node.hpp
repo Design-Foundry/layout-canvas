@@ -347,7 +347,7 @@ NodePatch applyPatch(Node& node, const NodePatch& patch);
 /// instances (whose children are copies of their component's).
 [[nodiscard]] bool isContainer(NodeType type);
 
-enum class TokenFamilyHint { Color, Dimension, Opacity, Border, Shadow, Typography };
+enum class TokenFamilyHint { Color, Dimension, Opacity, Border, Shadow, Typography, Gradient };
 
 /// Calls `fn(tokenId, expectedFamily)` for every token a patch refers to.
 template <typename Fn>
