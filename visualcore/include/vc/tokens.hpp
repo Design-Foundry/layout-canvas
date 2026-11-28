@@ -12,8 +12,9 @@
 namespace vc {
 
 /// Token families, after Design Foundry's model 0.4. Members of a family take the same operations.
-/// Typography is a literal composite of the editor's supported text styles.
-enum class TokenType { Color, Dimension, Duration, Ratio, Opacity, Border, Shadow, Typography };
+/// Typography is a literal composite of the editor's supported text styles. A gradient is a composite of
+/// color-token stops and CSS-like geometry.
+enum class TokenType { Color, Dimension, Duration, Ratio, Opacity, Border, Shadow, Typography, Gradient };
 
 enum class Unit { None, Px, Rem, Em, Pt, Ms, S };
 
@@ -88,12 +89,57 @@ struct ShadowValue {
     friend bool operator==(const ShadowValue&, const ShadowValue&) = default;
 };
 
+enum class GradientKind { Linear, Radial, Conic };
+enum class RadialShape { Circle, Ellipse };
+enum class RadialExtent { ClosestSide, ClosestCorner, FarthestSide, FarthestCorner };
+
+/// One stop of a gradient token: a color token, optionally modified, at an optional position along the
+/// gradient line (0 to 1). Omitted positions are stored omitted and completed on resolve: the first is
+/// 0, the last 1, the ones between are spread evenly between their known neighbors.
+struct GradientStopValue {
+    Id color;
+    std::optional<double> position;
+    std::vector<Modifier> colorModifiers;
+
+    friend bool operator==(const GradientStopValue&, const GradientStopValue&) = default;
+};
+
+/// A gradient token's value. Geometry is normalized: defaults are
+/// materialized for the kind, and what doesn't apply to it is left unset (`GradientGeometry`).
+///  - Linear: `angle` degrees. Conic: `angle` is the "from" angle, `centerX`/`centerY` percent of the box.
+///  - Radial: `shape`, `extent`, `centerX`/`centerY`; no angle.
+/// `geometry` names the kind (linear, radial, conic).
+struct GradientValue {
+    GradientKind geometry = GradientKind::Linear;
+    bool repeating = false;
+    std::optional<double> angle;
+    std::optional<RadialShape> shape;
+    std::optional<RadialExtent> extent;
+    std::optional<double> centerX;
+    std::optional<double> centerY;
+    std::vector<GradientStopValue> stops;
+
+    friend bool operator==(const GradientValue&, const GradientValue&) = default;
+};
+
+/// Stop positions with the omitted ones completed (first 0, last 1, the rest evenly between known
+/// neighbors). Positions stay as authored otherwise.
+[[nodiscard]] std::vector<double> completeStopPositions(const std::vector<GradientStopValue>& stops);
+/// CSS stop order: a position lower than the one before it is raised to it. Applied when drawing.
+void applyCssStopOrder(std::vector<double>& positions);
+
+/// Why this gradient's geometry is refused, or null. Fields that don't apply to the kind are refused,
+/// not ignored; a center needs both coordinates.
+[[nodiscard]] const char* gradientGeometryProblem(const GradientValue& gradient);
+/// Fills the defaults for the kind: angle 0 (linear, conic), ellipse and farthest-corner, center 50/50.
+void normalizeGradientGeometry(GradientValue& gradient);
+
 /// A token's own value. Colors are born solid: alpha comes from modifiers.
-using TokenLiteral = std::variant<Oklch, Magnitude, BorderValue, ShadowValue, TextStyle>;
+using TokenLiteral = std::variant<Oklch, Magnitude, BorderValue, ShadowValue, TextStyle, GradientValue>;
 
 /// A design token. It is a primitive (`value`, the same in every mode) or an alias (`source`, one
 /// token of the same family per mode, covering the default mode). Modifiers apply after either.
-/// Border, shadow and typography tokens are composites: primitives only, without modifiers.
+/// Border, shadow, gradient and typography tokens are composites: primitives only, without modifiers.
 struct Token {
     Id id;
     TokenType type = TokenType::Color;
@@ -147,6 +193,11 @@ void forEachTokenReference(const Token& token, Fn&& fn) {
             for (const ShadowLayerValue& layer : shadow->layers) {
                 fn(layer.color);
                 visitModifiers(layer.colorModifiers);
+            }
+        } else if (const auto* gradient = std::get_if<GradientValue>(&*token.value)) {
+            for (const GradientStopValue& stop : gradient->stops) {
+                fn(stop.color);
+                visitModifiers(stop.colorModifiers);
             }
         }
     }

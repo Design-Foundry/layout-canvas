@@ -13,7 +13,7 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSnapshotVersion = 27;
+constexpr int kSnapshotVersion = 28;
 
 bool statePrototype(const Interaction& i) { return i.action==PrototypeAction::ChangeState || i.transition==PrototypeTransition::SmartAnimate; }
 
@@ -92,6 +92,14 @@ constexpr std::array<std::pair<ColorOp, std::string_view>, 3> kColorOps{{
     {ColorOp::Set, "set"}, {ColorOp::Delta, "delta"}, {ColorOp::Factor, "factor"}}};
 constexpr std::array<std::pair<MagnitudeOp, std::string_view>, 4> kMagnitudeOps{{
     {MagnitudeOp::Factor, "factor"}, {MagnitudeOp::Delta, "delta"}, {MagnitudeOp::Min, "min"}, {MagnitudeOp::Max, "max"}}};
+constexpr std::array<std::pair<GradientKind, std::string_view>, 3> kGradientKinds{{
+    {GradientKind::Linear, "linear"}, {GradientKind::Radial, "radial"}, {GradientKind::Conic, "conic"}}};
+constexpr std::array<std::pair<RadialShape, std::string_view>, 2> kRadialShapes{{
+    {RadialShape::Circle, "circle"}, {RadialShape::Ellipse, "ellipse"}}};
+constexpr std::array<std::pair<RadialExtent, std::string_view>, 4> kRadialExtents{{
+    {RadialExtent::ClosestSide, "closest-side"}, {RadialExtent::ClosestCorner, "closest-corner"},
+    {RadialExtent::FarthestSide, "farthest-side"}, {RadialExtent::FarthestCorner, "farthest-corner"}}};
+
 constexpr std::array<std::pair<StrokeStyle, std::string_view>, 5> kStrokeStyles{{
     {StrokeStyle::Solid, "solid"}, {StrokeStyle::None, "none"}, {StrokeStyle::Dashed, "dashed"},
     {StrokeStyle::Dotted, "dotted"}, {StrokeStyle::Double, "double"}}};
@@ -1279,6 +1287,27 @@ json writeLiteral(const TokenLiteral& literal) {
         }
         return {{"layers", layers}};
     }
+    if (const auto* gradient = std::get_if<GradientValue>(&literal)) {
+        json out{{"geometry", nameOf(kGradientKinds, gradient->geometry)}};
+        if (gradient->repeating) out["repeating"] = true;
+        if (gradient->angle) out["angle"] = *gradient->angle;
+        if (gradient->shape) out["shape"] = nameOf(kRadialShapes, *gradient->shape);
+        if (gradient->extent) out["extent"] = nameOf(kRadialExtents, *gradient->extent);
+        if (gradient->centerX) out["center"] = json::array({*gradient->centerX, *gradient->centerY});
+        json stops = json::array();
+        for (const GradientStopValue& stop : gradient->stops) {
+            json item{{"color", stop.color.toString()}};
+            if (stop.position) item["position"] = *stop.position;
+            if (!stop.colorModifiers.empty()) {
+                json modifiers = json::array();
+                for (const Modifier& modifier : stop.colorModifiers) modifiers.push_back(writeModifier(modifier));
+                item["colorModifiers"] = modifiers;
+            }
+            stops.push_back(item);
+        }
+        out["stops"] = stops;
+        return out;
+    }
     const auto& magnitude = std::get<Magnitude>(literal);
     json out{{"value", magnitude.value}};
     if (magnitude.unit != Unit::None) out["unit"] = unitName(magnitude.unit);
@@ -1390,6 +1419,73 @@ std::optional<TokenLiteral> readLiteral(TokenType type, const json& j) {
         }
         return shadow;
     }
+    if (type == TokenType::Gradient) {
+        GradientValue gradient;
+        {
+            DiagnosticScope field{"geometry"};
+            if (!j.contains("geometry")) return refused("geometry is required: linear, radial or conic");
+        }
+        if (!readNamed(j, "geometry", kGradientKinds, gradient.geometry, "geometry must be linear, radial or conic")) return std::nullopt;
+        if (j.contains("repeating")) {
+            if (!require(j, "repeating", Shape::Boolean)) return std::nullopt;
+            gradient.repeating = j["repeating"].get<bool>();
+        }
+        if (j.contains("angle")) {
+            if (!require(j, "angle", Shape::Number)) return std::nullopt;
+            gradient.angle = j["angle"].get<double>();
+        }
+        if (j.contains("shape")) {
+            RadialShape shape = RadialShape::Ellipse;
+            if (!readNamed(j, "shape", kRadialShapes, shape, "shape must be circle or ellipse")) return std::nullopt;
+            gradient.shape = shape;
+        }
+        if (j.contains("extent")) {
+            RadialExtent extent = RadialExtent::FarthestCorner;
+            if (!readNamed(j, "extent", kRadialExtents, extent, "extent must be closest-side, closest-corner, farthest-side or farthest-corner")) return std::nullopt;
+            gradient.extent = extent;
+        }
+        if (j.contains("center")) {
+            DiagnosticScope field{"center"};
+            const json& center = j["center"];
+            if (!center.is_array() || center.size() != 2 || !center[0].is_number() || !center[1].is_number()) {
+                return refused("center must be [x, y]: two numbers, percent of the box");
+            }
+            gradient.centerX = center[0].get<double>();
+            gradient.centerY = center[1].get<double>();
+        }
+        if (const char* why = gradientGeometryProblem(gradient)) return refused(why);
+        normalizeGradientGeometry(gradient);
+        {
+            DiagnosticScope field{"stops"};
+            if (!j.contains("stops") || !j["stops"].is_array()) return refused("stops is required: an array of stops");
+        }
+        DiagnosticScope list{"stops"};
+        for (std::size_t index = 0; index < j["stops"].size(); ++index) {
+            const json& item = j["stops"][index];
+            DiagnosticScope entry{slot(index)};
+            if (!item.is_object()) return refused("must be an object with color, position and colorModifiers");
+            GradientStopValue stop;
+            const auto color = requireId(item, "color");
+            if (!color) return std::nullopt;
+            stop.color = *color;
+            if (item.contains("position")) {
+                if (!require(item, "position", Shape::Number)) return std::nullopt;
+                stop.position = item["position"].get<double>();
+            }
+            if (const auto it = item.find("colorModifiers"); it != item.end()) {
+                DiagnosticScope modifiers{"colorModifiers"};
+                if (!it->is_array()) return refused("colorModifiers must be an array of modifiers");
+                for (std::size_t m = 0; m < it->size(); ++m) {
+                    DiagnosticScope modifierEntry{slot(m)};
+                    auto modifier = readModifier((*it)[m]);
+                    if (!modifier) return std::nullopt;
+                    stop.colorModifiers.push_back(std::move(*modifier));
+                }
+            }
+            gradient.stops.push_back(std::move(stop));
+        }
+        return gradient;
+    }
     if (type == TokenType::Color) {
         Oklch color;
         const std::array<std::pair<const char*, double*>, 3> fields{{{"l", &color.l}, {"c", &color.c}, {"h", &color.h}}};
@@ -1467,7 +1563,7 @@ std::optional<Token> readTokenDef(const json& j) {
     {
         DiagnosticScope field{"type"};
         const auto it = j.find("type");
-        const std::string_view allowed = "color, dimension, duration, ratio, opacity, border, shadow or typography";
+        const std::string_view allowed = "color, dimension, duration, ratio, opacity, border, shadow, gradient or typography";
         if (it == j.end()) return refused("type is required: " + std::string{allowed});
         type = it->is_string() ? tokenTypeFromName(it->get_ref<const std::string&>()) : std::nullopt;
         if (!type) return refused("type must be " + std::string{allowed});
@@ -1984,7 +2080,9 @@ std::string snapshotToJson(const Document& document) {
         }
     });
     fontModel = fontModel || typography;
-    json out{{"version", icons ? 27 : notes ? 26 : fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
+    bool gradientTokens = false;
+    for (const Token* token : document.tokens()) gradientTokens = gradientTokens || token->type == TokenType::Gradient;
+    json out{{"version", gradientTokens ? 28 : icons ? 27 : notes ? 26 : fontModel ? 25 : cellVisibility ? 24 : parts ? 23 : namedFlows ? 22 : componentStates ? 21 : multipleInteractions ? 20 : scrolling ? 19 : positioned ? 18 : extended ? 17 : prototype ? 16 : image ? 15 : curved ? 14 : path ? 13 : line ? 12 : typography ? 11 : wrapping ? 8 : partialTextStyles ? 7 : textProperties ? 6 : text ? 5 : swaps ? 4 : declared ? 3 : 2}, {"modes", modes}, {"tokens", tokens}, {"nodes", nodes}};
     if (fontModel) {
         json fonts = json::array(), stacks = json::array();
         for (const Font* font : document.fonts()) fonts.push_back(writeFont(*font));
@@ -2085,6 +2183,10 @@ std::optional<std::vector<OpBody>> snapshotFromJson(std::string_view data) {
             auto token = readTokenDef(j["tokens"][i]);
             if (!token) return std::nullopt;
             if (version < 25 && gFontModelReads != fontReads) return refused("font stacks, axes and features need snapshot version 25 or later");
+            if (version < 28 && token->type == TokenType::Gradient) {
+                DiagnosticScope field{"type"};
+                return refused("gradient tokens need snapshot version 28 or later");
+            }
             if (version < 11 && token->type == TokenType::Typography) {
                 DiagnosticScope field{"type"};
                 return refused("typography tokens need snapshot version 11 or later");
@@ -2231,6 +2333,15 @@ std::string tokensToJson(const Document& document, const Id& mode) {
                                   {"inset", layer.inset}, {"color", color(layer.color)}});
             }
             row["resolved"] = {{"layers", layers}};
+        } else if (token->type == TokenType::Gradient) {
+            if (const auto gradient = document.resolveGradient(token->id, mode)) {
+                json stops = json::array();
+                for (const ResolvedGradientStop& stop : gradient->stops) {
+                    stops.push_back({{"color", color(stop.color)}, {"position", stop.position}});
+                }
+                row["resolved"] = {{"geometry", nameOf(kGradientKinds, gradient->geometry)}, {"repeating", gradient->repeating},
+                                   {"stops", stops}};
+            }
         } else if (const auto resolved = document.resolveToken(token->id, mode)) {
             json value = writeLiteral(*resolved);
             if (const auto* color = std::get_if<Oklch>(&*resolved)) {

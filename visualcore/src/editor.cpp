@@ -540,6 +540,7 @@ std::optional<Id> Editor::addToken(TokenType type) {
         token.value = Magnitude{1.0, Unit::None};
         break;
     case TokenType::Border:
+    case TokenType::Gradient:
     case TokenType::Shadow: {
         const Token* firstColor = nullptr;
         const Token* firstDimension = nullptr;
@@ -552,6 +553,11 @@ std::optional<Id> Editor::addToken(TokenType type) {
         }
         if (type == TokenType::Border) {
             token.value = BorderValue{firstDimension->id, StrokeStyle::Solid, firstColor->id};
+        } else if (type == TokenType::Gradient) {
+            GradientValue gradient;
+            gradient.stops = {{firstColor->id, std::nullopt, {}}, {firstColor->id, std::nullopt, {{ColorChannelModifier{ColorChannel::Alpha, ColorOp::Set, 0.0, std::nullopt}}}}};
+            normalizeGradientGeometry(gradient);
+            token.value = std::move(gradient);
         } else {
             token.value = ShadowValue{{ShadowLayerValue{0.0, 4.0, 8.0, 0.0, false, firstColor->id, {}}}};
         }

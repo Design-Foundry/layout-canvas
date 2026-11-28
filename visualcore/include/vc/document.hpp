@@ -32,6 +32,25 @@ struct ResolvedShadow {
     bool inset = false;
 };
 
+/// A gradient token resolved in one mode: every stop color is concrete.
+struct ResolvedGradientStop {
+    Oklch color;
+    /// 0 to 1 along the gradient line, omitted positions completed. Not yet ordered the CSS way: run
+    /// `applyCssStopOrder` on the positions when drawing.
+    double position = 0.0;
+};
+
+struct ResolvedGradient {
+    GradientKind geometry = GradientKind::Linear;
+    bool repeating = false;
+    double angle = 0.0;
+    RadialShape shape = RadialShape::Ellipse;
+    RadialExtent extent = RadialExtent::FarthestCorner;
+    double centerX = 50.0;
+    double centerY = 50.0;
+    std::vector<ResolvedGradientStop> stops;
+};
+
 /// The node tree and the document's design system (tokens and modes). Ops are the only way to change
 /// either.
 class Document {
@@ -145,6 +164,8 @@ public:
     [[nodiscard]] std::array<double, 4> resolveCorners(const Node& node, const Id& mode) const;
     /// Nothing when the stroke draws nothing (no width, style none, or unresolvable).
     [[nodiscard]] std::optional<ResolvedStroke> resolveStroke(const Value<Stroke>& value, const Id& mode) const;
+    /// Nullopt when the token is missing, isn't a gradient, or a stop color can't be resolved.
+    [[nodiscard]] std::optional<ResolvedGradient> resolveGradient(const Id& token, const Id& mode) const;
     [[nodiscard]] std::vector<ResolvedShadow> resolveShadows(const Value<std::vector<Shadow>>& value,
                                                              const Id& mode) const;
 

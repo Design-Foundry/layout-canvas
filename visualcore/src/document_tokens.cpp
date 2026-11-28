@@ -77,12 +77,14 @@ TokenType familyOf(TokenFamilyHint hint) {
         return TokenType::Shadow;
     case TokenFamilyHint::Typography:
         return TokenType::Typography;
+    case TokenFamilyHint::Gradient:
+        return TokenType::Gradient;
     }
     return TokenType::Color;
 }
 
 bool isComposite(TokenType type) {
-    return type == TokenType::Border || type == TokenType::Shadow || type == TokenType::Typography;
+    return type == TokenType::Border || type == TokenType::Shadow || type == TokenType::Gradient || type == TokenType::Typography;
 }
 
 std::string familyName(TokenType type) {
@@ -103,6 +105,8 @@ std::string familyName(TokenType type) {
         return "shadow";
     case TokenType::Typography:
         return "typography";
+    case TokenType::Gradient:
+        return "gradient";
     }
     return "color";
 }
@@ -360,6 +364,28 @@ std::optional<ResolvedStroke> Document::resolveStroke(const Value<Stroke>& value
     return out;
 }
 
+std::optional<ResolvedGradient> Document::resolveGradient(const Id& token, const Id& mode) const {
+    const auto resolved = resolveToken(token, mode);
+    const auto* gradient = resolved ? std::get_if<GradientValue>(&*resolved) : nullptr;
+    if (!gradient) return std::nullopt;
+    ResolvedGradient out;
+    out.geometry = gradient->geometry;
+    out.repeating = gradient->repeating;
+    out.angle = gradient->angle.value_or(0.0);
+    out.shape = gradient->shape.value_or(RadialShape::Ellipse);
+    out.extent = gradient->extent.value_or(RadialExtent::FarthestCorner);
+    out.centerX = gradient->centerX.value_or(50.0);
+    out.centerY = gradient->centerY.value_or(50.0);
+    const std::vector<double> positions = completeStopPositions(gradient->stops);
+    for (std::size_t i = 0; i < gradient->stops.size(); ++i) {
+        const GradientStopValue& stop = gradient->stops[i];
+        auto color = resolveColor(TokenRef{stop.color}, mode);
+        if (!color || !applyColorModifiers(*color, stop.colorModifiers, mode, 0)) return std::nullopt;
+        out.stops.push_back({*color, positions[i]});
+    }
+    return out;
+}
+
 std::vector<ResolvedShadow> Document::resolveShadows(const Value<std::vector<Shadow>>& value, const Id& mode) const {
     std::vector<ResolvedShadow> out;
     if (const auto* ref = std::get_if<TokenRef>(&value)) {
@@ -462,6 +488,22 @@ bool Document::isValidToken(const Token& token) const {
             }
             if (!refersTo(border->color, TokenType::Color)) {
                 return refuseRef(border->color, TokenType::Color, "the border color");
+            }
+            return !hasCycle(token) || refuseCycle();
+        }
+        if (token.type == TokenType::Gradient) {
+            const auto* gradient = std::get_if<GradientValue>(&*token.value);
+            if (!gradient) return refuse("a gradient token holds a geometry and stops");
+            if (const char* why = gradientGeometryProblem(*gradient)) return refuse(why);
+            if (gradient->stops.size() < 2) return refuse("a gradient token needs at least two stops");
+            for (std::size_t i = 0; i < gradient->stops.size(); ++i) {
+                const GradientStopValue& stop = gradient->stops[i];
+                const DiagnosticScope scope{"stops[" + std::to_string(i) + "]"};
+                if (stop.position && (!std::isfinite(*stop.position) || *stop.position < 0.0 || *stop.position > 1.0)) {
+                    return refuse("a stop position must be between 0 and 1");
+                }
+                if (!refersTo(stop.color, TokenType::Color)) return refuseRef(stop.color, TokenType::Color, "the stop color");
+                if (!isValidColorModifiers(stop.colorModifiers)) return false;
             }
             return !hasCycle(token) || refuseCycle();
         }
